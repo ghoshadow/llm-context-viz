@@ -15,13 +15,15 @@ interface Props {
   cacheHit: number;
   fullCtx: number;
   asstReqs: number;
+  mode?: 'peak' | 'cumulative';
   onClose: () => void;
 }
 
 export default function PeakModal({
   categories, tools, peakTokens, peakIndex, turnIndex, reqStep,
-  model, contextLimit, cacheHit, fullCtx, asstReqs, onClose,
+  model, contextLimit, cacheHit, fullCtx, asstReqs, mode, onClose,
 }: Props) {
+  const isCum = mode === 'cumulative';
   const peakData = {
     session: {
       model,
@@ -68,8 +70,8 @@ export default function PeakModal({
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: 'oklch(0.74 0.13 60)', boxShadow: '0 0 10px oklch(0.74 0.13 60 / 0.7)' }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.91 0.01 265)' }}>本轮上下文透视</span>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'oklch(0.55 0.012 265)' }}>{sub}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.91 0.01 265)' }}>{isCum ? '累计拼装上下文透视' : '本轮上下文透视'}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'oklch(0.55 0.012 265)' }}>{isCum ? `第 ${turnIndex} 轮 · 累计拼装 ${fmt(fullCtx)} tok · 缓存 ${fmt(cacheHit)}（${((cacheHit / fullCtx) * 100).toFixed(0)}%）` : sub}</span>
           </div>
           <button onClick={onClose} title="关闭" style={{
             border: `1px solid oklch(0.32 0.014 265)`, borderRadius: 8,
@@ -81,7 +83,7 @@ export default function PeakModal({
         </div>
         {/* Embedded Context Assembly */}
         <div className="tl" style={{ flex: 1, overflow: 'auto' }}>
-          <ContextAssembly peakData={peakData} embedded />
+          <ContextAssembly peakData={peakData} embedded mode={isCum ? 'cumulative' : 'peak'} />
         </div>
       </div>
     </div>

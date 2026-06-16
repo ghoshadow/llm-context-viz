@@ -1430,6 +1430,7 @@ export default function TurnInspector() {
           cacheHit={currentTurn.max_cache_hit ?? 0}
           fullCtx={Math.max(currentTurn.max_input + (currentTurn.max_cache_hit ?? 0), currentTurn.cum_total)}
           asstReqs={currentTurn.asst_reqs}
+          mode="peak"
           onClose={() => setShowPeakDetail(false)}
         />
       )}
@@ -1457,6 +1458,7 @@ export default function TurnInspector() {
           cacheHit={currentTurn.cum_cache_hit ?? 0}
           fullCtx={currentTurn.cum_total}
           asstReqs={currentTurn.asst_reqs}
+          mode="cumulative"
           onClose={() => setShowCumDetail(false)}
         />
       )}

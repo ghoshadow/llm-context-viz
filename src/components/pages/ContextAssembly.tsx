@@ -349,9 +349,11 @@ interface PeakDataProps {
     series?: SeriesPoint[];
   };
   embedded?: boolean;
+  mode?: 'peak' | 'cumulative';
 }
 
-export default function ContextAssembly({ peakData, embedded }: PeakDataProps = {}) {
+export default function ContextAssembly({ peakData, embedded, mode }: PeakDataProps = {}) {
+  const isCum = mode === 'cumulative';
   const sessionFromStore = useSessionStore((s) => s.currentSession);
   const session = peakData ? peakData.session as any : sessionFromStore;
   const setPage = useUIStore((s) => s.setPage);
@@ -664,7 +666,7 @@ export default function ContextAssembly({ peakData, embedded }: PeakDataProps = 
                 color: SEMANTIC.textDesc6,
               }}
             >
-              上下文峰值透视
+              {isCum ? '累计拼装上下文透视' : '上下文峰值透视'}
             </span>
           </div>
           <h1
@@ -676,7 +678,7 @@ export default function ContextAssembly({ peakData, embedded }: PeakDataProps = 
               letterSpacing: '-0.025em',
             }}
           >
-            上下文消耗最大的一次请求
+            {isCum ? '累计拼装上下文全貌' : '上下文消耗最大的一次请求'}
           </h1>
           <p
             style={{
@@ -687,16 +689,9 @@ export default function ContextAssembly({ peakData, embedded }: PeakDataProps = 
               maxWidth: 600,
             }}
           >
-            每一轮对话都会把整个已拼装的上下文重新发送给模型。这里把全会话中
-            <strong
-              style={{
-                color: SEMANTIC.textPrimary4,
-                fontWeight: 600,
-              }}
-            >
-              最重的一次请求
-            </strong>
-            拆解成各个组成模块 —— 看清输入 Token 究竟花在了哪里。
+            {isCum
+              ? '从会话开始到本轮结束，上下文窗口中累计拼装的全部内容。随着对话推进，历史内容通过缓存复用，实际计费远低于拼装总量。'
+              : <>每一轮对话都会把整个已拼装的上下文重新发送给模型。这里把全会话中<strong style={{ color: SEMANTIC.textPrimary4, fontWeight: 600 }}>最重的一次请求</strong>拆解成各个组成模块 —— 看清输入 Token 究竟花在了哪里。</>}
           </p>
         </div>
 
