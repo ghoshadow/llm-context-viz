@@ -30,7 +30,7 @@ export default function PeakModal({
       version: '',
       cwd: '',
       total_requests: asstReqs,
-      peak_index: 0,
+      peak_index: turnIndex,
       peak_tokens: peakTokens,
       context_limit: contextLimit,
       total_output: 0,

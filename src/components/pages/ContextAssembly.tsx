@@ -810,7 +810,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                 marginBottom: 5,
               }}
             >
-              峰值输入
+              {isCum ? '累计拼装' : '峰值输入'}
             </div>
             <div
               style={{
@@ -847,7 +847,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                 color: SEMANTIC.textDesc2,
               }}
             >
-              第 {derived.peakTurnIdx} 轮 · 步骤 #{derived.peakStep + 1} · 全会话最重
+              {isCum ? `第 ${derived.peakTurnIdx + 1} 轮 · 累计拼装上下文` : `第 ${derived.peakTurnIdx} 轮 · 步骤 #${derived.peakStep + 1} · 全会话最重`}
             </span>
           </div>
           <div
