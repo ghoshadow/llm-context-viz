@@ -1027,6 +1027,7 @@ export default function TurnInspector() {
   const selectedStepIndex = useUIStore((s) => s.selectedStepIndex);
   const toggleStep = useUIStore((s) => s.toggleStep);
   const [showPeakDetail, setShowPeakDetail] = useState(false);
+  const [showCumDetail, setShowCumDetail] = useState(false);
   const setSelectedStepIndex = useUIStore((s) => s.setSelectedStepIndex);
   const setPage = useUIStore((s) => s.setPage);
 
@@ -1353,7 +1354,13 @@ export default function TurnInspector() {
                   </div>
                   <div className="stat-card">
                     <div className="stat-value">{fmt(currentTurn.cum_total)}</div>
-                    <div className="stat-label">累计拼装{(currentTurn.cum_cache_hit ?? 0) > 0 ? ` · 缓存 ${fmt(currentTurn.cum_cache_hit ?? 0)}（${(((currentTurn.cum_cache_hit ?? 0) / currentTurn.cum_total) * 100).toFixed(0)}%）` : ''}</div>
+                    <div className="stat-label">
+                      累计拼装{(currentTurn.cum_cache_hit ?? 0) > 0 ? ` · 缓存 ${fmt(currentTurn.cum_cache_hit ?? 0)}（${(((currentTurn.cum_cache_hit ?? 0) / currentTurn.cum_total) * 100).toFixed(0)}%）` : ''}
+                      <span
+                        style={{ marginLeft: 4, color: 'oklch(0.74 0.13 60)', cursor: 'pointer', fontSize: 10, textDecoration: 'underline' }}
+                        onClick={(e) => { e.stopPropagation(); setShowCumDetail(true); }}
+                      >查看</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1424,6 +1431,24 @@ export default function TurnInspector() {
           fullCtx={Math.max(currentTurn.max_input + (currentTurn.max_cache_hit ?? 0), currentTurn.cum_total)}
           asstReqs={currentTurn.asst_reqs}
           onClose={() => setShowPeakDetail(false)}
+        />
+      )}
+
+      {/* Cumulative context detail modal */}
+      {showCumDetail && currentTurn && (
+        <PeakModal
+          categories={buildCategories(turnDetail?.comp ?? (currentTurn as any).comp ?? {}, currentTurn.cum_total, currentTurn.cum_total)}
+          tools={sessionStore.currentSession?.tools ?? []}
+          peakTokens={currentTurn.cum_total}
+          peakIndex={currentTurnIndex ?? 0}
+          turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
+          reqStep={0}
+          model={sessionStore.currentSession?.model ?? 'unknown'}
+          contextLimit={200000}
+          cacheHit={currentTurn.cum_cache_hit ?? 0}
+          fullCtx={currentTurn.cum_total}
+          asstReqs={currentTurn.asst_reqs}
+          onClose={() => setShowCumDetail(false)}
         />
       )}
     </>
