@@ -1413,7 +1413,7 @@ export default function TurnInspector() {
       {showPeakDetail && currentTurn && (
         <PeakModal
           categories={buildCategories(turnDetail?.comp ?? (currentTurn as any).comp ?? {}, Math.max(currentTurn.max_input + (currentTurn.max_cache_hit ?? 0), currentTurn.cum_total), currentTurn.cum_total)}
-          tools={Object.entries(turnDetail?.tools ?? (currentTurn as any).tools ?? {}).map(([name, calls]) => ({ name, calls: calls as number, resultTokens: 0, task: name.startsWith('Task') || name === 'Agent' || name === 'Workflow' }))}
+          tools={sessionStore.currentSession?.tools ?? []}
           peakTokens={currentTurn.max_input}
           peakIndex={currentTurnIndex ?? 0}
           turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
