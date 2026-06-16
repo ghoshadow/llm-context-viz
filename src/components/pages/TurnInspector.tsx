@@ -1009,91 +1009,7 @@ function ToolUsagePanel({ tools }: ToolUsagePanelProps) {
 // Main TurnInspector Component
 // ============================================================================
 
-function PeakDetailModal({
-  comp, maxInput, cacheHit, cumTotal, tools, turnIndex, reqStep, onClose,
-}: {
-  comp: Record<string, number>;
-  maxInput: number;
-  cacheHit: number;
-  cumTotal: number;
-  tools: Record<string, number>;
-  turnIndex: number;
-  reqStep: number;
-  onClose: () => void;
-}) {
-  const CATSUM = Object.values(comp).reduce((a, b) => a + b, 0) || 1;
-  const sorted = Object.entries(comp)
-    .filter(([, v]) => v > 0)
-    .sort(([, a], [, b]) => b - a);
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1100,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'oklch(0 0 0 / 0.55)', backdropFilter: 'blur(6px)',
-    }} onClick={onClose}>
-      <div style={{
-        width: 520, maxWidth: 'calc(100vw - 48px)', maxHeight: '80vh', overflowY: 'auto',
-        padding: '28px 28px 22px', borderRadius: 12,
-        background: SEMANTIC.cardBg, border: `1px solid ${SEMANTIC.borderColor}`,
-        boxShadow: '0 16px 48px oklch(0 0 0 / 0.45)',
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>
-            第 {turnIndex} 轮 · 步骤 #{reqStep + 1} · 峰值请求
-          </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: SEMANTIC.textMuted, fontSize: 20, cursor: 'pointer', padding: 0 }}>✕</button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-          <div style={{ flex: 1, border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 8, padding: '10px 14px', background: 'oklch(0.20 0.01 265 / 0.5)' }}>
-            <div style={{ fontSize: 10, color: SEMANTIC.textMuted, marginBottom: 4 }}>峰值输入</div>
-            <div style={{ fontSize: 18, fontWeight: 600, color: SEMANTIC.textAccent }}>{fmt(maxInput)}</div>
-          </div>
-          <div style={{ flex: 1, border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 8, padding: '10px 14px', background: 'oklch(0.20 0.01 265 / 0.5)' }}>
-            <div style={{ fontSize: 10, color: SEMANTIC.textMuted, marginBottom: 4 }}>缓存命中</div>
-            <div style={{ fontSize: 18, fontWeight: 600, color: SEMANTIC.textPrimary }}>{fmt(cacheHit)}{cacheHit > 0 ? ` (${((cacheHit / maxInput) * 100).toFixed(0)}%)` : ''}</div>
-          </div>
-          <div style={{ flex: 1, border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 8, padding: '10px 14px', background: 'oklch(0.20 0.01 265 / 0.5)' }}>
-            <div style={{ fontSize: 10, color: SEMANTIC.textMuted, marginBottom: 4 }}>累计拼装</div>
-            <div style={{ fontSize: 18, fontWeight: 600, color: SEMANTIC.textPrimary }}>{fmt(cumTotal)}</div>
-          </div>
-        </div>
-
-        <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>上下文组成</h3>
-        {sorted.map(([key, tokens]) => {
-          const pct = (tokens / CATSUM) * 100;
-          return (
-            <div key={key} style={{ marginBottom: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, fontSize: 12 }}>
-                <span style={{ color: SEMANTIC.textSecondary }}>{LABELS[key] ?? key}</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: SEMANTIC.textMuted }}>{fmt(tokens)} ({pct.toFixed(1)}%)</span>
-              </div>
-              <div style={{ height: 6, borderRadius: 3, background: 'oklch(0.24 0.01 265)', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${pct}%`, borderRadius: 3, background: COLORS[key] ?? 'oklch(0.5 0 0)' }} />
-              </div>
-            </div>
-          );
-        })}
-
-        {Object.keys(tools).length > 0 && (
-          <>
-            <h3 style={{ margin: '16px 0 10px', fontSize: 14, fontWeight: 600 }}>本轮工具调用</h3>
-            {Object.entries(tools).map(([name, count]) => (
-              <div key={name} style={{ fontSize: 12, color: SEMANTIC.textSecondary, marginBottom: 3, fontFamily: "'IBM Plex Mono', monospace" }}>
-                {name} × {count}
-              </div>
-            ))}
-          </>
-        )}
-
-        <div style={{ marginTop: 16, fontSize: 11, color: SEMANTIC.textMuted }}>
-          累计拼装为到该轮为止拼入上下文的内容总量的 API 实际值
-        </div>
-      </div>
-    </div>
-  );
-}
+import PeakModal, { buildCategories } from '../upload/PeakModal';
 
 export default function TurnInspector() {
   const sessionStore = useSessionStore();
@@ -1495,14 +1411,16 @@ export default function TurnInspector() {
 
       {/* Peak request detail modal */}
       {showPeakDetail && currentTurn && (
-        <PeakDetailModal
-          comp={turnDetail?.comp ?? (currentTurn as any).comp ?? {}}
-          maxInput={currentTurn.max_input}
-          cacheHit={currentTurn.max_cache_hit ?? 0}
-          cumTotal={currentTurn.cum_total}
-          tools={turnDetail?.tools ?? (currentTurn as any).tools ?? {}}
+        <PeakModal
+          categories={buildCategories(turnDetail?.comp ?? (currentTurn as any).comp ?? {}, currentTurn.max_input, currentTurn.max_cache_hit ?? 0)}
+          tools={Object.entries(turnDetail?.tools ?? (currentTurn as any).tools ?? {}).map(([name, calls]) => ({ name, calls: calls as number, resultTokens: 0, task: name.startsWith('Task') || name === 'Agent' || name === 'Workflow' }))}
+          peakTokens={currentTurn.max_input}
+          peakIndex={currentTurnIndex ?? 0}
           turnIndex={currentTurnIndex ?? 0}
           reqStep={currentTurn.max_req_step ?? 0}
+          model={sessionStore.currentSession?.model ?? 'unknown'}
+          contextLimit={200000}
+          cacheHit={currentTurn.max_cache_hit ?? 0}
           onClose={() => setShowPeakDetail(false)}
         />
       )}
