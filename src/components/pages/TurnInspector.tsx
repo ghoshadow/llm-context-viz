@@ -1461,7 +1461,7 @@ export default function TurnInspector() {
           contextLimit={200000}
           cacheHit={currentTurn.cum_cache_hit ?? 0}
           fullCtx={currentTurn.cum_total}
-          asstReqs={currentTurn.asst_reqs}
+          asstReqs={turns.filter(t => (t.turn_index ?? 0) <= (currentTurn.turn_index ?? currentTurnIndex ?? 0)).reduce((s, t) => s + (t.asst_reqs ?? 0), 0)}
           mode="cumulative"
           onClose={() => setShowCumDetail(false)}
         />
