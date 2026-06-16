@@ -203,6 +203,7 @@ function assembleTurns(
       segs: tl?.segs ?? [],
       comp: { ...comp },
       cumTotal,
+      cumCacheHit: (tl as any)?.cumCacheHit ?? 0,
     };
 
     turns.push(turn);

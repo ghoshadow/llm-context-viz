@@ -282,6 +282,8 @@ export interface TurnData {
   segs: TimelineSegment[];
   /** Cumulative context composition by category key -> tokens. */
   comp: Record<string, number>;
+  /** Cache hit from the last request (for cum_total display). */
+  cumCacheHit?: number;
   /** Cumulative total context tokens at turn end. */
   cumTotal: number;
 }

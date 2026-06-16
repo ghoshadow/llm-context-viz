@@ -532,16 +532,15 @@ function computeContextInfo(
   segments: TimelineSegment[],
   comp: TurnContextComposition,
   group?: TurnGroup,
-): { cumTotal: number; outTok: number } {
-  // Use API actual total context (input + cache_read) from last assistant,
-  // falling back to estimated composition sum
+): { cumTotal: number; cumCacheHit: number; outTok: number } {
   let cumTotal = 0;
+  let cumCacheHit = 0;
   if (group) {
-    // Find the last assistant with usage data
     for (let i = group.asstLines.length - 1; i >= 0; i--) {
       const usage = group.asstLines[i]?.message.usage;
       if (usage) {
         cumTotal = usage.input_tokens + (usage.cache_read_input_tokens ?? 0);
+        cumCacheHit = usage.cache_read_input_tokens ?? 0;
         break;
       }
     }
@@ -550,7 +549,6 @@ function computeContextInfo(
     cumTotal = Object.values(comp).reduce((a, b) => a + b, 0);
   }
 
-  // outTok: total output tokens from all m-type segments.
   let outTok = 0;
   for (const seg of segments) {
     if (seg.k === 'm') {
@@ -560,6 +558,7 @@ function computeContextInfo(
 
   return {
     cumTotal: Math.round(cumTotal),
+    cumCacheHit: Math.round(cumCacheHit),
     outTok: Math.round(outTok),
   };
 }
@@ -618,6 +617,7 @@ export function computeTimeline(
         segs: [],
         comp: { ...comp },
         cumTotal: Math.round(Object.values(comp).reduce((a, b) => a + b, 0)),
+        cumCacheHit: 0,
       });
       continue;
     }
@@ -648,7 +648,7 @@ export function computeTimeline(
     const metrics = computeTurnMetrics(segments, turnDurMs);
 
     // 4. Compute context info.
-    const { cumTotal, outTok } = computeContextInfo(segments, comp, group);
+    const { cumTotal, cumCacheHit, outTok } = computeContextInfo(segments, comp, group);
 
     // 5. Build tool usage summary.
     const tools: Record<string, number> = {};
@@ -712,6 +712,7 @@ export function computeTimeline(
       segs: segments,
       comp: { ...comp },
       cumTotal,
+      cumCacheHit,
     });
   }
 

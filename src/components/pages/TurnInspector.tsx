@@ -1353,7 +1353,7 @@ export default function TurnInspector() {
                   </div>
                   <div className="stat-card">
                     <div className="stat-value">{fmt(currentTurn.cum_total)}</div>
-                    <div className="stat-label">累计拼装{(currentTurn.max_cache_hit ?? 0) > 0 ? ` · 缓存 ${fmt(currentTurn.max_cache_hit ?? 0)}（${((currentTurn.max_cache_hit! / currentTurn.cum_total) * 100).toFixed(0)}%）` : ''}</div>
+                    <div className="stat-label">累计拼装{(() => { const estCache = Math.max(0, currentTurn.cum_total - currentTurn.max_input); return estCache > 0 ? ` · 缓存 ~${fmt(estCache)}（${((estCache / currentTurn.cum_total) * 100).toFixed(0)}%）` : ''; })()}</div>
                   </div>
                 </div>
               </div>
