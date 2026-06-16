@@ -1416,11 +1416,13 @@ export default function TurnInspector() {
           tools={Object.entries(turnDetail?.tools ?? (currentTurn as any).tools ?? {}).map(([name, calls]) => ({ name, calls: calls as number, resultTokens: 0, task: name.startsWith('Task') || name === 'Agent' || name === 'Workflow' }))}
           peakTokens={currentTurn.max_input}
           peakIndex={currentTurnIndex ?? 0}
-          turnIndex={currentTurnIndex ?? 0}
+          turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
           reqStep={currentTurn.max_req_step ?? 0}
           model={sessionStore.currentSession?.model ?? 'unknown'}
           contextLimit={200000}
           cacheHit={currentTurn.max_cache_hit ?? 0}
+          fullCtx={currentTurn.cum_total}
+          asstReqs={currentTurn.asst_reqs}
           onClose={() => setShowPeakDetail(false)}
         />
       )}

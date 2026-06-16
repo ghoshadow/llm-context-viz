@@ -341,8 +341,19 @@ function GrowthChart({
 // Main Component
 // ============================================================================
 
-export default function ContextAssembly() {
-  const session = useSessionStore((s) => s.currentSession);
+interface PeakDataProps {
+  peakData?: {
+    session: { model: string; version: string; cwd: string; requests: number; peakIndex: number; peakTokens: number; contextLimit: number };
+    categories: ContextCategory[];
+    tools: ToolAggregation[];
+    series?: SeriesPoint[];
+  };
+  embedded?: boolean;
+}
+
+export default function ContextAssembly({ peakData, embedded }: PeakDataProps = {}) {
+  const sessionFromStore = useSessionStore((s) => s.currentSession);
+  const session = peakData ? peakData.session as any : sessionFromStore;
   const setPage = useUIStore((s) => s.setPage);
   const hoveredCategory = useUIStore((s) => s.hoveredCategory);
   const setHoveredCategory = useUIStore((s) => s.setHoveredCategory);
@@ -350,16 +361,16 @@ export default function ContextAssembly() {
   const setChartHover = useUIStore((s) => s.setChartHover);
 
   const categories: ContextCategory[] = useMemo(
-    () => session?.categories ?? [],
-    [session?.categories],
+    () => peakData?.categories ?? session?.categories ?? [],
+    [peakData?.categories, session?.categories],
   );
   const tools: ToolAggregation[] = useMemo(
-    () => session?.tools ?? [],
-    [session?.tools],
+    () => peakData?.tools ?? session?.tools ?? [],
+    [peakData?.tools, session?.tools],
   );
   const series: SeriesPoint[] = useMemo(
-    () => session?.series ?? [],
-    [session?.series],
+    () => peakData?.series ?? session?.series ?? [],
+    [peakData?.series, session?.series],
   );
 
   // ==========================================================================
@@ -691,49 +702,30 @@ export default function ContextAssembly() {
           }}
         >
           {/* Turn Inspector link */}
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              setPage('home');
-            }}
-            style={{
-              textDecoration: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              border: `1px solid ${SEMANTIC.borderColor}`,
-              borderRadius: 10,
-              padding: '11px 15px',
-              background: SEMANTIC.innerCardBg,
-              color: SEMANTIC.textSecondary,
-              fontSize: 12.5,
-              height: 'fit-content',
-            }}
-          >
-            ← 首页
-          </a>
-
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              setPage('inspector');
-            }}
-            style={{
-              textDecoration: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              border: `1px solid ${SEMANTIC.borderAccent}`,
-              borderRadius: 10,
-              padding: '11px 15px',
-              background: 'oklch(0.74 0.13 60 / 0.12)',
-              color: SEMANTIC.textAccent2,
-              fontSize: 12.5,
-              height: 'fit-content',
-            }}
-          >
-            逐轮检查 →
-          </a>
+          {!embedded && (
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); setPage('home'); }}
+              style={{
+                textDecoration: 'none', display: 'flex', alignItems: 'center',
+                border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 10,
+                padding: '11px 15px', background: SEMANTIC.innerCardBg,
+                color: SEMANTIC.textSecondary, fontSize: 12.5, height: 'fit-content',
+              }}
+            >← 首页</a>
+          )}
+          {!embedded && (
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); setPage('inspector'); }}
+              style={{
+                textDecoration: 'none', display: 'flex', alignItems: 'center',
+                border: `1px solid ${SEMANTIC.borderAccent}`, borderRadius: 10,
+                padding: '11px 15px', background: 'oklch(0.74 0.13 60 / 0.12)',
+                color: SEMANTIC.textAccent2, fontSize: 12.5, height: 'fit-content',
+              }}
+            >逐轮检查 →</a>
+          )}
 
           {/* Model badge */}
           <div
@@ -1657,6 +1649,7 @@ export default function ContextAssembly() {
       {/* ================================================================ */}
       {/* GROWTH CHART: Context growth over session                        */}
       {/* ================================================================ */}
+      {!embedded && (
       <section
         style={{
           marginTop: 30,
@@ -1799,10 +1792,12 @@ export default function ContextAssembly() {
           <span>req {derived.requests}</span>
         </div>
       </section>
+      )}
 
       {/* ================================================================ */}
       {/* FOOTER                                                            */}
       {/* ================================================================ */}
+      {!embedded && (
       <footer
         style={{
           marginTop: 26,
@@ -1823,6 +1818,7 @@ export default function ContextAssembly() {
           标"估算"的模块（系统提示词 · 工具 schema）为近似值 —— 日志中未记录
         </span>
       </footer>
+      )}
     </>
   );
 }
