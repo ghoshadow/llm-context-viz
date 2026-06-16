@@ -1438,7 +1438,11 @@ export default function TurnInspector() {
       {/* Cumulative context detail modal */}
       {showCumDetail && currentTurn && (
         <PeakModal
-          categories={buildCategories(turnDetail?.comp ?? (currentTurn as any).comp ?? {}, currentTurn.cum_total, currentTurn.cum_total)}
+          categories={(() => {
+            const comp = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
+            const compSum = Object.values(comp).reduce((a: number, b: number) => a + b, 0) || 1;
+            return buildCategories(comp, currentTurn.cum_total, compSum);
+          })()}
           tools={(() => {
             // Parse cumTools if stored as JSON string from DB
             const ct = (currentTurn as any).cum_tools_json
