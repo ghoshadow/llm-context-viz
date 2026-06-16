@@ -326,6 +326,7 @@ export interface TurnSummary {
   max_cache_hit?: number;
   max_req_idx?: number;
   max_req_step?: number;
+  cum_cache_hit?: number;
   out_tok: number;
   cum_total: number;
   dur_ms: number;

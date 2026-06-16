@@ -66,6 +66,7 @@ export function initDb(): void {
       max_req_step INTEGER DEFAULT 0,
       out_tok INTEGER,
       cum_total INTEGER,
+      cum_cache_hit INTEGER DEFAULT 0,
       dur_ms INTEGER,
       model_ms INTEGER,
       tool_ms INTEGER,
