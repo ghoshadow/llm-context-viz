@@ -615,6 +615,14 @@ export default function ContextAssembly({ peakData, embedded }: PeakDataProps = 
 
   return (
     <>
+      {embedded && (
+        <style>{`
+          .sc-embedded { padding: 20px 28px !important; font-size: 0.92em; }
+          .sc-embedded h1 { font-size: 24px !important; }
+          .sc-embedded h2 { font-size: 13px !important; }
+        `}</style>
+      )}
+      <div className={embedded ? 'sc-embedded' : ''} style={embedded ? { minHeight: 'auto', background: 'transparent', padding: '16px 22px', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", color: 'oklch(0.93 0.006 265)', letterSpacing: '-0.01em' } : undefined}>
       {/* ================================================================ */}
       {/* HEADER                                                           */}
       {/* ================================================================ */}
@@ -1819,6 +1827,7 @@ export default function ContextAssembly({ peakData, embedded }: PeakDataProps = 
         </span>
       </footer>
       )}
+      </div>
     </>
   );
 }
