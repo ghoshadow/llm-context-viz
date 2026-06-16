@@ -1439,8 +1439,8 @@ export default function TurnInspector() {
       {showCumDetail && currentTurn && (
         <PeakModal
           categories={(() => {
-            const comp = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
-            const compSum = Object.values(comp).reduce((a: number, b: number) => a + b, 0) || 1;
+            const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
+            const compSum = Object.values(comp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
             return buildCategories(comp, currentTurn.cum_total, compSum);
           })()}
           tools={(() => {
