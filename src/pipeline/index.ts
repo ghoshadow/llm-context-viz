@@ -204,6 +204,7 @@ function assembleTurns(
       comp: { ...comp },
       cumTotal,
       cumCacheHit: (tl as any)?.cumCacheHit ?? 0,
+      cumTools: (tl as any)?.cumTools ?? {},
     };
 
     turns.push(turn);

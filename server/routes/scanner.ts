@@ -369,9 +369,9 @@ router.post('/import', (req, res) => {
     const insertTurn = db.prepare(`
       INSERT INTO turns (
         id, session_id, turn_index, prompt, timestamp, asst_reqs,
-        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, dur_ms, model_ms, tool_ms, sub_ms,
+        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, cum_tools_json, dur_ms, model_ms, tool_ms, sub_ms,
         step_count, comp_json, delta_json, tools_json, segs_json, longest_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertTurns = db.transaction(() => {
@@ -390,6 +390,7 @@ router.post('/import', (req, res) => {
           turn.outTok,
           turn.cumTotal,
           (turn as any).cumCacheHit ?? 0,
+          JSON.stringify((turn as any).cumTools ?? {}),
           turn.durMs,
           turn.modelMs,
           turn.toolMs,

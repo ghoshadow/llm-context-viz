@@ -284,6 +284,7 @@ export interface TurnData {
   comp: Record<string, number>;
   /** Cache hit from the last request (for cum_total display). */
   cumCacheHit?: number;
+  cumTools?: Record<string, { calls: number; resultTokens: number; task: boolean }>;
   /** Cumulative total context tokens at turn end. */
   cumTotal: number;
 }

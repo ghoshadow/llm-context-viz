@@ -591,6 +591,7 @@ export function computeTimeline(
   compositions: TurnContextComposition[],
 ): TimelineResult[] {
   const results: TimelineResult[] = [];
+  const cumTools: Record<string, { calls: number; resultTokens: number; task: boolean }> = {};
 
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i]!;
@@ -618,6 +619,7 @@ export function computeTimeline(
         comp: { ...comp },
         cumTotal: Math.round(Object.values(comp).reduce((a, b) => a + b, 0)),
         cumCacheHit: 0,
+        cumTools: {},
       });
       continue;
     }
@@ -690,7 +692,40 @@ export function computeTimeline(
     // 8. Build delta (delegated to compute-deltas stage).
     const delta = {};
 
-    // 9. Build the result.
+    // 9. Accumulate cumulative tools from this turn
+    for (const line of group.asstLines) {
+      for (const c of (line.message.content ?? [])) {
+        if (c.type !== 'tool_use') continue;
+        const existing = cumTools[c.name] ?? { calls: 0, resultTokens: 0, task: c.name.startsWith('Task') || c.name === 'Agent' || c.name === 'Workflow' };
+        existing.calls++;
+        cumTools[c.name] = existing;
+      }
+    }
+    for (const trLine of [...(group.toolResultLines ?? [])]) {
+      const content = trLine.message.content;
+      if (typeof content === 'string' || !content) continue;
+      for (const block of content) {
+        if (block.type !== 'tool_result') continue;
+        const toolUseId = block.tool_use_id;
+        for (const line of group.asstLines) {
+          for (const c of (line.message.content ?? [])) {
+            if (c.type === 'tool_use' && c.id === toolUseId) {
+              const existing = cumTools[c.name] ?? { calls: 0, resultTokens: 0, task: c.name.startsWith('Task') || c.name === 'Agent' || c.name === 'Workflow' };
+              const resultStr = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+              existing.resultTokens += Math.round(resultStr.length / 4);
+              cumTools[c.name] = existing;
+              break;
+            }
+          }
+        }
+      }
+    }
+    const cumToolsSnapshot: typeof cumTools = {};
+    for (const [k, v] of Object.entries(cumTools)) {
+      cumToolsSnapshot[k] = { ...v };
+    }
+
+    // 10. Build the result.
     results.push({
       i, // 0-based index (matching array position).
       prompt: extractPrompt(group.userLine),
@@ -713,6 +748,7 @@ export function computeTimeline(
       comp: { ...comp },
       cumTotal,
       cumCacheHit,
+      cumTools: cumToolsSnapshot,
     });
   }
 

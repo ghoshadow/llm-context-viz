@@ -67,6 +67,7 @@ export function initDb(): void {
       out_tok INTEGER,
       cum_total INTEGER,
       cum_cache_hit INTEGER DEFAULT 0,
+      cum_tools_json TEXT,
       dur_ms INTEGER,
       model_ms INTEGER,
       tool_ms INTEGER,
