@@ -343,7 +343,7 @@ function GrowthChart({
 
 interface PeakDataProps {
   peakData?: {
-    session: { model: string; version: string; cwd: string; requests: number; peakIndex: number; peakTokens: number; contextLimit: number };
+    session: Record<string, any>;
     categories: ContextCategory[];
     tools: ToolAggregation[];
     series?: SeriesPoint[];
