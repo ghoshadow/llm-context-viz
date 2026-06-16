@@ -1,0 +1,563 @@
+/* ==========================================================================
+   LLM Context Visualizer — Global Styles
+   Dark theme, based on the prototype visual design.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Google Fonts — IBM Plex Sans + Mono
+   Already loaded in index.html via <link>, declared here for style isolation.
+   -------------------------------------------------------------------------- */
+
+/* --------------------------------------------------------------------------
+   1. CSS Reset
+   -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* --------------------------------------------------------------------------
+   2. Root & Body
+   -------------------------------------------------------------------------- */
+
+html,
+body {
+  margin: 0;
+  background: oklch(0.155 0.008 265);
+  color: oklch(0.93 0.006 265);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* --------------------------------------------------------------------------
+   3. Selection
+   -------------------------------------------------------------------------- */
+
+::selection {
+  background: oklch(0.74 0.13 60 / 0.30);
+}
+
+/* --------------------------------------------------------------------------
+   4. Root Background — radial gradient matching the prototype
+   -------------------------------------------------------------------------- */
+
+#root {
+  min-height: 100vh;
+  background:
+    radial-gradient(
+      1200px 700px at 80% -10%,
+      oklch(0.22 0.03 285 / 0.45),
+      transparent 60%
+    ),
+    oklch(0.155 0.008 265);
+}
+
+/* --------------------------------------------------------------------------
+   5. Scrollbar Styling (WebKit)
+   -------------------------------------------------------------------------- */
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 9px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(0.34 0.014 265);
+  border-radius: 6px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   6. Utility Classes
+   -------------------------------------------------------------------------- */
+
+.mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* --------------------------------------------------------------------------
+   7. Panel / Card Styles
+   -------------------------------------------------------------------------- */
+
+.panel {
+  border: 1px solid oklch(0.30 0.014 265);
+  border-radius: 16px;
+  background: oklch(0.185 0.009 265 / 0.7);
+  padding: 20px 22px;
+}
+
+/* --------------------------------------------------------------------------
+   8. Stat Card
+   -------------------------------------------------------------------------- */
+
+.stat-card {
+  border: 1px solid oklch(0.28 0.012 265);
+  border-radius: 11px;
+  padding: 12px 13px;
+  background: oklch(0.20 0.01 265 / 0.5);
+}
+
+.stat-card .stat-value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 21px;
+  font-weight: 600;
+  color: oklch(0.90 0.01 265);
+}
+
+.stat-card .stat-label {
+  font-size: 11px;
+  color: oklch(0.56 0.012 265);
+  margin-top: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   9. Legend Row
+   -------------------------------------------------------------------------- */
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid oklch(0.26 0.012 265 / 0.5);
+  cursor: default;
+}
+
+.legend-row .legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-row .legend-label {
+  font-size: 12.5px;
+  flex: 1;
+  color: oklch(0.82 0.01 265);
+}
+
+.legend-row .legend-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: oklch(0.50 0.012 265);
+}
+
+.legend-row .legend-tokens {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: oklch(0.88 0.01 265);
+  text-align: right;
+}
+
+.legend-row .legend-pct {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  color: oklch(0.60 0.012 265);
+  text-align: right;
+}
+
+.legend-row .legend-bar-track {
+  height: 4px;
+  border-radius: 3px;
+  background: oklch(0.26 0.01 265);
+  margin-top: 7px;
+  margin-left: 21px;
+  overflow: hidden;
+}
+
+.legend-row .legend-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   10. Smooth Transitions
+   -------------------------------------------------------------------------- */
+
+.panel,
+.stat-card,
+.legend-row {
+  transition: opacity 0.18s ease, background 0.14s ease, border-color 0.14s ease;
+}
+
+.fade-hover {
+  transition: opacity 0.18s ease;
+}
+
+.fade-hover:hover {
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
+   11. Typography Scale
+   -------------------------------------------------------------------------- */
+
+h1 {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.section-header .helper-text {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: oklch(0.54 0.012 265);
+}
+
+/* --------------------------------------------------------------------------
+   12. Header Bar Styles
+   -------------------------------------------------------------------------- */
+
+.header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+  border-bottom: 1px solid oklch(0.30 0.014 265);
+  padding-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.header-bar .tag {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.header-bar .tag-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: oklch(0.74 0.13 60);
+  box-shadow: 0 0 12px oklch(0.74 0.13 60 / 0.7);
+}
+
+.header-bar .tag-text {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: oklch(0.64 0.012 265);
+}
+
+.header-bar .subtitle {
+  margin: 12px 0 0;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: oklch(0.66 0.012 265);
+  max-width: 600px;
+}
+
+.header-bar .subtitle strong {
+  color: oklch(0.88 0.01 265);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   13. Metric Badge (model, request count, peak, etc.)
+   -------------------------------------------------------------------------- */
+
+.metric-badge {
+  border: 1px solid oklch(0.30 0.014 265);
+  border-radius: 10px;
+  padding: 11px 15px;
+  background: oklch(0.20 0.01 265 / 0.6);
+}
+
+.metric-badge.accent {
+  border: 1px solid oklch(0.45 0.10 60);
+  background: oklch(0.74 0.13 60 / 0.12);
+  color: oklch(0.82 0.10 60);
+}
+
+.metric-badge .metric-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.58 0.012 265);
+  margin-bottom: 5px;
+}
+
+.metric-badge .metric-value {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: oklch(0.90 0.01 265);
+}
+
+.metric-badge.accent .metric-value {
+  color: oklch(0.74 0.13 60);
+}
+
+/* --------------------------------------------------------------------------
+   14. Progress Bar
+   -------------------------------------------------------------------------- */
+
+.progress-bar {
+  display: flex;
+  width: 100%;
+  height: 74px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid oklch(0.32 0.014 265);
+  background: oklch(0.19 0.01 265);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04);
+}
+
+.progress-bar .progress-segment {
+  transition: opacity 0.18s ease;
+  cursor: default;
+  position: relative;
+  border-right: 1px solid oklch(0.16 0.008 265 / 0.5);
+}
+
+.progress-bar .progress-free {
+  background: repeating-linear-gradient(
+    135deg,
+    oklch(0.24 0.01 265) 0 7px,
+    oklch(0.20 0.01 265) 7px 14px
+  );
+}
+
+/* --------------------------------------------------------------------------
+   15. Grid Helpers
+   -------------------------------------------------------------------------- */
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  align-items: start;
+}
+
+.two-col-uneven {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 22px;
+  align-items: stretch;
+}
+
+.three-col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.four-col {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 11px;
+}
+
+/* --------------------------------------------------------------------------
+   16. Footer
+   -------------------------------------------------------------------------- */
+
+.app-footer {
+  margin-top: 26px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: oklch(0.46 0.012 265);
+  line-height: 1.6;
+}
+
+/* --------------------------------------------------------------------------
+   17. Marked-Area Chart Background
+   -------------------------------------------------------------------------- */
+
+.chart-container {
+  border: 1px solid oklch(0.30 0.014 265);
+  border-radius: 16px;
+  padding: 22px 24px 18px;
+  background: oklch(0.185 0.009 265 / 0.7);
+}
+
+/* --------------------------------------------------------------------------
+   18. Tooltip
+   -------------------------------------------------------------------------- */
+
+.tooltip {
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: oklch(0.26 0.012 265);
+  border: 1px solid oklch(0.40 0.014 265);
+  border-radius: 9px;
+  padding: 8px 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  white-space: nowrap;
+  box-shadow: 0 8px 24px oklch(0 0 0 / 0.4);
+  transition: opacity 0.12s ease;
+}
+
+/* --------------------------------------------------------------------------
+   19. Estimator Badge
+   -------------------------------------------------------------------------- */
+
+.estimator-badge {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: oklch(0.52 0.012 265);
+}
+
+.estimator-badge .estimator-pill {
+  border: 1px solid oklch(0.40 0.012 265);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* --------------------------------------------------------------------------
+   20. Conic Ring Card (for group stats)
+   -------------------------------------------------------------------------- */
+
+.conic-ring {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.conic-ring .ring-center {
+  position: absolute;
+  inset: 13px;
+  border-radius: 50%;
+  background: oklch(0.185 0.012 265);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.conic-ring .ring-value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   21. Step List Item
+   -------------------------------------------------------------------------- */
+
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background 0.12s ease;
+}
+
+.step-item.selected {
+  background: oklch(0.26 0.02 60 / 0.28);
+  border-color: oklch(0.45 0.08 60);
+}
+
+.step-item .step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.step-item .step-bar-track {
+  height: 7px;
+  border-radius: 4px;
+  background: oklch(0.24 0.01 265);
+  overflow: hidden;
+  flex: 1;
+}
+
+.step-item .step-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+/* --------------------------------------------------------------------------
+   22. Content Block (expandable code/details)
+   -------------------------------------------------------------------------- */
+
+.content-block {
+  border: 1px solid oklch(0.28 0.012 265);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.content-block .block-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: oklch(0.21 0.01 265 / 0.7);
+  border-bottom: 1px solid oklch(0.26 0.012 265);
+}
+
+.content-block .block-body {
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: oklch(0.82 0.01 265);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.content-block .block-body.mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* --------------------------------------------------------------------------
+   23. Spacing Utilities
+   -------------------------------------------------------------------------- */
+
+.mt-18 { margin-top: 18px; }
+.mt-22 { margin-top: 22px; }
+.mt-24 { margin-top: 24px; }
+.mt-26 { margin-top: 26px; }
+.mt-30 { margin-top: 30px; }
+.mb-14 { margin-bottom: 14px; }
+.mb-16 { margin-bottom: 16px; }
+.gap-18 { gap: 18px; }
+.gap-22 { gap: 22px; }
+
+/* --------------------------------------------------------------------------
+   25. Keyframe Animations
+   -------------------------------------------------------------------------- */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
