@@ -88,7 +88,8 @@ export default function PeakModal({
   );
 }
 
-export function buildCategories(comp: Record<string, number>, _peakTokens: number, _cacheHit: number): ContextCategory[] {
+export function buildCategories(comp: Record<string, number>, fullCtx: number, cumTotal: number): ContextCategory[] {
+  const scaleF = cumTotal > 0 ? fullCtx / cumTotal : 1;
   const CAT_META: Record<string, { label: string; group: ContextCategory['group'] }> = {
     sysPrompt: { label: '系统提示', group: 'core' },
     tools: { label: '工具定义', group: 'core' },
@@ -107,7 +108,7 @@ export function buildCategories(comp: Record<string, number>, _peakTokens: numbe
   const cats: ContextCategory[] = [];
   for (const [key, tokens] of Object.entries(comp)) {
     const meta = CAT_META[key] ?? { label: key, group: 'convo' as const };
-    cats.push({ key, label: meta.label, group: meta.group, estimated: EST.has(key), tokens: Math.round(tokens), raw: 0 });
+    cats.push({ key, label: meta.label, group: meta.group, estimated: EST.has(key), tokens: Math.round(tokens * scaleF), raw: 0 });
   }
   cats.sort((a, b) => b.tokens - a.tokens);
   return cats;
