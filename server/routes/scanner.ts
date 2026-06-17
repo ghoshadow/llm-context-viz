@@ -272,27 +272,37 @@ export function enrichWithSubAgents(turns: any[], sessDir: string) {
 
   if (subAgents.length === 0) return;
 
-  // Match sub-agents to specific s-type segments by timestamp proximity.
-  // A sub-agent is associated with the most recent s-type segment (Agent/Workflow
-  // spawn call) whose timestamp is <= the sub-agent's start time.
+  // Separate workflow sub-agents (in subagents/workflows/) from direct ones
+  const workflowAgents = subAgents.filter((sa: any) => sa.file.includes('/workflows/'));
+  const directAgents = subAgents.filter((sa: any) => !sa.file.includes('/workflows/'));
+
   for (const turn of turns) {
-    for (const sa of subAgents) {
+    // Workflow sub-agents → attach to the LAST Workflow segment in the turn
+    if (workflowAgents.length > 0) {
+      let lastWfSeg: any = null;
+      for (const seg of (turn.segs ?? [])) {
+        if (seg.k === 's' && seg.n === 'Workflow') lastWfSeg = seg;
+      }
+      if (lastWfSeg && lastWfSeg.det) {
+        lastWfSeg.det.subAgents = workflowAgents;
+      }
+    }
+
+    // Direct sub-agents → timestamp matching (5-min window)
+    for (const sa of directAgents) {
       if (!sa.firstTs || sa.firstTs < turn.ts) continue;
       const turnEnd = turns.indexOf(turn) + 1 < turns.length
         ? turns[turns.indexOf(turn) + 1]!.ts : '9999';
       if (sa.firstTs >= turnEnd) continue;
 
-      // Segment timestamp = tool RESULT time. Sub-agent starts between the
-      // tool call (spawn) and tool result (return). Match sub-agent to the
-      // s-type segment whose result time is closest AFTER the sub-agent start.
       let bestSeg: any = null;
       let bestGap = Infinity;
       const saMs = new Date(sa.firstTs).getTime();
       for (const seg of (turn.segs ?? [])) {
         if (seg.k !== 's') continue;
         const segMs = new Date(seg.ts).getTime();
-        const gap = segMs - saMs;  // positive = result after sub-agent start
-        if (gap >= 0 && gap < 300_000 && gap < bestGap) { // within 5 minutes
+        const gap = segMs - saMs;
+        if (gap >= 0 && gap < 300_000 && gap < bestGap) {
           bestGap = gap;
           bestSeg = seg;
         }
