@@ -60,8 +60,8 @@ interface TurnListItemProps {
   turnNum: string;
   asstReqs: number;
   maxInput: number;
+  cumTotal: number;
   prompt: string;
-  maxPeak: number;
   isSelected: boolean;
   onClick: () => void;
 }
@@ -70,12 +70,12 @@ function TurnListItem({
   turnNum,
   asstReqs,
   maxInput,
+  cumTotal,
   prompt,
-  maxPeak,
   isSelected,
   onClick,
 }: TurnListItemProps) {
-  const loadPct = Math.max(2, (maxInput / maxPeak) * 100);
+  const loadPct = Math.max(2, (cumTotal / WINDOW) * 100);
   const peakColor = maxInput >= 120000 ? 'oklch(0.76 0.13 60)' : SEMANTIC.textDesc2;
 
   return (
@@ -1108,11 +1108,6 @@ export default function TurnInspector() {
     };
   }, [currentTurn]);
 
-  // Max peak for list bars
-  const maxPeak = useMemo(() => {
-    return Math.max(1, ...turns.map((t) => t.max_input ?? 0));
-  }, [turns]);
-
   // Guard: no session
   if (!currentSessionId) {
     return (
@@ -1280,7 +1275,7 @@ export default function TurnInspector() {
                     asstReqs={t.asst_reqs ?? 0}
                     maxInput={t.max_input ?? 0}
                     prompt={t.prompt ?? ''}
-                    maxPeak={maxPeak}
+                    cumTotal={t.cum_total ?? 0}
                     isSelected={isSelected}
                     onClick={() => selectTurn(t.turn_index)}
                   />
