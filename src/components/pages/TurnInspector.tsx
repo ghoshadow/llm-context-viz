@@ -61,6 +61,7 @@ interface TurnListItemProps {
   asstReqs: number;
   maxInput: number;
   cumTotal: number;
+  contextLimit: number;
   prompt: string;
   isSelected: boolean;
   onClick: () => void;
@@ -71,12 +72,12 @@ function TurnListItem({
   asstReqs,
   maxInput,
   cumTotal,
+  contextLimit: ctxLimit,
   prompt,
   isSelected,
   onClick,
 }: TurnListItemProps) {
-  const loadPct = Math.max(2, (cumTotal / WINDOW) * 100);
-  const peakColor = maxInput >= 120000 ? 'oklch(0.76 0.13 60)' : SEMANTIC.textDesc2;
+  const loadPct = Math.max(2, (cumTotal / ctxLimit) * 100);
 
   return (
     <button
@@ -1017,6 +1018,7 @@ import PeakModal, { buildCategories } from '../upload/PeakModal';
 
 export default function TurnInspector() {
   const sessionStore = useSessionStore();
+  const contextLimit = sessionStore.currentSession?.context_limit ?? 200000;
   const {
     currentSessionId,
     fetchTurns,
@@ -1276,6 +1278,7 @@ export default function TurnInspector() {
                     maxInput={t.max_input ?? 0}
                     prompt={t.prompt ?? ''}
                     cumTotal={t.cum_total ?? 0}
+                    contextLimit={contextLimit}
                     isSelected={isSelected}
                     onClick={() => selectTurn(t.turn_index)}
                   />
@@ -1442,7 +1445,7 @@ export default function TurnInspector() {
           turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
           reqStep={currentTurn.max_req_step ?? 0}
           model={sessionStore.currentSession?.model ?? 'unknown'}
-          contextLimit={200000}
+          contextLimit={contextLimit}
           cacheHit={currentTurn.max_cache_hit ?? 0}
           fullCtx={Math.max(currentTurn.max_input + (currentTurn.max_cache_hit ?? 0), currentTurn.cum_total)}
           asstReqs={currentTurn.asst_reqs}
@@ -1470,7 +1473,7 @@ export default function TurnInspector() {
           turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
           reqStep={0}
           model={sessionStore.currentSession?.model ?? 'unknown'}
-          contextLimit={200000}
+          contextLimit={contextLimit}
           cacheHit={currentTurn.cum_cache_hit ?? 0}
           fullCtx={currentTurn.cum_total}
           asstReqs={turns.filter(t => (t.turn_index ?? 0) <= (currentTurn.turn_index ?? currentTurnIndex ?? 0)).reduce((s, t) => s + (t.asst_reqs ?? 0), 0)}
