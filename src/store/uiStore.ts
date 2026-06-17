@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-type Page = 'home' | 'assembly' | 'inspector';
+type Page = 'home' | 'assembly' | 'inspector' | 'ontology';
 
 interface UIStore {
   // Page navigation
@@ -19,6 +19,10 @@ interface UIStore {
   selectedStepIndex: number | null;
   setSelectedStepIndex: (index: number | null) => void;
   toggleStep: (index: number) => void;
+
+  // Ontology: selected entity node ID (null = no selection)
+  selectedOntologyNode: string | null;
+  setSelectedOntologyNode: (id: string | null) => void;
 }
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -37,4 +41,7 @@ export const useUIStore = create<UIStore>((set) => ({
     set((state) => ({
       selectedStepIndex: state.selectedStepIndex === index ? null : index,
     })),
+
+  selectedOntologyNode: null,
+  setSelectedOntologyNode: (id) => set({ selectedOntologyNode: id }),
 }));

@@ -23,16 +23,17 @@ export default function ContextStructure({
     .filter((k) => (comp[k] ?? 0) > 0)
     .sort((a, b) => (comp[b] ?? 0) - (comp[a] ?? 0));
 
-  const total = Object.values(comp).reduce((a, b) => a + b, 0) || 1;
+  const compSum = Object.values(comp).reduce((a, b) => a + b, 0) || 1;
+  const scale = cumTotal / compSum;
   const barSegs = useMemo(() => {
     return order.map((k) => ({
       key: k,
       color: COLORS[k] ?? 'oklch(0.5 0 0)',
-      pct: ((comp[k] ?? 0) / total) * 100,
+      pct: (((comp[k] ?? 0) * scale) / cumTotal) * 100,
       op: hoveredCategory && hoveredCategory !== k ? 0.28 : 1,
       title: `${LABELS[k]} — ${fmt(comp[k] ?? 0)} tok`,
     }));
-  }, [order, comp, total, hoveredCategory]);
+  }, [order, comp, cumTotal, compSum, scale, hoveredCategory]);
 
   const legendRows = useMemo(() => {
     return order.map((k) => ({

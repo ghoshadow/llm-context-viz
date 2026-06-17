@@ -193,10 +193,14 @@ function ContextStructure({
       .sort((a, b) => comp[b]! - comp[a]!);
   }, [comp]);
 
+  // Scale composition to match API actual total
+  const compSum = Object.values(comp).reduce((a, b) => a! + b!, 0) || 1;
+  const scale = cumTotal / compSum;
+
   const barSegs = order.map((k) => ({
     key: k,
     color: COLORS[k] ?? 'oklch(0.5 0 0)',
-    pct: (comp[k]! / cumTotal) * 100,
+    pct: ((comp[k]! * scale) / cumTotal) * 100,
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
     title: `${LABELS[k] ?? k} — ${fmt(comp[k]!)} tok`,
   }));
@@ -1175,6 +1179,23 @@ export default function TurnInspector() {
             }}
           >
             &larr; 峰值透视
+          </a>
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setPage('ontology');
+            }}
+            style={{
+              textDecoration: 'none',
+              border: `1px solid ${SEMANTIC.borderColor}`,
+              borderRadius: 9,
+              padding: '9px 14px',
+              color: SEMANTIC.textSecondary,
+              background: 'oklch(0.20 0.01 265 / 0.6)',
+            }}
+          >
+            本体建模
           </a>
           <span
             style={{

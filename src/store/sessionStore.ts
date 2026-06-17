@@ -6,6 +6,7 @@ import type {
   TurnSummary,
   TurnDetail,
 } from '../types/session';
+import type { OntologyData } from '../types/ontology';
 
 export interface SessionStore {
   sessions: SessionListItem[];
@@ -44,7 +45,12 @@ export interface SessionStore {
   closeScanner: () => void;
   uploadFile: (file: File) => Promise<string | null>;
   deleteSession: (id: string) => Promise<void>;
+  fetchOntology: () => Promise<void>;
 
+  // Ontology state
+  ontologyData: OntologyData | null;
+  ontologyLoading: boolean;
+  ontologyError: string | null;
 }
 
 export const useSessionStore = create<SessionStore>((set, getState) => ({
@@ -69,6 +75,10 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   uploadProgress: null,
   uploadError: null,
 
+  ontologyData: null,
+  ontologyLoading: false,
+  ontologyError: null,
+
   fetchSessions: async () => {
     set({ sessionsLoading: true, sessionsError: null });
     try {
@@ -88,6 +98,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       const currentSession = await get<SessionDetail>(`/sessions/${id}`);
       set({ currentSession, currentSessionLoading: false });
       await getState().fetchTurns(id);
+      await getState().fetchOntology();
     } catch {
       set({ currentSessionLoading: false });
     }
@@ -144,6 +155,23 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         uploadError: err instanceof Error ? err.message : 'Upload failed',
       });
       return null;
+    }
+  },
+
+  fetchOntology: async () => {
+    const { currentSessionId } = getState();
+    if (!currentSessionId) return;
+    set({ ontologyLoading: true, ontologyError: null });
+    try {
+      const result = await get<{ sessionId: string; maxTurn: number; data: OntologyData }>(
+        '/sessions/' + currentSessionId + '/ontology',
+      );
+      set({ ontologyData: result.data, ontologyLoading: false });
+    } catch (err) {
+      set({
+        ontologyLoading: false,
+        ontologyError: err instanceof Error ? err.message : 'Failed to load ontology',
+      });
     }
   },
 

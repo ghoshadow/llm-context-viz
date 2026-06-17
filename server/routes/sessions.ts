@@ -308,4 +308,94 @@ router.delete('/:id', (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// GET /:id/ontology
+// ---------------------------------------------------------------------------
+
+router.get('/:id/ontology', (req, res) => {
+  try {
+    const db = getDb();
+    const row = db
+      .prepare('SELECT ontology_json, max_turn FROM ontology WHERE session_id = ?')
+      .get(req.params.id) as { ontology_json: string; max_turn: number } | undefined;
+
+    if (!row) {
+      return res.status(404).json({ error: '该会话尚无本体数据。请通过 POST 上传本体 JSON。' });
+    }
+
+    const data = JSON.parse(row.ontology_json);
+    return res.json({ sessionId: req.params.id, maxTurn: row.max_turn, data });
+  } catch (err) {
+    console.error('GET /:id/ontology error:', err);
+    return res.status(500).json({ error: '获取本体数据时出错' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/ontology
+// ---------------------------------------------------------------------------
+
+router.post('/:id/ontology', (req, res) => {
+  try {
+    const db = getDb();
+    const { data } = req.body;
+
+    // Validate structure
+    if (!data || !Array.isArray(data.types) || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+      return res.status(400).json({ error: '请求体格式错误: 需要 { data: { types, nodes, edges } }' });
+    }
+
+    // Validate edge endpoints exist in nodes
+    const nodeIds = new Set(data.nodes.map((n: { id: string }) => n.id));
+    for (const edge of data.edges) {
+      if (!nodeIds.has(edge.s)) {
+        return res.status(400).json({ error: `边引用未知源节点: ${edge.s}` });
+      }
+      if (!nodeIds.has(edge.t)) {
+        return res.status(400).json({ error: `边引用未知目标节点: ${edge.t}` });
+      }
+    }
+
+    // Verify session exists
+    const session = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(req.params.id);
+    if (!session) {
+      return res.status(404).json({ error: '会话不存在' });
+    }
+
+    // Compute maxTurn from nodes
+    const maxTurn = Math.max(...data.nodes.map((n: { firstTurn: number }) => n.firstTurn), 1);
+
+    // Upsert
+    db.prepare(
+      `INSERT OR REPLACE INTO ontology (session_id, ontology_json, max_turn, updated_at)
+       VALUES (?, ?, ?, datetime('now'))`,
+    ).run(req.params.id, JSON.stringify(data), maxTurn);
+
+    return res.json({ sessionId: req.params.id, maxTurn, data });
+  } catch (err) {
+    console.error('POST /:id/ontology error:', err);
+    return res.status(500).json({ error: '保存本体数据时出错' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /:id/ontology
+// ---------------------------------------------------------------------------
+
+router.delete('/:id/ontology', (req, res) => {
+  try {
+    const db = getDb();
+    const result = db.prepare('DELETE FROM ontology WHERE session_id = ?').run(req.params.id);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: '本体数据不存在' });
+    }
+
+    return res.json({ deleted: true });
+  } catch (err) {
+    console.error('DELETE /:id/ontology error:', err);
+    return res.status(500).json({ error: '删除本体数据时出错' });
+  }
+});
+
 export default router;

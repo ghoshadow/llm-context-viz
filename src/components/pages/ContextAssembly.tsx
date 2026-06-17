@@ -734,6 +734,18 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
           {!embedded && (
             <a
               href="#"
+              onClick={(e) => { e.preventDefault(); setPage('ontology'); }}
+              style={{
+                textDecoration: 'none', display: 'flex', alignItems: 'center',
+                border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 10,
+                padding: '11px 15px', background: SEMANTIC.innerCardBg,
+                color: SEMANTIC.textSecondary, fontSize: 12.5, height: 'fit-content',
+              }}
+            >本体建模</a>
+          )}
+          {!embedded && (
+            <a
+              href="#"
               onClick={(e) => { e.preventDefault(); setPage('inspector'); }}
               style={{
                 textDecoration: 'none', display: 'flex', alignItems: 'center',

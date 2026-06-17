@@ -82,6 +82,14 @@ export function initDb(): void {
 
     CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id);
 
+    CREATE TABLE IF NOT EXISTS ontology (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      ontology_json TEXT NOT NULL,
+      max_turn INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS scanned_files (
       path TEXT PRIMARY KEY,
       name TEXT NOT NULL,
