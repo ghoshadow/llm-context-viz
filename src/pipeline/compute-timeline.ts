@@ -85,8 +85,10 @@ function isTaskTool(name: string): boolean {
 }
 
 function isSubAgentTool(name: string): boolean {
-  // Agent, Workflow (both spawn sub-agents) and Task* management commands
-  return name === 'Agent' || name === 'Workflow' || isTaskTool(name);
+  // Only Agent and Workflow actually spawn sub-agents.
+  // Task* tools (TaskCreate, TaskUpdate, etc.) are management commands,
+  // not sub-agent spawns.
+  return name === 'Agent' || name === 'Workflow';
 }
 
 // ---------------------------------------------------------------------------
