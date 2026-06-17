@@ -52,29 +52,40 @@ export interface TurnContextEntry {
 // ---------------------------------------------------------------------------
 // Estimated system-module character sizes
 // ---------------------------------------------------------------------------
-// SYS_PROMPT and TOOL_DEFS are calibrated from a real API request capture
-// (Claude Code v2.1.170, deepseek-v4-pro). The others are fallback defaults
-// that get replaced when the JSONL contains real payloads (skill_listing,
-// mcp_instructions_delta, task_reminder, etc.).
+// Defaults calibrated from a real API request capture (Claude Code v2.1.170,
+// deepseek-v4-pro). These can be overridden by uploading a capture via the
+// /api/calibrate endpoint, which writes system-constants.json.
 //
 // Measured from proxy capture:
 //   system blocks:  5,768 chars (billing 85 + agent 62 + harness 5,621)
 //   tools JSON:    98,949 chars (full JSON Schema for all ~50 tools)
 
-const SYS_PROMPT_FALLBACK_CHARS  = 5768;
-const TOOL_DEFS_FALLBACK_CHARS   = 98949;
+let SYS_PROMPT_FALLBACK_CHARS  = 5768;
+let TOOL_DEFS_FALLBACK_CHARS   = 98949;
 const SKILLS_FALLBACK_CHARS      = 9122;
 const MCP_FALLBACK_CHARS         = 222;
 const REMINDERS_FALLBACK_CHARS   = 409;
-
-// <system-reminder> chrome text (headers, environment info, boilerplate)
-// that wraps around the CLAUDE.md / skills / MCP content inside the
-// first user message. Measured from proxy capture (v2.1.170).
-const SYSTEM_REMINDER_CHROME_CHARS = 612;
+let SYSTEM_REMINDER_CHROME_CHARS = 612;
 
 // MEMORY is set at runtime from actual CLAUDE.md files on disk.
-// The default (2474) is only used if the files can't be read.
 let MEMORY_FALLBACK_CHARS = 2474;
+
+// Load calibrated constants from disk if available (server-side only).
+// Use a plain function call so this works in both CJS and ESM contexts.
+(function loadCalibratedConstants() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('fs');
+    const path = require('path');
+    const constantsPath = path.join(__dirname, 'system-constants.json');
+    if (fs.existsSync(constantsPath)) {
+      const data = JSON.parse(fs.readFileSync(constantsPath, 'utf-8'));
+      if (data.SYS_PROMPT_FALLBACK_CHARS) SYS_PROMPT_FALLBACK_CHARS = data.SYS_PROMPT_FALLBACK_CHARS;
+      if (data.TOOL_DEFS_FALLBACK_CHARS) TOOL_DEFS_FALLBACK_CHARS = data.TOOL_DEFS_FALLBACK_CHARS;
+      if (data.SYSTEM_REMINDER_CHROME_CHARS) SYSTEM_REMINDER_CHROME_CHARS = data.SYSTEM_REMINDER_CHROME_CHARS;
+    }
+  } catch { /* browser-side or file not found — use defaults */ }
+})();
 
 export function setMemoryChars(chars: number): void {
   if (chars > 0) MEMORY_FALLBACK_CHARS = chars;

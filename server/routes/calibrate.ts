@@ -1,0 +1,78 @@
+import { Router } from 'express';
+import multer from 'multer';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { fileURLToPath } from 'url';
+import { extractConstants, type ExtractedConstants } from '../../src/pipeline/extract-constants';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = join(__filename, '..', '..');
+
+const upload = multer({ dest: '/tmp/claude-trace-uploads' });
+const router = Router();
+
+// Constants file path (next to compute-context.ts)
+const CONSTANTS_FILE = join(__dirname, '..', '..', 'src', 'pipeline', 'system-constants.json');
+
+// ── POST /calibrate — upload captured API log and extract constants ──
+
+router.post('/calibrate', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: '缺少文件' });
+    }
+
+    const extracted = extractConstants(req.file.path);
+    if (!extracted) {
+      return res.status(400).json({ error: '未找到有效的 API 请求数据。请确认文件是通过 transparent-proxy.js 截获的。' });
+    }
+
+    return res.json(extracted);
+  } catch (err) {
+    return res.status(500).json({ error: '解析失败: ' + (err as Error).message });
+  }
+});
+
+// ── PUT /calibrate/apply — save extracted constants to disk ──
+
+router.put('/calibrate/apply', (req, res) => {
+  try {
+    const body = req.body as { summary?: ExtractedConstants['summary']; ccVersion?: string; model?: string };
+    if (!body.summary) {
+      return res.status(400).json({ error: '缺少 summary 字段' });
+    }
+
+    const data = {
+      appliedAt: new Date().toISOString(),
+      ccVersion: body.ccVersion || 'unknown',
+      model: body.model || 'unknown',
+      ...body.summary,
+    };
+
+    writeFileSync(CONSTANTS_FILE, JSON.stringify(data, null, 2) + '\n');
+    return res.json({ ok: true, path: CONSTANTS_FILE });
+  } catch (err) {
+    return res.status(500).json({ error: '保存失败: ' + (err as Error).message });
+  }
+});
+
+// ── GET /calibrate/current — read current calibrated constants ──
+
+router.get('/calibrate/current', (_req, res) => {
+  try {
+    if (existsSync(CONSTANTS_FILE)) {
+      const data = JSON.parse(readFileSync(CONSTANTS_FILE, 'utf-8'));
+      return res.json(data);
+    }
+    return res.json({
+      note: '尚未校准。使用 compute-context.ts 中的硬编码常量。',
+      SYS_PROMPT_FALLBACK_CHARS: 5768,
+      TOOL_DEFS_FALLBACK_CHARS: 98949,
+      SYSTEM_REMINDER_CHROME_CHARS: 612,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: '读取失败: ' + (err as Error).message });
+  }
+});
+
+export default router;

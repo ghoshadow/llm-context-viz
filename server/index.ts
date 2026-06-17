@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 
 import sessionsRouter from './routes/sessions';
 import scannerRouter from './routes/scanner';
+import calibrateRouter from './routes/calibrate';
 import { initDb, migrate } from './db';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,6 +31,7 @@ app.use(express.json({ limit: '50mb' }));
 // API routes
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/scanner', scannerRouter);
+app.use('/api/calibrate', calibrateRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', db: 'connected' });
