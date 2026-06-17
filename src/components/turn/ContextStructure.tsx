@@ -33,7 +33,7 @@ export default function ContextStructure({
       op: hoveredCategory && hoveredCategory !== k ? 0.28 : 1,
       title: `${LABELS[k]} — ${fmt(comp[k] ?? 0)} tok`,
     }));
-  }, [order, comp, cumTotal, compSum, scale, hoveredCategory]);
+  }, [order, comp, cumTotal, hoveredCategory]);
 
   const legendRows = useMemo(() => {
     return order.map((k) => ({
@@ -41,11 +41,11 @@ export default function ContextStructure({
       label: LABELS[k] ?? k,
       color: COLORS[k] ?? 'oklch(0.5 0 0)',
       tokensFmt: fmt(comp[k] ?? 0),
-      pctFmt: (((comp[k] ?? 0) / total) * 100).toFixed(1) + '%',
+      pctFmt: (((comp[k] ?? 0) / cumTotal) * 100).toFixed(1) + '%',
       estBadge: EST.has(k),
       op: hoveredCategory && hoveredCategory !== k ? 0.28 : 1,
     }));
-  }, [order, comp, total, hoveredCategory]);
+  }, [order, comp, cumTotal, hoveredCategory]);
 
   const over = cumTotal > WINDOW;
   const overflowNote = over
