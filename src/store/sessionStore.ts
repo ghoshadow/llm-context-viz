@@ -51,6 +51,7 @@ export interface SessionStore {
   ontologyData: OntologyData | null;
   ontologyLoading: boolean;
   ontologyError: string | null;
+  ontologyFetched: boolean;
 }
 
 export const useSessionStore = create<SessionStore>((set, getState) => ({
@@ -78,6 +79,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   ontologyData: null,
   ontologyLoading: false,
   ontologyError: null,
+  ontologyFetched: false,
 
   fetchSessions: async () => {
     set({ sessionsLoading: true, sessionsError: null });
@@ -93,7 +95,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   },
 
   selectSession: async (id: string) => {
-    set({ currentSessionId: id, currentSessionLoading: true, ontologyData: null, ontologyError: null });
+    set({ currentSessionId: id, currentSessionLoading: true, ontologyData: null, ontologyError: null, ontologyFetched: false });
     try {
       const currentSession = await get<SessionDetail>(`/sessions/${id}`);
       set({ currentSession, currentSessionLoading: false });
@@ -166,14 +168,14 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       const result = await get<{ sessionId: string; maxTurn: number; data: OntologyData }>(
         '/sessions/' + currentSessionId + '/ontology',
       );
-      set({ ontologyData: result.data, ontologyLoading: false });
+      set({ ontologyData: result.data, ontologyLoading: false, ontologyFetched: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       // 404 is expected — no ontology data yet, not an error
       if (msg.includes('404')) {
-        set({ ontologyData: null, ontologyLoading: false, ontologyError: null });
+        set({ ontologyData: null, ontologyLoading: false, ontologyError: null, ontologyFetched: true });
       } else {
-        set({ ontologyLoading: false, ontologyError: msg || 'Failed to load ontology' });
+        set({ ontologyLoading: false, ontologyError: msg || 'Failed to load ontology', ontologyFetched: true });
       }
     }
   },

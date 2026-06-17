@@ -282,11 +282,18 @@ export function enrichWithSubAgents(turns: any[], sessDir: string) {
         ? turns[turns.indexOf(turn) + 1]!.ts : '9999';
       if (sa.firstTs >= turnEnd) continue;
 
-      // Find the closest s-type segment before the sub-agent start
+      // Segment timestamp = tool RESULT time. Sub-agent starts between the
+      // tool call (spawn) and tool result (return). Match sub-agent to the
+      // s-type segment whose result time is closest AFTER the sub-agent start.
       let bestSeg: any = null;
+      let bestGap = Infinity;
+      const saMs = new Date(sa.firstTs).getTime();
       for (const seg of (turn.segs ?? [])) {
         if (seg.k !== 's') continue;
-        if (seg.ts <= sa.firstTs && (!bestSeg || seg.ts > bestSeg.ts)) {
+        const segMs = new Date(seg.ts).getTime();
+        const gap = segMs - saMs;  // positive = result after sub-agent start
+        if (gap >= 0 && gap < 300_000 && gap < bestGap) { // within 5 minutes
+          bestGap = gap;
           bestSeg = seg;
         }
       }

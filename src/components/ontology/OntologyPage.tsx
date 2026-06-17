@@ -22,6 +22,7 @@ export default function OntologyPage() {
   const ontologyData = useSessionStore((s) => s.ontologyData);
   const ontologyLoading = useSessionStore((s) => s.ontologyLoading);
   const ontologyError = useSessionStore((s) => s.ontologyError);
+  const ontologyFetched = useSessionStore((s) => s.ontologyFetched);
   const fetchOntology = useSessionStore((s) => s.fetchOntology);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
 
@@ -32,15 +33,13 @@ export default function OntologyPage() {
   // ─── Data loading ──────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (currentSessionId && !ontologyData && !ontologyLoading && !ontologyError) {
+    if (currentSessionId && !ontologyData && !ontologyLoading && !ontologyFetched) {
       fetchOntology();
     }
-  }, [currentSessionId, ontologyData, ontologyLoading, ontologyError, fetchOntology]);
+  }, [currentSessionId, ontologyData, ontologyLoading, ontologyFetched, fetchOntology]);
 
   // Reset error when session changes so we retry for a new session
-  useEffect(() => {
-    // error state auto-clears on next fetchOntology call; no explicit reset needed
-  }, [currentSessionId]);
+  // (handled by selectSession clearing ontologyFetched)
 
   // Initialize activeTypes when data arrives
   useEffect(() => {
