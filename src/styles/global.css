@@ -214,7 +214,65 @@ h2 {
 }
 
 /* --------------------------------------------------------------------------
-   13. Keyframe Animations
+   13. Section Header (used in TurnInspector)
+   -------------------------------------------------------------------------- */
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.section-header .helper-text {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: oklch(0.54 0.012 265);
+}
+
+/* --------------------------------------------------------------------------
+   14. Legend Row (used in TurnInspector context structure)
+   -------------------------------------------------------------------------- */
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid oklch(0.26 0.012 265 / 0.5);
+  cursor: default;
+}
+
+.legend-row .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.legend-row .legend-label { font-size: 12.5px; flex: 1; color: oklch(0.82 0.01 265); }
+.legend-row .legend-badge { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: oklch(0.50 0.012 265); }
+.legend-row .legend-tokens { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: oklch(0.88 0.01 265); text-align: right; }
+.legend-row .legend-pct { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: oklch(0.60 0.012 265); text-align: right; }
+
+/* --------------------------------------------------------------------------
+   15. Header Bar (used in TurnInspector page header)
+   -------------------------------------------------------------------------- */
+
+.header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+  border-bottom: 1px solid oklch(0.30 0.014 265);
+  padding-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.header-bar .tag { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.header-bar .tag-dot { width: 9px; height: 9px; border-radius: 2px; background: oklch(0.74 0.13 60); box-shadow: 0 0 12px oklch(0.74 0.13 60 / 0.7); }
+.header-bar .tag-text { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: oklch(0.64 0.012 265); }
+.header-bar .subtitle { margin: 12px 0 0; font-size: 14.5px; line-height: 1.7; color: oklch(0.66 0.012 265); max-width: 600px; }
+.header-bar .subtitle strong { color: oklch(0.88 0.01 265); font-weight: 600; }
+
+/* --------------------------------------------------------------------------
+   16. Keyframe Animations
    -------------------------------------------------------------------------- */
 
 @keyframes spin {
