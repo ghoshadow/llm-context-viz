@@ -272,26 +272,27 @@ export function enrichWithSubAgents(turns: any[], sessDir: string) {
 
   if (subAgents.length === 0) return;
 
-  // Match sub-agents to turns by timestamp
-  for (let i = 0; i < turns.length; i++) {
-    const turn = turns[i]!;
-    const turnEnd = (i + 1 < turns.length) ? turns[i + 1]!.ts : '9999';
-    for (const sa of subAgents) {
-      if (sa.firstTs && sa.firstTs >= turn.ts && sa.firstTs < turnEnd) {
-        if (!(turn as any)._subAgents) (turn as any)._subAgents = [];
-        (turn as any)._subAgents.push(sa);
-      }
-    }
-  }
-
-  // Embed per-turn sub-agent summaries into s-type segments
+  // Match sub-agents to specific s-type segments by timestamp proximity.
+  // A sub-agent is associated with the most recent s-type segment (Agent/Workflow
+  // spawn call) whose timestamp is <= the sub-agent's start time.
   for (const turn of turns) {
-    const agents = (turn as any)._subAgents as any[] | undefined;
-    if (!agents || agents.length === 0) continue;
-    const segs = turn.segs ?? [];
-    for (const seg of segs) {
-      if (seg.k === 's' && seg.det) {
-        seg.det.subAgents = agents;
+    for (const sa of subAgents) {
+      if (!sa.firstTs || sa.firstTs < turn.ts) continue;
+      const turnEnd = turns.indexOf(turn) + 1 < turns.length
+        ? turns[turns.indexOf(turn) + 1]!.ts : '9999';
+      if (sa.firstTs >= turnEnd) continue;
+
+      // Find the closest s-type segment before the sub-agent start
+      let bestSeg: any = null;
+      for (const seg of (turn.segs ?? [])) {
+        if (seg.k !== 's') continue;
+        if (seg.ts <= sa.firstTs && (!bestSeg || seg.ts > bestSeg.ts)) {
+          bestSeg = seg;
+        }
+      }
+      if (bestSeg && bestSeg.det) {
+        if (!bestSeg.det.subAgents) bestSeg.det.subAgents = [];
+        bestSeg.det.subAgents.push(sa);
       }
     }
   }

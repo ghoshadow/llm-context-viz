@@ -32,10 +32,15 @@ export default function OntologyPage() {
   // ─── Data loading ──────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (currentSessionId && !ontologyData && !ontologyLoading) {
+    if (currentSessionId && !ontologyData && !ontologyLoading && !ontologyError) {
       fetchOntology();
     }
-  }, [currentSessionId, ontologyData, ontologyLoading, fetchOntology]);
+  }, [currentSessionId, ontologyData, ontologyLoading, ontologyError, fetchOntology]);
+
+  // Reset error when session changes so we retry for a new session
+  useEffect(() => {
+    // error state auto-clears on next fetchOntology call; no explicit reset needed
+  }, [currentSessionId]);
 
   // Initialize activeTypes when data arrives
   useEffect(() => {

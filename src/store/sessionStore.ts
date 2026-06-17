@@ -93,7 +93,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   },
 
   selectSession: async (id: string) => {
-    set({ currentSessionId: id, currentSessionLoading: true });
+    set({ currentSessionId: id, currentSessionLoading: true, ontologyData: null, ontologyError: null });
     try {
       const currentSession = await get<SessionDetail>(`/sessions/${id}`);
       set({ currentSession, currentSessionLoading: false });
@@ -168,10 +168,13 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       );
       set({ ontologyData: result.data, ontologyLoading: false });
     } catch (err) {
-      set({
-        ontologyLoading: false,
-        ontologyError: err instanceof Error ? err.message : 'Failed to load ontology',
-      });
+      const msg = err instanceof Error ? err.message : '';
+      // 404 is expected — no ontology data yet, not an error
+      if (msg.includes('404')) {
+        set({ ontologyData: null, ontologyLoading: false, ontologyError: null });
+      } else {
+        set({ ontologyLoading: false, ontologyError: msg || 'Failed to load ontology' });
+      }
     }
   },
 
