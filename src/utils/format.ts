@@ -24,7 +24,7 @@ export function fmt(n: number): string {
  */
 export function fmtK(n: number): string {
   if (n >= 100000) return Math.round(n / 1000) + 'K';
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  if (n >= 1000) return (n / 1000).toFixed(2) + 'K';
   return String(Math.round(n));
 }
 
@@ -46,7 +46,7 @@ export function fmtDur(ms: number): string {
     const s = Math.round((ms % 60000) / 1000);
     return s > 0 ? `${m}分${s}秒` : `${m}分`;
   }
-  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
+  if (ms >= 1000) return (ms / 1000).toFixed(2) + 's';
   return Math.round(ms) + 'ms';
 }
 
@@ -56,7 +56,7 @@ export function fmtDur(ms: number): string {
  * @example fmtPct(3, 7) => "42.9%"
  */
 export function fmtPct(n: number, total: number): string {
-  return ((n / total) * 100).toFixed(1) + '%';
+  return ((n / total) * 100).toFixed(2) + '%';
 }
 
 /**

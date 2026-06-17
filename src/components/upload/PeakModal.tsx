@@ -40,7 +40,7 @@ export default function PeakModal({
     series: [],
   };
 
-  const sub = `第 ${turnIndex} 轮 · 完整输入 ${fmt(fullCtx)} tok · 计费 ${fmt(peakTokens)} tok${cacheHit > 0 ? ` · 缓存 ${fmt(cacheHit)}（${((cacheHit / peakTokens) * 100).toFixed(0)}%）` : ''}`;
+  const sub = `第 ${turnIndex} 轮 · 完整输入 ${fmt(fullCtx)} tok · 计费 ${fmt(peakTokens)} tok${cacheHit > 0 ? ` · 缓存 ${fmt(cacheHit)}（${((cacheHit / peakTokens) * 100).toFixed(2)}%）` : ''}`;
 
   return (
     <div style={{
@@ -71,7 +71,7 @@ export default function PeakModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: 'oklch(0.74 0.13 60)', boxShadow: '0 0 10px oklch(0.74 0.13 60 / 0.7)' }} />
             <span style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.91 0.01 265)' }}>{isCum ? '累计拼装上下文透视' : '本轮上下文透视'}</span>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'oklch(0.55 0.012 265)' }}>{isCum ? `第 ${turnIndex} 轮 · 累计拼装 ${fmt(fullCtx)} tok · 缓存 ${fmt(cacheHit)}（${((cacheHit / fullCtx) * 100).toFixed(0)}%）` : sub}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'oklch(0.55 0.012 265)' }}>{isCum ? `第 ${turnIndex} 轮 · 累计拼装 ${fmt(fullCtx)} tok · 缓存 ${fmt(cacheHit)}（${((cacheHit / fullCtx) * 100).toFixed(2)}%）` : sub}</span>
           </div>
           <button onClick={onClose} title="关闭" style={{
             border: `1px solid oklch(0.32 0.014 265)`, borderRadius: 8,

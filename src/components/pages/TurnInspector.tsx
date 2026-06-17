@@ -214,7 +214,7 @@ function ContextStructure({
     label: LABELS[k] ?? k,
     color: COLORS[k] ?? 'oklch(0.5 0 0)',
     tokensFmt: fmt(comp[k]!),
-    pctFmt: ((comp[k]! / cumTotal) * 100).toFixed(1) + '%',
+    pctFmt: ((comp[k]! / cumTotal) * 100).toFixed(2) + '%',
     estimated: EST.has(k),
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
   }));
@@ -222,7 +222,7 @@ function ContextStructure({
   const over = cumTotal > ctxLimit;
   const overflowNote = over
     ? `累计拼装内容已超过 ${fmtK(ctxLimit)} 上下文窗口 —— 实际请求依靠缓存与压缩才能容纳，峰值输入仅 ${fmt(maxInput)} tok。`
-    : `本轮峰值输入 ${fmt(maxInput)} tok，占 ${fmtK(ctxLimit)} 窗口的 ${((maxInput / ctxLimit) * 100).toFixed(0)}%。`;
+    : `本轮峰值输入 ${fmt(maxInput)} tok，占 ${fmtK(ctxLimit)} 窗口的 ${((maxInput / ctxLimit) * 100).toFixed(2)}%。`;
 
   return (
     <div
@@ -1377,7 +1377,7 @@ export default function TurnInspector() {
                   <div className="stat-card">
                     <div className="stat-value">{fmt(currentTurn.cum_total)}</div>
                     <div className="stat-label">
-                      累计拼装{(currentTurn.cum_cache_hit ?? 0) > 0 ? ` · 缓存 ${fmt(currentTurn.cum_cache_hit ?? 0)}（${(((currentTurn.cum_cache_hit ?? 0) / currentTurn.cum_total) * 100).toFixed(0)}%）` : ''}
+                      累计拼装{(currentTurn.cum_cache_hit ?? 0) > 0 ? ` · 缓存 ${fmt(currentTurn.cum_cache_hit ?? 0)}（${(((currentTurn.cum_cache_hit ?? 0) / currentTurn.cum_total) * 100).toFixed(2)}%）` : ''}
                       <span
                         style={{ marginLeft: 4, color: 'oklch(0.74 0.13 60)', cursor: 'pointer', fontSize: 10, textDecoration: 'underline' }}
                         onClick={(e) => { e.stopPropagation(); setShowCumDetail(true); }}

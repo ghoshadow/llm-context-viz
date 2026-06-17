@@ -41,7 +41,7 @@ export default function ContextStructure({
       label: LABELS[k] ?? k,
       color: COLORS[k] ?? 'oklch(0.5 0 0)',
       tokensFmt: fmt(comp[k] ?? 0),
-      pctFmt: (((comp[k] ?? 0) / cumTotal) * 100).toFixed(1) + '%',
+      pctFmt: (((comp[k] ?? 0) / cumTotal) * 100).toFixed(2) + '%',
       estBadge: EST.has(k),
       op: hoveredCategory && hoveredCategory !== k ? 0.28 : 1,
     }));
@@ -50,7 +50,7 @@ export default function ContextStructure({
   const over = cumTotal > WINDOW;
   const overflowNote = over
     ? `累计拼装内容已超过 ${fmtK(WINDOW)} 上下文窗口 —— 实际请求依靠缓存与压缩才能容纳，峰值输入仅 ${fmt(maxInput)} tok。`
-    : `本轮峰值输入 ${fmt(maxInput)} tok，占 ${fmtK(WINDOW)} 窗口的 ${((maxInput / WINDOW) * 100).toFixed(0)}%。`;
+    : `本轮峰值输入 ${fmt(maxInput)} tok，占 ${fmtK(WINDOW)} 窗口的 ${((maxInput / WINDOW) * 100).toFixed(2)}%。`;
 
   const overflowColor = over ? OVERFLOW.text : OK_STATE.text;
   const overflowBg = over ? OVERFLOW.bg : OK_STATE.bg;

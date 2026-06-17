@@ -132,14 +132,14 @@ function GrowthChart({
       const p = series[k]!;
       const cmd = k === 0 ? 'M' : 'L';
       const total = p.input + p.output;
-      asmPath += `${cmd}${X(p.i).toFixed(1)} ${Y(p.assembled).toFixed(1)} `;
-      inpPath += `${cmd}${X(p.i).toFixed(1)} ${Y(p.input).toFixed(1)} `;
-      outPath += `${cmd}${X(p.i).toFixed(1)} ${Y(p.output).toFixed(1)} `;
-      totPath += `${cmd}${X(p.i).toFixed(1)} ${Y(total).toFixed(1)} `;
+      asmPath += `${cmd}${X(p.i).toFixed(2)} ${Y(p.assembled).toFixed(2)} `;
+      inpPath += `${cmd}${X(p.i).toFixed(2)} ${Y(p.input).toFixed(2)} `;
+      outPath += `${cmd}${X(p.i).toFixed(2)} ${Y(p.output).toFixed(2)} `;
+      totPath += `${cmd}${X(p.i).toFixed(2)} ${Y(total).toFixed(2)} `;
     }
     const lastX = X(series[series.length - 1]!.i);
     const firstX = X(series[0]!.i);
-    areaPath = asmPath + `L${lastX.toFixed(1)} ${H} L${firstX.toFixed(1)} ${H} Z`;
+    areaPath = asmPath + `L${lastX.toFixed(2)} ${H} L${firstX.toFixed(2)} ${H} Z`;
   }
 
   const refY = Y(contextLimit);
@@ -265,7 +265,7 @@ function GrowthChart({
         style={{
           position: 'absolute',
           left: 0,
-          top: `${((1 - 200000 / VMAX) * 100).toFixed(1)}%`,
+          top: `${((1 - 200000 / VMAX) * 100).toFixed(2)}%`,
           fontFamily: "'IBM Plex Mono', monospace",
           fontSize: 10,
           color: CHART_COLORS.refLine,
@@ -280,7 +280,7 @@ function GrowthChart({
         style={{
           position: 'absolute',
           left: 0,
-          top: `${((1 - 100000 / VMAX) * 100).toFixed(1)}%`,
+          top: `${((1 - 100000 / VMAX) * 100).toFixed(2)}%`,
           fontFamily: "'IBM Plex Mono', monospace",
           fontSize: 10,
           color: SEMANTIC.textMuted3,
@@ -431,7 +431,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
       label: c.label,
       color: COLORS[c.key] ?? 'oklch(0.5 0 0)',
       tokensFmt: fmt(c.tokens),
-      pctFmt: ((c.tokens / CATSUM) * 100).toFixed(1) + '%',
+      pctFmt: ((c.tokens / CATSUM) * 100).toFixed(2) + '%',
       barPct: (c.tokens / maxTok) * 100,
       op: opFor(c.key),
       onEnter: setH[c.key]!,
@@ -462,7 +462,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
         top: cr.top,
         w: cr.w,
         h: cr.h,
-        pctFmt: ((cr.value / CATSUM) * 100).toFixed(1) + '%',
+        pctFmt: ((cr.value / CATSUM) * 100).toFixed(2) + '%',
         labelSize: cr.w > 30 ? 14 : big ? 12 : tiny ? 8 : 11,
         labelOp: med ? 1 : 0,
         valOp: cr.w > 11 && cr.h > 9 ? 1 : 0,
@@ -501,12 +501,12 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
         desc: meta.desc,
         accent: meta.accent,
         tokensFmt: fmt(gtot),
-        pctFmt: ((gtot / CATSUM) * 100).toFixed(0) + '%',
+        pctFmt: ((gtot / CATSUM) * 100).toFixed(2) + '%',
         conic: `conic-gradient(${stops.join(',')})`,
         members: mem.map((c) => ({
           label: c.label,
           color: COLORS[c.key] ?? 'oklch(0.5 0 0)',
-          pctFmt: ((c.tokens / CATSUM) * 100).toFixed(1) + '%',
+          pctFmt: ((c.tokens / CATSUM) * 100).toFixed(2) + '%',
         })),
       };
     });
@@ -537,7 +537,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
     const peakTurnIdx = session.peak_turn_idx ?? peakIndex;
     const peakStep = session.peak_step ?? 0;
     const contextLimitFmt = fmtK(contextLimit);
-    const windowPctFmt = ((peakTokens / contextLimit) * 100).toFixed(0) + '%';
+    const windowPctFmt = ((peakTokens / contextLimit) * 100).toFixed(2) + '%';
     const freeTokensFmt = fmt(Math.max(0, contextLimit - peakTokens));
 
     return {
