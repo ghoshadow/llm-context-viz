@@ -23,7 +23,7 @@ export default function ContextStructure({
     .filter((k) => (comp[k] ?? 0) > 0)
     .sort((a, b) => (comp[b] ?? 0) - (comp[a] ?? 0));
 
-  const total = cumTotal || 1;
+  const total = Object.values(comp).reduce((a, b) => a + b, 0) || 1;
   const barSegs = useMemo(() => {
     return order.map((k) => ({
       key: k,
