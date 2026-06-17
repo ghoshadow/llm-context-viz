@@ -102,9 +102,9 @@ function extractToolResultText(block: ContentBlock): string {
 // Helpers: tool-name classification
 // ---------------------------------------------------------------------------
 
-/** Returns true if the tool name indicates a sub-agent (Task family). */
+/** Returns true if the tool name indicates a sub-agent spawn. */
 function isTaskTool(name: string): boolean {
-  return name.startsWith('Task');
+  return name.startsWith('Task') || name === 'Agent' || name === 'Workflow';
 }
 
 // ---------------------------------------------------------------------------
@@ -263,8 +263,10 @@ function processGroup(
   }
 
   // ---- 3. Tool-result follow-up messages ----
-  if (typeof userContent !== 'string') {
-    for (const block of userContent) {
+  for (const trLine of [group.userLine, ...(group.toolResultLines ?? [])]) {
+    const content = trLine?.message?.content;
+    if (typeof content === 'string' || !content) continue;
+    for (const block of content) {
       if (block.type === 'tool_result') {
         const resultText = extractToolResultText(block);
         if (!resultText) continue;
