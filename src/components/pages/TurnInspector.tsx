@@ -176,6 +176,7 @@ interface ContextStructureProps {
   comp: Record<string, number>;
   cumTotal: number;
   maxInput: number;
+  contextLimit: number;
   hoveredComp: string | null;
   onCompEnter: (key: string) => void;
   onCompLeave: () => void;
@@ -185,6 +186,7 @@ function ContextStructure({
   comp,
   cumTotal,
   maxInput,
+  contextLimit: ctxLimit,
   hoveredComp,
   onCompEnter,
   onCompLeave,
@@ -217,10 +219,10 @@ function ContextStructure({
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
   }));
 
-  const over = cumTotal > WINDOW;
+  const over = cumTotal > ctxLimit;
   const overflowNote = over
-    ? `累计拼装内容已超过 ${fmtK(WINDOW)} 上下文窗口 —— 实际请求依靠缓存与压缩才能容纳，峰值输入仅 ${fmt(maxInput)} tok。`
-    : `本轮峰值输入 ${fmt(maxInput)} tok，占 ${fmtK(WINDOW)} 窗口的 ${((maxInput / WINDOW) * 100).toFixed(0)}%。`;
+    ? `累计拼装内容已超过 ${fmtK(ctxLimit)} 上下文窗口 —— 实际请求依靠缓存与压缩才能容纳，峰值输入仅 ${fmt(maxInput)} tok。`
+    : `本轮峰值输入 ${fmt(maxInput)} tok，占 ${fmtK(ctxLimit)} 窗口的 ${((maxInput / ctxLimit) * 100).toFixed(0)}%。`;
 
   return (
     <div
@@ -1390,6 +1392,7 @@ export default function TurnInspector() {
                 comp={turnDetail.comp}
                 cumTotal={currentTurn.cum_total}
                 maxInput={currentTurn.max_input}
+                contextLimit={contextLimit}
                 hoveredComp={hoveredComp}
                 onCompEnter={handleCompEnter}
                 onCompLeave={handleCompLeave}
