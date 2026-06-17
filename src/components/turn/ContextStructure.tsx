@@ -4,8 +4,6 @@ import { fmt, fmtK } from '../../utils/format';
 
 const WINDOW = 200000;
 
-const WINDOW = 200000;
-
 export interface ContextStructureProps {
   comp: Record<string, number>;
   cumTotal: number;
