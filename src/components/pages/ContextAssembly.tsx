@@ -919,8 +919,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
           <div
             style={{
               width: `${derived.freePct}%`,
-              background:
-                'repeating-linear-gradient(135deg, oklch(0.24 0.01 265) 0 7px, oklch(0.20 0.01 265) 7px 14px)',
+              background: SEMANTIC.freeStripes,
             }}
           />
         </div>

@@ -101,7 +101,7 @@ export const SEMANTIC: Record<string, string> = {
   barInsetBoxShadow: 'inset 0 1px 0 oklch(1 0 0 / 0.04)',
   barSeparator:   'oklch(0.16 0.008 265 / 0.5)',    // Segment divider
   barSeparator2:  'oklch(0.16 0.008 265 / 0.45)',   // Lighter segment divider
-  freeStripes:    'repeating-linear-gradient(135deg, oklch(0.24 0.01 265) 0 7px, oklch(0.20 0.01 265) 7px 14px)',
+  freeStripes:    'repeating-linear-gradient(135deg, oklch(0.26 0.012 265) 0 7px, oklch(0.18 0.01 265) 7px 14px)',
 
   // Donut center
   donutCenter:   'oklch(0.185 0.012 265)',
