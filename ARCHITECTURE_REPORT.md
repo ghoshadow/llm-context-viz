@@ -353,18 +353,3 @@ computeTimeline:
 │     API Response → Frontend Store → Component Render
 └──────────────────────────────────────────────────────┘
 ```
-
----
-
-## 7. 已知债务项
-
-| 项目 | 文件 | 说明 |
-|------|------|------|
-| 重复 fmtK | ToolDrilldown.tsx | 与 format.ts 的 fmtK 功能重复，舍入逻辑不同 |
-| 重复 fmtDate | ExecutionTimeline.tsx | 与 format.ts 的 fmtDate 功能重复 |
-| 样式重复 | global.css ↔ 各组件 | CSS 类与 inline style 重复定义了色彩/尺寸 |
-| hardcoded 常量 | theme.ts | WINDOW=200K 硬编码，实际不同模型窗口不同 |
-| upload 路由缺 enrichment | sessions.ts | 上传不调用 enrichWithSubAgents |
-| cumTools 冗余 | 前端 | 累计浮窗同时支持 cum_tools_json 和 cumTools 两种格式 |
-| PeakDataProps | ContextAssembly.tsx | session 类型为 Record<string,any>，缺少类型安全 |
-| assignDurations 末尾段 | compute-timeline.ts | ~30 tok/s 估算粗糙，不同模型速率差异大 |

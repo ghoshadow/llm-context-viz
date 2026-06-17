@@ -4,6 +4,8 @@ import { fmt, fmtK } from '../../utils/format';
 
 const WINDOW = 200000;
 
+const WINDOW = 200000;
+
 export interface ContextStructureProps {
   comp: Record<string, number>;
   cumTotal: number;
@@ -117,6 +119,15 @@ export default function ContextStructure({
             }}
           />
         ))}
+        {/* Free space — unused portion of window with diagonal stripe pattern */}
+        {(() => {
+          const usedPct = barSegs.reduce((s, seg) => s + seg.pct, 0);
+          const freePct = Math.max(0, 100 - usedPct);
+          if (freePct > 0.1) {
+            return <div style={{ width: `${freePct}%`, background: SEMANTIC.freeStripes }} />;
+          }
+          return null;
+        })()}
       </div>
 
       {/* Legend rows */}
