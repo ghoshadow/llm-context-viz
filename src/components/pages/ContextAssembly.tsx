@@ -341,9 +341,23 @@ function GrowthChart({
 // Main Component
 // ============================================================================
 
+interface PeakSessionData {
+  model: string;
+  version: string;
+  cwd: string;
+  total_requests: number;
+  peak_index: number;
+  peak_tokens: number;
+  context_limit: number;
+  peak_cache_hit?: number;
+  peak_turn_idx?: number;
+  peak_step?: number;
+  total_output?: number;
+}
+
 interface PeakDataProps {
   peakData?: {
-    session: Record<string, any>;
+    session: PeakSessionData;
     categories: ContextCategory[];
     tools: ToolAggregation[];
     series?: SeriesPoint[];
@@ -355,7 +369,7 @@ interface PeakDataProps {
 export default function ContextAssembly({ peakData, embedded, mode }: PeakDataProps = {}) {
   const isCum = mode === 'cumulative';
   const sessionFromStore = useSessionStore((s) => s.currentSession);
-  const session = peakData ? peakData.session as any : sessionFromStore;
+  const session = (peakData ? peakData.session : sessionFromStore) as PeakSessionData | any;
   const setPage = useUIStore((s) => s.setPage);
   const hoveredCategory = useUIStore((s) => s.hoveredCategory);
   const setHoveredCategory = useUIStore((s) => s.setHoveredCategory);
@@ -520,8 +534,8 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
     const peakTokensFmt = fmt(peakTokens);
     const peakCacheHit = session.peak_cache_hit ?? 0;
     const peakCacheFmt = fmt(peakCacheHit);
-    const peakTurnIdx = (session as any).peak_turn_idx ?? peakIndex;
-    const peakStep = (session as any).peak_step ?? 0;
+    const peakTurnIdx = session.peak_turn_idx ?? peakIndex;
+    const peakStep = session.peak_step ?? 0;
     const contextLimitFmt = fmtK(contextLimit);
     const windowPctFmt = ((peakTokens / contextLimit) * 100).toFixed(0) + '%';
     const freeTokensFmt = fmt(Math.max(0, contextLimit - peakTokens));

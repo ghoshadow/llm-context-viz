@@ -1444,14 +1444,10 @@ export default function TurnInspector() {
             return buildCategories(comp, currentTurn.cum_total, compSum);
           })()}
           tools={(() => {
-            // Parse cumTools if stored as JSON string from DB
-            const ct = (currentTurn as any).cum_tools_json
-              ? JSON.parse((currentTurn as any).cum_tools_json)
-              : (currentTurn as any).cumTools ?? sessionStore.currentSession?.tools ?? [];
-            if (Array.isArray(ct)) return ct;
-            return Object.entries(ct).map(([name, v]: [string, any]) => ({
+            const ct = (currentTurn as any).cum_tools_json;
+            return ct ? Object.entries(JSON.parse(ct)).map(([name, v]: [string, any]) => ({
               name, calls: v.calls ?? 0, resultTokens: v.resultTokens ?? 0, task: v.task ?? false,
-            }));
+            })) : [];
           })()}
           peakTokens={currentTurn.cum_total}
           peakIndex={currentTurnIndex ?? 0}

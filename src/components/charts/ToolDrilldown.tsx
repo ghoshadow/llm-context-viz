@@ -1,4 +1,5 @@
 import { SEMANTIC } from '../../styles/theme';
+import { fmt, fmtK } from '../../utils/format';
 
 // ============================================================================
 // ToolDrilldown — Tool I/O drilldown with horizontal bar chart
@@ -216,15 +217,6 @@ const s = {
     color: SEMANTIC.textGreen2,
   } as React.CSSProperties,
 };
-
-// ─── Helpers ───────────────────────────────────────────────────────────
-
-/** Format token count as compact shorthand (e.g. "123K", "1.2K"). */
-function fmtK(n: number): string {
-  if (n >= 100000) return Math.round(n / 1000) + 'K';
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-  return String(Math.round(n));
-}
 
 // ============================================================================
 // Component

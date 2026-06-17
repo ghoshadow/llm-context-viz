@@ -8,7 +8,7 @@ import {
   OK_STATE,
   ERROR_COLOR,
 } from '../../styles/theme';
-import { fmtDur } from '../../utils/format';
+import { fmtDur, fmtDate } from '../../utils/format';
 
 // ============================================================================
 // ExecutionTimeline — Gantt chart + step list + step detail drilldown
@@ -160,17 +160,6 @@ function buildDetailSections(det: SegmentDetail, k: string): DetailSection[] {
   return sections;
 }
 
-// ─── Format ISO timestamp to "MM-DD HH:MM" ───────────────────────────
-
-function fmtTime(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  const MM = String(d.getMonth() + 1).padStart(2, '0');
-  const DD = String(d.getDate()).padStart(2, '0');
-  const HH = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${MM}-${DD} ${HH}:${mm}`;
-}
 
 // ============================================================================
 // Style objects
@@ -585,7 +574,7 @@ export default function ExecutionTimeline({
         : ''
     : '';
 
-  const timeFmt = selectedSeg ? fmtTime(selectedSeg.ts) : '';
+  const timeFmt = selectedSeg ? fmtDate(selectedSeg.ts) : '';
 
   // ====================================================================
   // Render
