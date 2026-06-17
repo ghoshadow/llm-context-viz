@@ -138,7 +138,20 @@ export function aggregateSession(
     }
   }
 
-  const contextLimit = 200_000;
+  // Determine context window from model name
+  const MODEL_WINDOWS: Record<string, number> = {
+    'claude-sonnet': 200_000,
+    'claude-opus': 200_000,
+    'claude-haiku': 200_000,
+    'deepseek-v4': 1_000_000,
+    'deepseek-v3': 128_000,
+    'deepseek-r1': 128_000,
+  };
+  let contextLimit = 200_000;
+  const modelLower = meta.model.toLowerCase();
+  for (const [prefix, limit] of Object.entries(MODEL_WINDOWS)) {
+    if (modelLower.includes(prefix)) { contextLimit = limit; break; }
+  }
 
   // --- 2. Categories from peak composition ---
 

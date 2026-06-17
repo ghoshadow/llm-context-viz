@@ -208,7 +208,7 @@ function extractSessionTitle(jsonlContent: string): string {
 }
 
 /** Read sub-agent logs from the session directory and attach summaries to turns. */
-function enrichWithSubAgents(turns: any[], sessDir: string) {
+export function enrichWithSubAgents(turns: any[], sessDir: string) {
   const subDir = join(sessDir, 'subagents');
   if (!existsSync(subDir)) return;
 

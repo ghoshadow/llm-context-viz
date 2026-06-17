@@ -3,6 +3,10 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { getDb } from '../db';
 import { runPipeline } from '../../src/pipeline/index';
+import { enrichWithSubAgents } from './scanner';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const router = Router();
 
@@ -44,6 +48,14 @@ router.post('/upload', upload.single('file'), (req, res) => {
     const { summary, turns } = runPipeline(content, originalFilename);
 
     const sessionId = hash.substring(0, 16);
+
+    // Enrich with sub-agent data via temp file
+    try {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'llm-viz-upload-'));
+      writeFileSync(join(tmpDir, sessionId + '.jsonl'), content);
+      enrichWithSubAgents(turns as any, tmpDir);
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch { /* enrichment is best-effort */ }
 
     // Use a transaction for all inserts
     const insertSession = db.prepare(`
