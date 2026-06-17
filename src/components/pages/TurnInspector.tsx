@@ -78,6 +78,7 @@ function TurnListItem({
   onClick,
 }: TurnListItemProps) {
   const loadPct = Math.max(2, (cumTotal / ctxLimit) * 100);
+  const peakColor = maxInput >= 120000 ? 'oklch(0.76 0.13 60)' : SEMANTIC.textDesc2;
 
   return (
     <button
