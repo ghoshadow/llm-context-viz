@@ -4,7 +4,7 @@ import { join, basename } from 'path';
 import { homedir } from 'os';
 import crypto from 'crypto';
 import { getDb } from '../db';
-import { runPipeline } from '../../src/pipeline/index';
+import { runPipeline, setMemoryChars } from '../../src/pipeline/index';
 
 const router = Router();
 
@@ -288,28 +288,51 @@ export function enrichWithSubAgents(turns: any[], sessDir: string) {
       }
     }
 
-    // Direct sub-agents → timestamp matching (5-min window)
-    for (const sa of directAgents) {
-      if (!sa.firstTs || sa.firstTs < turn.ts) continue;
-      const turnEnd = turns.indexOf(turn) + 1 < turns.length
-        ? turns[turns.indexOf(turn) + 1]!.ts : '9999';
-      if (sa.firstTs >= turnEnd) continue;
-
-      let bestSeg: any = null;
-      let bestGap = Infinity;
-      const saMs = new Date(sa.firstTs).getTime();
-      for (const seg of (turn.segs ?? [])) {
+    // Direct sub-agents → match each to the LAST Agent call that
+    // happened before the sub-agent started.  This correctly assigns
+    // sub-agents to overlapping/consecutive Agent calls in the same turn.
+    if (directAgents.length > 0) {
+      // Collect all Agent call times (m-segment ts before each s-segment)
+      const agentCalls: { seg: any; callMs: number }[] = [];
+      for (let si = 0; si < (turn.segs ?? []).length; si++) {
+        const seg = turn.segs![si]!;
         if (seg.k !== 's') continue;
-        const segMs = new Date(seg.ts).getTime();
-        const gap = segMs - saMs;
-        if (gap >= 0 && gap < 300_000 && gap < bestGap) {
-          bestGap = gap;
-          bestSeg = seg;
+        // Call time = timestamp of the last m-segment before this s-segment
+        let callMs = new Date(seg.ts).getTime();
+        for (let j = si - 1; j >= 0; j--) {
+          if (turn.segs![j]!.k === 'm') {
+            callMs = new Date(turn.segs![j]!.ts).getTime();
+            break;
+          }
         }
+        agentCalls.push({ seg, callMs });
       }
-      if (bestSeg && bestSeg.det) {
-        if (!bestSeg.det.subAgents) bestSeg.det.subAgents = [];
-        bestSeg.det.subAgents.push(sa);
+
+      // Turn window: only match sub-agents that started within this turn
+      const turnStartMs = new Date(turn.ts).getTime();
+      const turnEndMs = turns.indexOf(turn) + 1 < turns.length
+        ? new Date(turns[turns.indexOf(turn) + 1]!.ts).getTime()
+        : Infinity;
+
+      for (const sa of directAgents) {
+        if (!sa.firstTs) continue;
+        const saMs = new Date(sa.firstTs).getTime();
+        if (saMs < turnStartMs || saMs >= turnEndMs) continue; // wrong turn
+
+        // Find the last Agent call that happened before this sub-agent started
+        let best: { seg: any; callMs: number } | null = null;
+        for (const ac of agentCalls) {
+          if (ac.callMs <= saMs) {
+            if (!best || ac.callMs > best.callMs) {
+              best = ac;
+            }
+          }
+        }
+
+        if (best && best.seg.det) {
+          if (!best.seg.det.subAgents) best.seg.det.subAgents = [];
+          best.seg.det.subAgents.push(sa);
+        }
       }
     }
   }
@@ -340,6 +363,26 @@ router.post('/import', (req, res) => {
     }
 
     const filename = basename(filePath);
+
+    // Read actual CLAUDE.md files to calibrate MEMORY category
+    let memChars = 0;
+    try {
+      const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
+      if (existsSync(globalMd)) {
+        memChars += readFileSync(globalMd, 'utf-8').length;
+      }
+      // Extract cwd from first JSONL line for project-level CLAUDE.md
+      const firstLine = JSON.parse(content.split('\n')[0]!);
+      const cwd = firstLine.cwd;
+      if (cwd) {
+        const projMd = join(cwd, '.claude', 'CLAUDE.md');
+        if (existsSync(projMd)) {
+          memChars += readFileSync(projMd, 'utf-8').length;
+        }
+      }
+    } catch { /* keep default */ }
+    setMemoryChars(memChars);
+
     const { summary, turns } = runPipeline(content, filename);
     const sessionId = hash.substring(0, 16);
 
@@ -387,9 +430,9 @@ router.post('/import', (req, res) => {
     const insertTurn = db.prepare(`
       INSERT INTO turns (
         id, session_id, turn_index, prompt, timestamp, asst_reqs,
-        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, cum_tools_json, dur_ms, model_ms, tool_ms, sub_ms,
+        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, cum_tools_json, compression_reset, dur_ms, model_ms, tool_ms, sub_ms,
         step_count, comp_json, delta_json, tools_json, segs_json, longest_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertTurns = db.transaction(() => {
@@ -409,6 +452,7 @@ router.post('/import', (req, res) => {
           turn.cumTotal,
           (turn as any).cumCacheHit ?? 0,
           JSON.stringify((turn as any).cumTools ?? {}),
+          (turn as any).compressionReset ? 1 : 0,
           turn.durMs,
           turn.modelMs,
           turn.toolMs,

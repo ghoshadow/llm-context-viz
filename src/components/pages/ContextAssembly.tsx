@@ -95,6 +95,7 @@ interface GrowthChartProps {
   peakTokens: number;
   peakIndex: number;
   contextLimit: number;
+  xUnit?: string;
   chartHover: { req: number; assembled: number; input: number; output: number; total: number } | null;
   onMouseMove: (e: React.MouseEvent<HTMLDivElement>) => void;
   onMouseLeave: () => void;
@@ -106,6 +107,7 @@ function GrowthChart({
   peakIndex,
   contextLimit,
   requests,
+  xUnit,
   chartHover,
   onMouseMove,
   onMouseLeave,
@@ -209,6 +211,20 @@ function GrowthChart({
           strokeLinejoin="round"
           opacity={0.85}
         />
+        {/* Data point markers */}
+        {series.map((p, k) => (
+          <g key={k}>
+            <circle cx={X(p.i)} cy={Y(p.assembled)} r={3.5}
+              fill={CHART_COLORS.assembled} stroke="oklch(0.16 0.01 265)" strokeWidth={1}
+              vectorEffect="non-scaling-stroke" />
+            <circle cx={X(p.i)} cy={Y(p.input)} r={2.5}
+              fill={CHART_COLORS.billed} stroke="oklch(0.16 0.01 265)" strokeWidth={0.8}
+              vectorEffect="non-scaling-stroke" opacity={0.85} />
+            <circle cx={X(p.i)} cy={Y(p.output)} r={2}
+              fill={CHART_COLORS.output} stroke="oklch(0.16 0.01 265)" strokeWidth={0.8}
+              vectorEffect="non-scaling-stroke" opacity={0.85} />
+          </g>
+        ))}
         {/* Reference line for context limit — rendered last to appear on top */}
         <line
           x1={0}
@@ -250,22 +266,7 @@ function GrowthChart({
         style={{
           position: 'absolute',
           left: 0,
-          top: 0,
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontSize: 10,
-          color: SEMANTIC.textMuted3,
-          transform: 'translateY(-50%)',
-          background: SEMANTIC.cardBg,
-          paddingRight: 4,
-        }}
-      >
-        {fmtK(VMAX)}
-      </span>
-      <span
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: `${((1 - 200000 / VMAX) * 100).toFixed(2)}%`,
+          top: `${((1 - contextLimit / VMAX) * 100).toFixed(2)}%`,
           fontFamily: "'IBM Plex Mono', monospace",
           fontSize: 10,
           color: CHART_COLORS.refLine,
@@ -274,7 +275,7 @@ function GrowthChart({
           paddingRight: 4,
         }}
       >
-        {fmtK(contextLimit)} ·窗口
+        {fmtK(contextLimit)} 窗口
       </span>
       <span
         style={{
@@ -318,7 +319,7 @@ function GrowthChart({
             marginBottom: 4,
           }}
         >
-          请求 #{chartHover?.req ?? ''}
+          {xUnit ?? '请求'} #{chartHover?.req ?? ''}
         </div>
         <div style={{ fontSize: 11.5, color: CHART_COLORS.assembled }}>
           已拼装 {chartHover ? fmt(chartHover.assembled) : ''}
@@ -422,7 +423,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
       onEnter: setH[c.key]!,
       title: `${c.label} — ${fmt(c.tokens)} tok`,
     }));
-    const freePct = Math.max(0, ((contextLimit - peakTokens) / contextLimit) * 100);
+    const freePct = Math.max(0, ((contextLimit - CATSUM) / contextLimit) * 100);
 
     // ── Legend rows (share of peak) ──
     const maxTok = categories[0]?.tokens ?? 1;
@@ -537,8 +538,8 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
     const peakTurnIdx = session.peak_turn_idx ?? peakIndex;
     const peakStep = session.peak_step ?? 0;
     const contextLimitFmt = fmtK(contextLimit);
-    const windowPctFmt = ((peakTokens / contextLimit) * 100).toFixed(2) + '%';
-    const freeTokensFmt = fmt(Math.max(0, contextLimit - peakTokens));
+    const windowPctFmt = ((CATSUM / contextLimit) * 100).toFixed(2) + '%';
+    const freeTokensFmt = fmt(Math.max(0, contextLimit - CATSUM));
 
     return {
       model,
@@ -873,7 +874,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                 color: SEMANTIC.textDesc2,
               }}
             >
-              {isCum ? `第 ${derived.peakTurnIdx + 1} 轮 · 累计拼装上下文` : `第 ${derived.peakTurnIdx} 轮 · 步骤 #${derived.peakStep + 1} · 全会话最重`}
+              {isCum ? `第 ${derived.peakTurnIdx + 1} 轮 · 累计拼装上下文` : `第 ${derived.peakTurnIdx} 轮 · 步骤 #${derived.peakStep + 1} · 当前轮次峰值输入`}
             </span>
           </div>
           <div
@@ -1431,16 +1432,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
               lineHeight: 1.6,
             }}
           >
-            每次工具调用回传的输出。其中{' '}
-            <strong
-              style={{
-                color: SEMANTIC.textPrimary7,
-                fontWeight: 600,
-              }}
-            >
-              Read
-            </strong>
-            （文件内容）单项就超过了整个占用的一半。
+            截至本轮/本步，已累计回传的所有工具输出。即使当前步骤本身不调用工具，前面步骤的工具结果仍然留在上下文中。
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
             {derived.toolRows.map((t) => (
@@ -1627,7 +1619,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                   color: SEMANTIC.textPrimary5,
                 }}
               >
-                {tools.filter((t) => t.task && t.name.startsWith('Task')).length}
+                {tools.filter((t) => t.task).length}
               </span>
             </div>
             <div
@@ -1677,7 +1669,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
       {/* ================================================================ */}
       {/* GROWTH CHART: Context growth over session                        */}
       {/* ================================================================ */}
-      {!embedded && (
+      {(!embedded || isCum) && (
       <section
         style={{
           marginTop: 30,
@@ -1698,7 +1690,9 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
         >
           <div style={{ flex: 1, minWidth: 300, maxWidth: 620 }}>
             <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
-              {derived.requestsFmt} 次请求中的上下文增长
+              {isCum
+                ? `${series.length} 轮对话中的上下文增长`
+                : `${derived.requestsFmt} 次请求中的上下文增长`}
             </h2>
             <p
               style={{
@@ -1707,8 +1701,11 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                 color: SEMANTIC.textDesc3,
               }}
             >
-              累计拼装的内容持续上升 —— 缓存使得每次请求实际
-              <em>计费</em>的 Token 保持低而尖岭。
+              {isCum
+                ? '累计拼装 token 逐轮累积，上下文压缩后重置并从零重新增长。'
+                : '累计拼装的内容持续上升 —— 缓存使得每次请求实际'}
+              {!isCum && (<em>计费</em>)}
+              {!isCum && '的 Token 保持低而尖岭。'}
             </p>
           </div>
           <div
@@ -1796,10 +1793,11 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
 
         <GrowthChart
           series={derived.series}
-          requests={derived.requests}
+          requests={isCum ? series.length : derived.requests}
           peakTokens={derived.peakTokens}
-          peakIndex={derived.peakIndex}
+          peakIndex={isCum ? (series.length > 0 ? series[series.length - 1]!.i : 0) : derived.peakIndex}
           contextLimit={derived.contextLimit}
+          xUnit={isCum ? '轮' : undefined}
           chartHover={chartHover}
           onMouseMove={handleChartMouseMove}
           onMouseLeave={handleChartMouseLeave}
@@ -1815,9 +1813,9 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
             color: SEMANTIC.textMuted3,
           }}
         >
-          <span>req 0</span>
-          <span>req {Math.floor(derived.requests / 2)}</span>
-          <span>req {derived.requests}</span>
+          <span>{isCum ? '轮' : 'req'} 0</span>
+          <span>{isCum ? '轮' : 'req'} {Math.floor((isCum ? derived.series.length : derived.requests) / 2)}</span>
+          <span>{isCum ? '轮' : 'req'} {isCum ? derived.series.length : derived.requests}</span>
         </div>
       </section>
       )}

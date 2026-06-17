@@ -1,4 +1,4 @@
-import type { ContextCategory, ToolAggregation } from '../../types/session';
+import type { ContextCategory, ToolAggregation, SeriesPoint } from '../../types/session';
 import ContextAssembly from '../pages/ContextAssembly';
 import { fmt, fmtK } from '../../utils/format';
 import { SEMANTIC } from '../../styles/theme';
@@ -15,13 +15,14 @@ interface Props {
   cacheHit: number;
   fullCtx: number;
   asstReqs: number;
+  series?: SeriesPoint[];
   mode?: 'peak' | 'cumulative';
   onClose: () => void;
 }
 
 export default function PeakModal({
   categories, tools, peakTokens, peakIndex, turnIndex, reqStep,
-  model, contextLimit, cacheHit, fullCtx, asstReqs, mode, onClose,
+  model, contextLimit, cacheHit, fullCtx, asstReqs, series, mode, onClose,
 }: Props) {
   const isCum = mode === 'cumulative';
   const peakData = {
@@ -34,10 +35,12 @@ export default function PeakModal({
       peak_tokens: peakTokens,
       context_limit: contextLimit,
       total_output: 0,
+      peak_step: reqStep,
+      peak_turn_idx: turnIndex,
     },
     categories,
     tools,
-    series: [],
+    series: series ?? [],
   };
 
   const sub = `第 ${turnIndex} 轮 · 完整输入 ${fmt(fullCtx)} tok · 计费 ${fmt(peakTokens)} tok${cacheHit > 0 ? ` · 缓存 ${fmt(cacheHit)}（${((cacheHit / peakTokens) * 100).toFixed(2)}%）` : ''}`;
@@ -109,9 +112,16 @@ export function buildCategories(comp: Record<string, number>, fullCtx: number, c
   const EST = new Set(['sysPrompt', 'tools']);
   const cats: ContextCategory[] = [];
   for (const [key, tokens] of Object.entries(comp)) {
+    const t = Math.round(tokens * scaleF);
     const meta = CAT_META[key] ?? { label: key, group: 'convo' as const };
-    cats.push({ key, label: meta.label, group: meta.group, estimated: EST.has(key), tokens: Math.round(tokens * scaleF), raw: 0 });
+    cats.push({ key, label: meta.label, group: meta.group, estimated: EST.has(key), tokens: t, raw: 0 });
   }
   cats.sort((a, b) => b.tokens - a.tokens);
+  // Absorb rounding drift into the largest category so the sum equals fullCtx
+  const roundedSum = cats.reduce((s, c) => s + c.tokens, 0);
+  const drift = fullCtx - roundedSum;
+  if (drift !== 0 && cats.length > 0 && cats[0]!.tokens + drift > 0) {
+    cats[0]!.tokens += drift;
+  }
   return cats;
 }

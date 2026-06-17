@@ -46,6 +46,7 @@ export interface SessionStore {
   uploadFile: (file: File) => Promise<string | null>;
   deleteSession: (id: string) => Promise<void>;
   fetchOntology: () => Promise<void>;
+  buildOntology: (body: { candidates: unknown[]; relations: unknown[]; config?: Record<string, unknown> }) => Promise<boolean>;
 
   // Ontology state
   ontologyData: OntologyData | null;
@@ -197,6 +198,24 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       });
     } catch {
       // deletion failure is silent in store; caller can handle
+    }
+  },
+
+  buildOntology: async (body) => {
+    const { currentSessionId } = getState();
+    if (!currentSessionId) return false;
+    set({ ontologyLoading: true, ontologyError: null });
+    try {
+      await post('/sessions/' + currentSessionId + '/ontology/build', body);
+      // Reload the built ontology
+      await getState().fetchOntology();
+      return true;
+    } catch (err) {
+      set({
+        ontologyLoading: false,
+        ontologyError: err instanceof Error ? err.message : 'Build failed',
+      });
+      return false;
     }
   },
 }));

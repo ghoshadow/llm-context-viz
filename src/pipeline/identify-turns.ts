@@ -65,6 +65,8 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
   let currentAsstLines: AssistantLine[] = [];
   let currentSystemLines: SystemLine[] = [];
   let currentToolResultLines: UserLine[] = [];
+  let currentAttachmentLines: Array<{ type: string; content: any; timestamp: string }> = [];
+  let preTurnAttachments: Array<{ type: string; content: any; timestamp: string }> = [];
   let currentStartTs = '';
   let currentEndTs = '';
   let turnIndex = 0;
@@ -83,8 +85,9 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
             asstLines: currentAsstLines,
             systemLines: currentSystemLines,
             toolResultLines: currentToolResultLines,
+            attachmentLines: currentAttachmentLines,
             startTs: currentStartTs,
-            endTs: currentEndTs, // last event of PREVIOUS turn
+            endTs: currentEndTs,
           });
         }
 
@@ -93,6 +96,7 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
         currentAsstLines = [];
         currentSystemLines = [];
         currentToolResultLines = [];
+        currentAttachmentLines = turnIndex === 0 ? [...preTurnAttachments] : [];
         currentStartTs = line.timestamp;
         continue;
       }
@@ -124,8 +128,18 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
       currentAsstLines.push(line as AssistantLine);
     } else if (line.type === 'system') {
       currentSystemLines.push(line as SystemLine);
+    } else if (line.type === 'attachment') {
+      const att = (line as any).attachment;
+      if (att && (att.type === 'skill_listing' || att.type === 'task_reminder' || att.type === 'mcp_instructions_delta' || att.type === 'ultra_effort_enter')) {
+        const target = currentUser ? currentAttachmentLines : preTurnAttachments;
+        target.push({
+          type: att.type,
+          content: att.content ?? att,
+          timestamp: line.timestamp,
+        });
+      }
     }
-    // Other line types (attachment, mode, etc.) are silently ignored as they
+    // Other line types (mode, etc.) are silently ignored as they
     // don't participate in turn grouping.
   }
 
@@ -138,6 +152,7 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
       asstLines: currentAsstLines,
       systemLines: currentSystemLines,
       toolResultLines: currentToolResultLines,
+      attachmentLines: currentAttachmentLines,
       startTs: currentStartTs,
       endTs: currentEndTs,
     });

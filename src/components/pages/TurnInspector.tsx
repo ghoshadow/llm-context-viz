@@ -48,7 +48,7 @@ function segLabel(k: string, n: string): string {
 }
 
 function isTaskName(n: string): boolean {
-  return /^Task/.test(n);
+  return n === 'Agent' || n === 'Workflow';
 }
 
 // ============================================================================
@@ -64,6 +64,7 @@ interface TurnListItemProps {
   contextLimit: number;
   prompt: string;
   isSelected: boolean;
+  compressionReset: boolean;
   onClick: () => void;
 }
 
@@ -75,6 +76,7 @@ function TurnListItem({
   contextLimit: ctxLimit,
   prompt,
   isSelected,
+  compressionReset,
   onClick,
 }: TurnListItemProps) {
   const loadPct = Math.max(2, (cumTotal / ctxLimit) * 100);
@@ -122,6 +124,23 @@ function TurnListItem({
         >
           {asstReqs} 请求
         </span>
+        {compressionReset && (
+          <span
+            style={{
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 9.5,
+              fontWeight: 600,
+              color: 'oklch(0.85 0.14 80)',
+              background: 'oklch(0.85 0.14 80 / 0.12)',
+              border: '1px solid oklch(0.85 0.14 80 / 0.35)',
+              borderRadius: 5,
+              padding: '1px 6px',
+              letterSpacing: '0.02em',
+            }}
+          >
+            压缩后
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         <span
           style={{
@@ -213,8 +232,8 @@ function ContextStructure({
     key: k,
     label: LABELS[k] ?? k,
     color: COLORS[k] ?? 'oklch(0.5 0 0)',
-    tokensFmt: fmt(comp[k]!),
-    pctFmt: ((comp[k]! / cumTotal) * 100).toFixed(2) + '%',
+    tokensFmt: fmt(Math.round(comp[k]! * scale)),
+    pctFmt: ((comp[k]! / compSum) * 100).toFixed(2) + '%',
     estimated: EST.has(k),
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
   }));
@@ -1167,23 +1186,6 @@ export default function TurnInspector() {
             href="#"
             onClick={(e) => {
               e.preventDefault();
-              setPage('assembly');
-            }}
-            style={{
-              textDecoration: 'none',
-              border: `1px solid ${SEMANTIC.borderColor}`,
-              borderRadius: 9,
-              padding: '9px 14px',
-              color: SEMANTIC.textSecondary,
-              background: 'oklch(0.20 0.01 265 / 0.6)',
-            }}
-          >
-            &larr; 峰值透视
-          </a>
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
               setPage('ontology');
             }}
             style={{
@@ -1283,6 +1285,7 @@ export default function TurnInspector() {
                     cumTotal={t.cum_total ?? 0}
                     contextLimit={contextLimit}
                     isSelected={isSelected}
+                    compressionReset={(t as any).compression_reset === 1}
                     onClick={() => selectTurn(t.turn_index)}
                   />
                 );
@@ -1442,8 +1445,51 @@ export default function TurnInspector() {
       {/* Peak request detail modal */}
       {showPeakDetail && currentTurn && (
         <PeakModal
-          categories={buildCategories(turnDetail?.comp ?? (currentTurn as any).comp ?? {}, Math.max(currentTurn.max_input + (currentTurn.max_cache_hit ?? 0), currentTurn.cum_total), currentTurn.cum_total)}
-          tools={sessionStore.currentSession?.tools ?? []}
+          categories={(() => {
+            const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
+            const compSum = Object.values(comp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
+            // Raw estimates — no API scaling. subagent/toolResults trimmed to step-level.
+            const segs = turnDetail?.segs ?? (currentTurn as any).segs ?? [];
+            let stepTools: any = null;
+            for (let i = Math.min(currentTurn.max_req_step ?? 0, segs.length - 1); i >= 0; i--) {
+              if (segs[i]?.det?.stepTools) { stepTools = segs[i]!.det!.stepTools; break; }
+            }
+            if (!stepTools) {
+              const ct = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+              if (Object.keys(ct).length > 0) stepTools = ct;
+            }
+            const adjComp = { ...comp };
+            if (stepTools) {
+              const turnCt: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+              const turnSubRt = Object.entries(turnCt).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+              const stepSubRt = Object.entries(stepTools).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+              const turnToolRt = Object.entries(turnCt).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+              const stepToolRt = Object.entries(stepTools).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+              // Replace subagent/toolResults with exact stepTools totals instead of proportional scaling
+              if (turnSubRt > 0) adjComp.subagent = stepSubRt;
+              if (turnToolRt > 0) adjComp.toolResults = stepToolRt;
+            }
+            const adjSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
+            return buildCategories(adjComp, currentTurn.max_input, adjSum);
+          })()}
+          tools={(() => {
+            const segs = turnDetail?.segs ?? (currentTurn as any).segs ?? [];
+            let stepTools: any = null;
+            for (let i = Math.min(currentTurn.max_req_step ?? 0, segs.length - 1); i >= 0; i--) {
+              if (segs[i]?.det?.stepTools) { stepTools = segs[i]!.det!.stepTools; break; }
+            }
+            if (!stepTools) {
+              const ct = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+              if (Object.keys(ct).length > 0) stepTools = ct;
+            }
+            if (!stepTools) return [];
+            return Object.entries(stepTools).map(([name, v]: any) => ({
+              name,
+              calls: v.calls ?? 0,
+              resultTokens: v.resultTokens ?? 0,  // raw, no API scaling
+              task: v.task ?? false,
+            }));
+          })()}
           peakTokens={currentTurn.max_input}
           peakIndex={currentTurnIndex ?? 0}
           turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
@@ -1451,7 +1497,7 @@ export default function TurnInspector() {
           model={sessionStore.currentSession?.model ?? 'unknown'}
           contextLimit={contextLimit}
           cacheHit={currentTurn.max_cache_hit ?? 0}
-          fullCtx={Math.max(currentTurn.max_input + (currentTurn.max_cache_hit ?? 0), currentTurn.cum_total)}
+          fullCtx={currentTurn.max_input + (currentTurn.max_cache_hit ?? 0)}
           asstReqs={currentTurn.asst_reqs}
           mode="peak"
           onClose={() => setShowPeakDetail(false)}
@@ -1468,9 +1514,16 @@ export default function TurnInspector() {
           })()}
           tools={(() => {
             const ct = (currentTurn as any).cum_tools_json;
-            return ct ? Object.entries(JSON.parse(ct)).map(([name, v]: [string, any]) => ({
-              name, calls: v.calls ?? 0, resultTokens: v.resultTokens ?? 0, task: v.task ?? false,
-            })) : [];
+            if (!ct) return [];
+            const comp2: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
+            const compSum2 = Object.values(comp2).reduce((a, b) => (a as number) + (b as number), 0) || 1;
+            const scale = currentTurn.cum_total / compSum2;
+            return Object.entries(JSON.parse(ct)).map(([name, v]: [string, any]) => ({
+              name,
+              calls: v.calls ?? 0,
+              resultTokens: Math.round((v.resultTokens ?? 0) * scale),
+              task: v.task ?? false,
+            }));
           })()}
           peakTokens={currentTurn.cum_total}
           peakIndex={currentTurnIndex ?? 0}
@@ -1481,6 +1534,14 @@ export default function TurnInspector() {
           cacheHit={currentTurn.cum_cache_hit ?? 0}
           fullCtx={currentTurn.cum_total}
           asstReqs={turns.filter(t => (t.turn_index ?? 0) <= (currentTurn.turn_index ?? currentTurnIndex ?? 0)).reduce((s, t) => s + (t.asst_reqs ?? 0), 0)}
+          series={turns
+            .filter(t => (t.turn_index ?? 0) <= (currentTurn.turn_index ?? 0))
+            .map(t => ({
+              i: t.turn_index,
+              assembled: t.cum_total,
+              input: t.max_input,
+              output: t.out_tok,
+            }))}
           mode="cumulative"
           onClose={() => setShowCumDetail(false)}
         />

@@ -24,7 +24,14 @@ export default function OntologyPage() {
   const ontologyError = useSessionStore((s) => s.ontologyError);
   const ontologyFetched = useSessionStore((s) => s.ontologyFetched);
   const fetchOntology = useSessionStore((s) => s.fetchOntology);
+  const buildOntology = useSessionStore((s) => s.buildOntology);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
+
+  // Build form state
+  const [buildJson, setBuildJson] = useState('');
+  const [buildExpanded, setBuildExpanded] = useState(false);
+  const [buildMsg, setBuildMsg] = useState<string | null>(null);
+  const [buildErr, setBuildErr] = useState<string | null>(null);
 
   // Refs
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -135,41 +142,108 @@ export default function OntologyPage() {
 
   const onJumpToTurn = useCallback((t: number) => setTurn(t), []);
 
-  // ─── Loading / Error / Empty states ────────────────────────────────────
+  // ─── Render: always show page shell with header/nav ─────────────────────
 
-  if (ontologyLoading) {
+  const tryBuild = async () => {
+    setBuildMsg(null); setBuildErr(null);
+    try {
+      const parsed = JSON.parse(buildJson);
+      if (!parsed.candidates || !parsed.relations) {
+        setBuildErr('JSON 必须包含 candidates 和 relations 数组');
+        return;
+      }
+      setBuildMsg('构建中...');
+      const ok = await buildOntology(parsed);
+      if (ok) {
+        setBuildMsg('构建成功！图谱已保存。');
+        setBuildJson('');
+        setBuildExpanded(false);
+      } else {
+        setBuildErr('构建失败，请检查控制台');
+      }
+    } catch (e) {
+      setBuildErr(e instanceof SyntaxError ? 'JSON 格式错误: ' + e.message : String(e));
+    }
+  };
+
+  const renderBody = () => {
+    if (ontologyLoading) {
+      return (
+        <div style={{ textAlign: 'center', padding: '120px 20px', color: SEMANTIC.textMuted, fontSize: 15, flex: 1 }}>
+          正在加载本体数据...
+        </div>
+      );
+    }
+    if (ontologyError) {
+      return (
+        <div style={{ textAlign: 'center', padding: '120px 20px', color: 'oklch(0.76 0.13 45)', fontSize: 15, flex: 1 }}>
+          加载本体数据失败: {ontologyError}
+        </div>
+      );
+    }
+    if (!ontologyData) {
+      return (
+        <div style={{ maxWidth: 700, margin: '60px auto 0', padding: '0 20px', color: SEMANTIC.textMuted, fontSize: 14, lineHeight: 1.8, flex: 1 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 600, color: SEMANTIC.textPrimary, marginBottom: 12 }}>暂无本体数据</h2>
+          <p>本体数据需要从会话内容中通过语义抽取生成。两种方式提供数据：</p>
+          <ol style={{ paddingInlineStart: 20, margin: '8px 0' }}>
+            <li>直接上传已构建好的 <code style={{ fontFamily: "'IBM Plex Mono', monospace", background: SEMANTIC.innerCardBg, padding: '2px 6px', borderRadius: 4 }}>OntologyData</code> JSON（POST /:id/ontology）</li>
+            <li>通过下面的构建管线，提供候选实体 + 语义关系，自动过滤/消歧/组装</li>
+          </ol>
+          <div style={{ marginTop: 24, border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 12, background: SEMANTIC.cardBg, overflow: 'hidden' }}>
+            <button onClick={() => setBuildExpanded(!buildExpanded)}
+              style={{ width: '100%', textAlign: 'left', border: 'none', padding: '14px 18px', background: 'transparent', color: SEMANTIC.textPrimary, cursor: 'pointer', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              通过构建管线生成（粘贴候选 JSON）
+              <span style={{ fontSize: 11, color: SEMANTIC.textMuted, fontWeight: 400 }}>{buildExpanded ? '收起 ▲' : '展开 ▼'}</span>
+            </button>
+            {buildExpanded && (
+              <div style={{ padding: '0 18px 18px' }}>
+                <p style={{ margin: '0 0 10px', fontSize: 12, color: SEMANTIC.textDesc3 }}>粘贴包含 <code>candidates</code>、<code>relations</code> 和可选 <code>config</code> 的 JSON。</p>
+                <textarea value={buildJson} onChange={(e) => setBuildJson(e.target.value)}
+                  placeholder='{"candidates": [...], "relations": [...], "config": {...}}' rows={8}
+                  style={{ width: '100%', background: 'oklch(0.19 0.01 265)', color: SEMANTIC.textPrimary, border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 8, padding: 12, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, resize: 'vertical', lineHeight: 1.5 }} />
+                <button onClick={tryBuild} disabled={!buildJson.trim() || ontologyLoading}
+                  style={{ marginTop: 10, padding: '9px 18px', borderRadius: 8, cursor: 'pointer', border: '1px solid oklch(0.45 0.09 165)', background: 'oklch(0.74 0.12 165 / 0.14)', color: 'oklch(0.84 0.10 165)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, opacity: buildJson.trim() ? 1 : 0.4 }}>
+                  {ontologyLoading ? '构建中...' : '▶ 构建图谱'}
+                </button>
+                {buildMsg && <div style={{ marginTop: 8, fontSize: 12, color: 'oklch(0.78 0.12 150)' }}>{buildMsg}</div>}
+                {buildErr && <div style={{ marginTop: 8, fontSize: 12, color: 'oklch(0.76 0.13 45)' }}>{buildErr}</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+    // Main graph view
     return (
-      <div style={{ textAlign: 'center', padding: '120px 20px', color: SEMANTIC.textMuted, fontSize: 15 }}>
-        正在加载本体数据...
-      </div>
+      <>
+        <OntologyToolbar
+          types={ontologyData.types} nodes={ontologyData.nodes} activeTypes={activeTypes}
+          turn={turn} maxTurn={maxTurn} playing={playing}
+          onToggleType={onToggleType} onSetTurn={onSetTurn} onTogglePlay={onTogglePlay} onRecenter={onRecenter}
+        />
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 350px', gap: 16, marginTop: 16, minHeight: 0 }}>
+          <div style={{ position: 'relative', border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 16, background: 'oklch(0.17 0.008 265 / 0.6)', overflow: 'hidden' }}>
+            <OntologyGraph data={ontologyData} selectedNodeId={selectedOntologyNode} turn={turn} activeTypes={activeTypes} onSelectNode={setSelectedOntologyNode} recenterKey={recenterKey} />
+            <div style={{ position: 'absolute', left: 14, bottom: 12, fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: 'oklch(0.46 0.012 265)', pointerEvents: 'none', lineHeight: 1.5 }}>
+              拖拽节点 · 滚轮缩放 · 拖拽空白平移 · 点击节点看详情
+            </div>
+            <div style={{ position: 'absolute', right: 14, top: 12, display: 'flex', gap: 14, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: SEMANTIC.textMuted2, pointerEvents: 'none' }}>
+              <span><span style={{ color: SEMANTIC.textPrimary6, fontWeight: 600 }}>{visibleCounts.nodes}</span> 实体</span>
+              <span><span style={{ color: SEMANTIC.textPrimary6, fontWeight: 600 }}>{visibleCounts.edges}</span> 关系</span>
+            </div>
+          </div>
+          <OntologyDetailPanel
+            data={ontologyData} selectedNodeId={selectedOntologyNode} turn={turn}
+            activeTypes={activeTypes} degree={degree} onSelectNode={setSelectedOntologyNode}
+            onClearSelection={() => setSelectedOntologyNode(null)} onJumpToTurn={onJumpToTurn}
+          />
+        </div>
+      </>
     );
-  }
+  };
 
-  if (ontologyError) {
-    return (
-      <div style={{ textAlign: 'center', padding: '120px 20px', color: 'oklch(0.76 0.13 45)', fontSize: 15 }}>
-        加载本体数据失败: {ontologyError}
-      </div>
-    );
-  }
-
-  if (!ontologyData) {
-    return (
-      <div style={{ textAlign: 'center', padding: '120px 20px', color: SEMANTIC.textMuted, fontSize: 14, lineHeight: 1.8 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 600, color: SEMANTIC.textPrimary, marginBottom: 12 }}>
-          暂无本体数据
-        </h2>
-        <p>本体数据需要从会话中通过语义抽取生成，目前尚未上传。</p>
-        <p style={{ marginTop: 8 }}>
-          可通过 <code style={{ fontFamily: "'IBM Plex Mono', monospace", background: SEMANTIC.innerCardBg, padding: '2px 6px', borderRadius: 4 }}>
-            POST /api/sessions/{currentSessionId}/ontology
-          </code> 接口上传。
-        </p>
-      </div>
-    );
-  }
-
-  // ─── Render ────────────────────────────────────────────────────────────
+  // ─── Page shell ───────────────────────────────────────────────────────
 
   return (
     <div
@@ -236,25 +310,14 @@ export default function OntologyPage() {
         <div style={{ display: 'flex', gap: 9, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, alignItems: 'center' }}>
           <a
             href="#"
-            onClick={(e) => { e.preventDefault(); setPage('inspector'); }}
+            onClick={(e) => { e.preventDefault(); setPage('home'); }}
             style={{
               textDecoration: 'none', border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 9,
               padding: '9px 13px', color: SEMANTIC.textSecondary,
               background: SEMANTIC.innerCardBg,
             }}
           >
-            逐轮检查
-          </a>
-          <a
-            href="#"
-            onClick={(e) => { e.preventDefault(); setPage('assembly'); }}
-            style={{
-              textDecoration: 'none', border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 9,
-              padding: '9px 13px', color: SEMANTIC.textSecondary,
-              background: SEMANTIC.innerCardBg,
-            }}
-          >
-            峰值透视
+            ← 首页
           </a>
           <span
             style={{
@@ -265,105 +328,21 @@ export default function OntologyPage() {
           >
             本体建模
           </span>
+          <a
+            href="#"
+            onClick={(e) => { e.preventDefault(); setPage('inspector'); }}
+            style={{
+              textDecoration: 'none', border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 9,
+              padding: '9px 13px', color: SEMANTIC.textSecondary,
+              background: SEMANTIC.innerCardBg,
+            }}
+          >
+            逐轮检查
+          </a>
         </div>
       </header>
 
-      {/* ================================================================ */}
-      {/* TOOLBAR                                                          */}
-      {/* ================================================================ */}
-      <OntologyToolbar
-        types={ontologyData.types}
-        nodes={ontologyData.nodes}
-        activeTypes={activeTypes}
-        turn={turn}
-        maxTurn={maxTurn}
-        playing={playing}
-        onToggleType={onToggleType}
-        onSetTurn={onSetTurn}
-        onTogglePlay={onTogglePlay}
-        onRecenter={onRecenter}
-      />
-
-      {/* ================================================================ */}
-      {/* MAIN: graph + detail                                             */}
-      {/* ================================================================ */}
-      <div
-        style={{
-          flex: 1,
-          display: 'grid',
-          gridTemplateColumns: '1fr 350px',
-          gap: 16,
-          marginTop: 16,
-          minHeight: 0,
-        }}
-      >
-        {/* Graph area */}
-        <div
-          style={{
-            position: 'relative',
-            border: `1px solid ${SEMANTIC.borderColor}`,
-            borderRadius: 16,
-            background: 'oklch(0.17 0.008 265 / 0.6)',
-            overflow: 'hidden',
-          }}
-        >
-          <OntologyGraph
-            data={ontologyData}
-            selectedNodeId={selectedOntologyNode}
-            turn={turn}
-            activeTypes={activeTypes}
-            onSelectNode={setSelectedOntologyNode}
-            recenterKey={recenterKey}
-          />
-          {/* Graph stats overlay */}
-          <div
-            style={{
-              position: 'absolute',
-              left: 14,
-              bottom: 12,
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontSize: 10,
-              color: 'oklch(0.46 0.012 265)',
-              pointerEvents: 'none',
-              lineHeight: 1.5,
-            }}
-          >
-            拖拽节点 · 滚轮缩放 · 拖拽空白平移 · 点击节点看详情
-          </div>
-          <div
-            style={{
-              position: 'absolute',
-              right: 14,
-              top: 12,
-              display: 'flex',
-              gap: 14,
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontSize: 11,
-              color: SEMANTIC.textMuted2,
-              pointerEvents: 'none',
-            }}
-          >
-            <span>
-              <span style={{ color: SEMANTIC.textPrimary6, fontWeight: 600 }}>{visibleCounts.nodes}</span> 实体
-            </span>
-            <span>
-              <span style={{ color: SEMANTIC.textPrimary6, fontWeight: 600 }}>{visibleCounts.edges}</span> 关系
-            </span>
-          </div>
-        </div>
-
-        {/* Detail panel */}
-        <OntologyDetailPanel
-          data={ontologyData}
-          selectedNodeId={selectedOntologyNode}
-          turn={turn}
-          activeTypes={activeTypes}
-          degree={degree}
-          onSelectNode={setSelectedOntologyNode}
-          onClearSelection={() => setSelectedOntologyNode(null)}
-          onJumpToTurn={onJumpToTurn}
-        />
-      </div>
+      {renderBody()}
 
       {/* ================================================================ */}
       {/* FOOTER                                                            */}

@@ -20,12 +20,32 @@ import type { TurnContextComposition } from './compute-context';
 // Token estimation (inline — consistent with other stages)
 // ---------------------------------------------------------------------------
 
+// Token estimation: use the same 3.5 chars/token ratio as the pipeline
+// calibrator so composition and timeline agree on token counts.
 function estTokens(text: string): number {
-  return text.length / 4;
+  return text.length / 3.5;
 }
 
 function roundTok(text: string): number {
   return Math.round(estTokens(text));
+}
+
+/** Per-block JSON wrapper overhead: {"type":"text","text":"..."} ≈ 23 chars. */
+const BLOCK_WRAPPER_CHARS = 23;
+
+/** Extract plain text from a tool_result content block, adding per-block wrapper cost. */
+function extractToolResultText(content: string | any[]): string {
+  if (typeof content === 'string') return content;
+  let result = '';
+  for (const block of content) {
+    if (block && block.type === 'text') {
+      result += (block.text as string) ?? '';
+      result += ' '.repeat(BLOCK_WRAPPER_CHARS); // JSON wrapper overhead
+    } else if (block && block.type === 'tool_result') {
+      result += extractToolResultText(block.content);
+    }
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,11 +124,11 @@ function extractToolResult(block: ContentBlockToolResult): ToolResultData {
   if (typeof block.content === 'string') {
     return { content: block.content, is_error: block.is_error ?? false };
   }
-  // Multi-block tool result: concatenate text blocks.
+  // Multi-block tool result: concatenate text blocks with wrapper overhead.
   const parts: string[] = [];
   for (const inner of block.content) {
     if (inner.type === 'text') {
-      parts.push(inner.text);
+      parts.push(inner.text + ' '.repeat(BLOCK_WRAPPER_CHARS));
     }
   }
   return {
@@ -538,12 +558,16 @@ function computeContextInfo(
   let cumTotal = 0;
   let cumCacheHit = 0;
   if (group) {
-    for (let i = group.asstLines.length - 1; i >= 0; i--) {
-      const usage = group.asstLines[i]?.message.usage;
+    // Take the MAXIMUM total context across all requests in this turn,
+    // not just the last one. This ensures monotonicity (cumTotal never decreases).
+    for (const line of group.asstLines) {
+      const usage = line.message.usage;
       if (usage) {
-        cumTotal = usage.input_tokens + (usage.cache_read_input_tokens ?? 0);
-        cumCacheHit = usage.cache_read_input_tokens ?? 0;
-        break;
+        const total = usage.input_tokens + (usage.cache_read_input_tokens ?? 0);
+        if (total > cumTotal) {
+          cumTotal = total;
+          cumCacheHit = usage.cache_read_input_tokens ?? 0;
+        }
       }
     }
   }
@@ -595,12 +619,21 @@ export function computeTimeline(
   const results: TimelineResult[] = [];
   const cumTools: Record<string, { calls: number; resultTokens: number; task: boolean }> = {};
 
+  let runningCumTotal = 0; // ensures monotonicity across turns
+
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i]!;
     const comp = compositions[i] ?? {};
 
     if (group.asstLines.length === 0) {
-      // Edge case: turn with no assistant responses.
+      // Edge case: turn with no assistant responses (e.g. interrupted).
+      // The interrupted request never completed, so no context was actually
+      // consumed — carry forward the previous turn's cumTotal and cumTools
+      // unchanged (no new tools were called in this turn).
+      const cumToolsSnapshot: typeof cumTools = {};
+      for (const [k, v] of Object.entries(cumTools)) {
+        cumToolsSnapshot[k] = { ...v };
+      }
       results.push({
         i,
         prompt: extractPrompt(group.userLine),
@@ -619,9 +652,9 @@ export function computeTimeline(
         longest: { k: '', n: '', ms: 0 },
         segs: [],
         comp: { ...comp },
-        cumTotal: Math.round(Object.values(comp).reduce((a, b) => a + b, 0)),
+        cumTotal: runningCumTotal,
         cumCacheHit: 0,
-        cumTools: {},
+        cumTools: cumToolsSnapshot,
       });
       continue;
     }
@@ -652,7 +685,39 @@ export function computeTimeline(
     const metrics = computeTurnMetrics(segments, turnDurMs);
 
     // 4. Compute context info.
-    const { cumTotal, cumCacheHit, outTok } = computeContextInfo(segments, comp, group);
+    let { cumTotal, cumCacheHit, outTok } = computeContextInfo(segments, comp, group);
+
+    // Determine whether cumTotal is backed by real API usage data.
+    // When the model reports usage.input_tokens or cache_read_input_tokens,
+    // that is ground truth — trust it even if it dropped (e.g. context
+    // compression resets the window after summarization).
+    // When there is NO API data (interrupted request, composition fallback),
+    // carry forward the last known-good value from a previous turn.
+    const hasApiUsage = group.asstLines.some(line => {
+      const u = line.message.usage;
+      return u != null && (u.input_tokens > 0 || (u.cache_read_input_tokens ?? 0) > 0);
+    });
+
+    let compressionReset = false;
+
+    if (hasApiUsage) {
+      // API ground truth — may drop after context compression.
+      // When the context window is compressed (summarized), the old tool
+      // results and sub-agent outputs are no longer in the active context.
+      // Reset cumulative tool counters so they only reflect what remains.
+      if (cumTotal < runningCumTotal) {
+        // Context compression detected: API reports a dramatic drop.
+        // Wipe the slate — only this turn's tools count going forward.
+        compressionReset = true;
+        for (const key of Object.keys(cumTools)) {
+          delete cumTools[key];
+        }
+      }
+      runningCumTotal = cumTotal;
+    } else {
+      // No API data — carry forward to avoid inflated composition estimates
+      cumTotal = runningCumTotal;
+    }
 
     // 5. Build tool usage summary.
     const tools: Record<string, number> = {};
@@ -694,34 +759,97 @@ export function computeTimeline(
     // 8. Build delta (delegated to compute-deltas stage).
     const delta = {};
 
-    // 9. Accumulate cumulative tools from this turn
-    for (const line of group.asstLines) {
-      for (const c of (line.message.content ?? [])) {
+    // 9. Accumulate cumulative tools, with per-step snapshots.
+    // Process tool_use and tool_result blocks in chronological order
+    // (one assistant message at a time), snapshotting after each tool
+    // execution segment so the peak modal can show tools up to that step.
+    const stepCumTools: (typeof cumTools | null)[] = new Array(segments.length).fill(null);
+
+    function snapshotStep(segIdx: number) {
+      if (segIdx < 0 || segIdx >= stepCumTools.length) return;
+      const snap: typeof cumTools = {};
+      for (const [k, v] of Object.entries(cumTools)) {
+        snap[k] = { ...v };
+      }
+      stepCumTools[segIdx] = snap;
+    }
+
+    for (let ai = 0; ai < group.asstLines.length; ai++) {
+      const asst = group.asstLines[ai]!;
+
+      // Count tool_use blocks from this assistant message
+      for (const c of (asst.message.content ?? [])) {
         if (c.type !== 'tool_use') continue;
-        const existing = cumTools[c.name] ?? { calls: 0, resultTokens: 0, task: c.name.startsWith('Task') || c.name === 'Agent' || c.name === 'Workflow' };
+        const existing = cumTools[c.name] ?? { calls: 0, resultTokens: 0, task: c.name === 'Agent' || c.name === 'Workflow' };
         existing.calls++;
         cumTools[c.name] = existing;
       }
-    }
-    for (const trLine of [...(group.toolResultLines ?? [])]) {
-      const content = trLine.message.content;
-      if (typeof content === 'string' || !content) continue;
-      for (const block of content) {
-        if (block.type !== 'tool_result') continue;
-        const toolUseId = block.tool_use_id;
-        for (const line of group.asstLines) {
-          for (const c of (line.message.content ?? [])) {
-            if (c.type === 'tool_use' && c.id === toolUseId) {
-              const existing = cumTools[c.name] ?? { calls: 0, resultTokens: 0, task: c.name.startsWith('Task') || c.name === 'Agent' || c.name === 'Workflow' };
-              const resultStr = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
-              existing.resultTokens += Math.round(resultStr.length / 4);
+
+      // Find tool_result blocks matching this assistant's tool_use blocks
+      for (const c of (asst.message.content ?? [])) {
+        if (c.type !== 'tool_use') continue;
+        // Find which segment corresponds to this tool execution
+        let segIdx = -1;
+        for (let si = 0; si < segments.length; si++) {
+          const seg = segments[si]!;
+          if ((seg.k === 't' || seg.k === 's') && seg.n === c.name) {
+            // Check if this segment's timestamp matches a tool_result for this tool_use
+            for (const trLine of [group.userLine, ...(group.toolResultLines ?? [])]) {
+              const trContent = trLine.message.content;
+              if (typeof trContent === 'string' || !trContent) continue;
+              for (const trBlock of trContent) {
+                if (trBlock.type === 'tool_result' && trBlock.tool_use_id === c.id && trLine.timestamp === seg.ts) {
+                  segIdx = si;
+                  break;
+                }
+              }
+              if (segIdx >= 0) break;
+            }
+            if (segIdx >= 0) break;
+          }
+        }
+
+        // Add result tokens
+        for (const trLine of [group.userLine, ...(group.toolResultLines ?? [])]) {
+          const trContent = trLine.message.content;
+          if (typeof trContent === 'string' || !trContent) continue;
+          for (const trBlock of trContent) {
+            if (trBlock.type === 'tool_result' && trBlock.tool_use_id === c.id) {
+              const existing = cumTools[c.name] ?? { calls: 0, resultTokens: 0, task: c.name === 'Agent' || c.name === 'Workflow' };
+              const resultStr = typeof trBlock.content === 'string'
+                ? trBlock.content
+                : extractToolResultText(trBlock.content);
+              existing.resultTokens += Math.round(resultStr.length / 3.5);
               cumTools[c.name] = existing;
               break;
             }
           }
         }
+
+        if (segIdx >= 0) {
+          snapshotStep(segIdx);
+        }
       }
     }
+
+    // Fill gaps: carry forward the last known state through subsequent segments
+    let lastSnap: typeof cumTools | null = null;
+    for (let si = 0; si < stepCumTools.length; si++) {
+      if (stepCumTools[si]) {
+        lastSnap = stepCumTools[si];
+      } else if (lastSnap) {
+        stepCumTools[si] = { ...lastSnap };
+      }
+    }
+
+    // Attach per-step snapshots to execution segments
+    for (let si = 0; si < segments.length; si++) {
+      const snap = stepCumTools[si];
+      if (snap && (segments[si]!.k === 't' || segments[si]!.k === 's')) {
+        segments[si]!.det!.stepTools = snap;
+      }
+    }
+
     const cumToolsSnapshot: typeof cumTools = {};
     for (const [k, v] of Object.entries(cumTools)) {
       cumToolsSnapshot[k] = { ...v };
@@ -751,6 +879,7 @@ export function computeTimeline(
       cumTotal,
       cumCacheHit,
       cumTools: cumToolsSnapshot,
+      compressionReset,
     });
   }
 

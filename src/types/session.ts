@@ -182,6 +182,8 @@ export interface TurnGroup {
   systemLines: SystemLine[];
   /** Tool-result user messages that arrive between assistant responses. */
   toolResultLines: UserLine[];
+  /** System attachments (skill_listing, task_reminder, etc.) not in systemLines. */
+  attachmentLines?: Array<{ type: string; content: any; timestamp: string }>;
   /** First event timestamp (ISO). */
   startTs: string;
   /** Last event timestamp (ISO). */
@@ -218,6 +220,8 @@ export interface SegmentDetail {
   resultTrunc?: boolean;
   isError?: boolean;
   subAgents?: { file: string; model: string; prompt: string; asstCount: number; durMs: number; toolCalls: string[] }[];
+  /** Cumulative tools snapshot at this step (t-type / s-type only). */
+  stepTools?: Record<string, { calls: number; resultTokens: number; task: boolean }>;
 }
 
 export interface TimelineSegment {
@@ -287,6 +291,9 @@ export interface TurnData {
   cumTools?: Record<string, { calls: number; resultTokens: number; task: boolean }>;
   /** Cumulative total context tokens at turn end. */
   cumTotal: number;
+  /** True when context compression was detected at this turn boundary
+   *  (cumTotal dropped >50% after summarization). */
+  compressionReset?: boolean;
 }
 
 // ============================================================================
@@ -332,6 +339,7 @@ export interface TurnSummary {
   cum_total: number;
   dur_ms: number;
   step_count: number;
+  compression_reset?: boolean;
 }
 
 export interface TurnDetail extends TurnSummary {

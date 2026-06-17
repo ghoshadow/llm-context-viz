@@ -354,11 +354,15 @@ export function parseJsonl(text: string): ParseResult {
     } else {
       // system, attachment, mode, permission-mode, ai-title, last-prompt,
       // file-history-snapshot, task_reminder, Project, nested_memory
-      // — pass through with just the base fields.
-      lines.push({
-        ...base,
-        type,
-      } as SessionLine);
+      // — pass through with base fields + attachment if present.
+      const line: any = { ...base, type };
+      if (parsed.attachment && typeof parsed.attachment === 'object') {
+        line.attachment = parsed.attachment;
+      }
+      if (parsed.message && typeof parsed.message === 'object') {
+        line.message = parsed.message;
+      }
+      lines.push(line as SessionLine);
     }
   }
 

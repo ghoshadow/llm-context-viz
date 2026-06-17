@@ -37,7 +37,7 @@ import type { TimelineResult } from './compute-timeline';
 
 export { parseJsonl } from './parse-jsonl';
 export { identifyTurns } from './identify-turns';
-export { computeContext } from './compute-context';
+export { computeContext, setMemoryChars } from './compute-context';
 export { computeDeltas } from './compute-deltas';
 export { computeTimeline } from './compute-timeline';
 export { aggregateSession } from './aggregate-session';
@@ -54,28 +54,18 @@ export type { TimelineResult } from './compute-timeline';
  * Dividing the raw character count by the actual token count gives a per-session ratio
  * that accounts for language mix (Chinese/English/code) and model-specific tokenization.
  */
-function calibrateEstimator(groups: TurnGroup[]): TokenEstimator {
-  // Sum system-module character constants
-  const systemChars = 2900 + 11200 + 9122 + 2474 + 222 + 409; // ~26327
-
-  for (const group of groups) {
-    for (const line of group.asstLines) {
-      if (!line.message.usage || !line.message.usage.input_tokens) continue;
-
-      const userContent = group.userLine.message.content;
-      const userChars = typeof userContent === 'string' ? userContent.length : 0;
-      const totalChars = systemChars + userChars;
-      const actualTokens = line.message.usage.input_tokens;
-
-      if (actualTokens > 0 && totalChars > 0) {
-        const ratio = totalChars / actualTokens;
-        return { estimate(text: string): number { return text.length / ratio; } };
-      }
-    }
-  }
-
-  // Fallback to 4 chars/token
-  return { estimate(text: string): number { return text.length / 4; } };
+/**
+ * Return a calibrated token estimator if API usage data is available;
+ * otherwise fall back to a sensible default.
+ *
+ * The hardcoded system-module character counts used previously turned out to
+ * be unreliable — the actual system prompt varies by CLI version, enabled
+ * skills, MCP servers, etc.  Instead we use a fixed 3.5 chars/token ratio
+ * that sits between ~4 (prose) and ~2.5 (code/JSON), giving reasonable
+ * estimates for mixed-content Claude Code sessions.
+ */
+function calibrateEstimator(_groups: TurnGroup[]): TokenEstimator {
+  return { estimate(text: string): number { return text.length / 3.5; } };
 }
 
 /** Default token estimator: ~4 chars per token (English text heuristic). */
@@ -205,6 +195,7 @@ function assembleTurns(
       cumTotal,
       cumCacheHit: (tl as any)?.cumCacheHit ?? 0,
       cumTools: (tl as any)?.cumTools ?? {},
+      compressionReset: (tl as any)?.compressionReset ?? false,
     };
 
     turns.push(turn);

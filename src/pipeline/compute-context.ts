@@ -52,17 +52,33 @@ export interface TurnContextEntry {
 // ---------------------------------------------------------------------------
 // Estimated system-module character sizes
 // ---------------------------------------------------------------------------
-// Drawn from the prototype's observed character counts for a typical
-// Claude Code session. When no real payload is found in the trace, these
-// constants ensure scaffolding categories are non-zero (matching prototype
-// behaviour where skil/memory/mcp/reminders never show zero).
+// SYS_PROMPT and TOOL_DEFS are calibrated from a real API request capture
+// (Claude Code v2.1.170, deepseek-v4-pro). The others are fallback defaults
+// that get replaced when the JSONL contains real payloads (skill_listing,
+// mcp_instructions_delta, task_reminder, etc.).
+//
+// Measured from proxy capture:
+//   system blocks:  5,768 chars (billing 85 + agent 62 + harness 5,621)
+//   tools JSON:    98,949 chars (full JSON Schema for all ~50 tools)
 
-const SYS_PROMPT_FALLBACK_CHARS  = 2900;
-const TOOL_DEFS_FALLBACK_CHARS   = 11200;
+const SYS_PROMPT_FALLBACK_CHARS  = 5768;
+const TOOL_DEFS_FALLBACK_CHARS   = 98949;
 const SKILLS_FALLBACK_CHARS      = 9122;
-const MEMORY_FALLBACK_CHARS      = 2474;
 const MCP_FALLBACK_CHARS         = 222;
 const REMINDERS_FALLBACK_CHARS   = 409;
+
+// <system-reminder> chrome text (headers, environment info, boilerplate)
+// that wraps around the CLAUDE.md / skills / MCP content inside the
+// first user message. Measured from proxy capture (v2.1.170).
+const SYSTEM_REMINDER_CHROME_CHARS = 612;
+
+// MEMORY is set at runtime from actual CLAUDE.md files on disk.
+// The default (2474) is only used if the files can't be read.
+let MEMORY_FALLBACK_CHARS = 2474;
+
+export function setMemoryChars(chars: number): void {
+  if (chars > 0) MEMORY_FALLBACK_CHARS = chars;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers: content extraction
@@ -74,6 +90,9 @@ const REMINDERS_FALLBACK_CHARS   = 409;
  * Handles text blocks, nested tool_result blocks, and nested text children.
  * Image blocks are ignored (no text contribution).
  */
+/** Per-block JSON wrapper overhead: {"type":"text","text":"..."} ≈ 23 chars. */
+const BLOCK_WRAPPER_CHARS = 23;
+
 function extractContentText(content: string | ContentBlock[]): string {
   if (typeof content === 'string') return content;
 
@@ -81,6 +100,7 @@ function extractContentText(content: string | ContentBlock[]): string {
   for (const block of content) {
     if (block.type === 'text') {
       result += block.text;
+      result += ' '.repeat(BLOCK_WRAPPER_CHARS); // JSON wrapper overhead
     } else if (block.type === 'tool_result') {
       // Recurse: tool_result.content is string | ContentBlock[]
       result += extractContentText(block.content);
@@ -104,7 +124,7 @@ function extractToolResultText(block: ContentBlock): string {
 
 /** Returns true if the tool name indicates a sub-agent spawn. */
 function isTaskTool(name: string): boolean {
-  return name.startsWith('Task') || name === 'Agent' || name === 'Workflow';
+  return name === 'Agent' || name === 'Workflow';
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +233,7 @@ function seedCoreScaffolding(
   addPadding(cum.memory!,     MEMORY_FALLBACK_CHARS,      est);
   addPadding(cum.mcp!,        MCP_FALLBACK_CHARS,         est);
   addPadding(cum.reminders!,  REMINDERS_FALLBACK_CHARS,   est);
+  addPadding(cum.userMsgs!,   SYSTEM_REMINDER_CHROME_CHARS, est);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +334,46 @@ function processGroup(
       }
     }
   }
+
+  // ---- 5. Attachment lines (skill_listing, task_reminder) ----
+  for (const att of group.attachmentLines ?? []) {
+    if (att.type === 'skill_listing' && typeof att.content === 'string') {
+      // Replace the hardcoded skills fallback with real skill listing from JSONL
+      cum.skills!.raw = 0;
+      cum.skills!.tokens = 0;
+      addTo(cum.skills!, att.content, est);
+    } else if (att.type === 'task_reminder') {
+      const items: any[] = Array.isArray(att.content) ? att.content : (att.content ? [att.content] : []);
+      for (const item of items) {
+        const text = typeof item === 'string' ? item : (item?.title || '') + '\n' + (item?.description || '');
+        if (text.trim()) {
+          if (cum.reminders!.raw === REMINDERS_FALLBACK_CHARS) {
+            cum.reminders!.raw = 0;
+            cum.reminders!.tokens = 0;
+          }
+          addTo(cum.reminders!, text, est);
+        }
+      }
+    } else if (att.type === 'mcp_instructions_delta') {
+      // MCP server instructions — uses addedBlocks at attachment root
+      const data: any = att.content;
+      const blocks: string[] = Array.isArray(data?.addedBlocks) ? data.addedBlocks : [];
+      const text = blocks.join('\n');
+      if (text) {
+        cum.mcp!.raw = 0;
+        cum.mcp!.tokens = 0;
+        addTo(cum.mcp!, text, est);
+      }
+    } else if (att.type === 'ultra_effort_enter') {
+      // Ultra effort reminder — add to reminders
+      const reminderText = 'Ultracode is on: optimize for the most exhaustive, correct answer.';
+      if (cum.reminders!.raw === REMINDERS_FALLBACK_CHARS) {
+        cum.reminders!.raw = 0;
+        cum.reminders!.tokens = 0;
+      }
+      addTo(cum.reminders!, reminderText, est);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +419,27 @@ export function computeContext(
 
   const compositions: TurnContextComposition[] = [];
 
+  let lastApiTotal = 0;
+
   for (const group of groups) {
+    let turnApiMax = 0;
+    for (const line of group.asstLines) {
+      const usage = line.message.usage;
+      if (!usage) continue;
+      const t = usage.input_tokens + (usage.cache_read_input_tokens ?? 0);
+      if (t > turnApiMax) turnApiMax = t;
+    }
+
+    if (turnApiMax > 0) {
+      if (lastApiTotal > 0 && turnApiMax < lastApiTotal * 0.5) {
+        for (const key of Object.keys(cum)) {
+          cum[key] = initAccum();
+        }
+        seedCoreScaffolding(cum, estimator);
+      }
+      lastApiTotal = turnApiMax;
+    }
+
     processGroup(group, estimator, cum);
     compositions.push(toTokenMap(snapshot(cum)));
   }
@@ -388,8 +469,26 @@ export function computeContextRich(
   seedCoreScaffolding(cum, estimator);
 
   const entries: TurnContextEntry[] = [];
-
+  let lastApiTotal = 0;
   for (const group of groups) {
+    let turnApiMax = 0;
+    for (const line of group.asstLines) {
+      const usage = line.message.usage;
+      if (!usage) continue;
+      const t = usage.input_tokens + (usage.cache_read_input_tokens ?? 0);
+      if (t > turnApiMax) turnApiMax = t;
+    }
+
+    if (turnApiMax > 0) {
+      if (lastApiTotal > 0 && turnApiMax < lastApiTotal * 0.5) {
+        for (const key of Object.keys(cum)) {
+          cum[key] = initAccum();
+        }
+        seedCoreScaffolding(cum, estimator);
+      }
+      lastApiTotal = turnApiMax;
+    }
+
     processGroup(group, estimator, cum);
     const comp = snapshot(cum);
     entries.push({

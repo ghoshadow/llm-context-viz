@@ -3,6 +3,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { getDb } from '../db';
 import { runPipeline } from '../../src/pipeline/index';
+import { buildOntology } from '../../src/pipeline/build-ontology';
 import { enrichWithSubAgents } from './scanner';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -222,7 +223,7 @@ router.get('/:id/turns', (req, res) => {
     const db = getDb();
     const rows = db
       .prepare(
-        `SELECT id, turn_index, prompt, timestamp, asst_reqs, max_input, out_tok, cum_total, dur_ms, step_count
+        `SELECT id, turn_index, prompt, timestamp, asst_reqs, max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, compression_reset, dur_ms, step_count
          FROM turns
          WHERE session_id = ?
          ORDER BY turn_index`,
@@ -395,6 +396,48 @@ router.delete('/:id/ontology', (req, res) => {
   } catch (err) {
     console.error('DELETE /:id/ontology error:', err);
     return res.status(500).json({ error: '删除本体数据时出错' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/ontology/build — run the 5-stage ontology build pipeline
+// ---------------------------------------------------------------------------
+
+router.post('/:id/ontology/build', (req, res) => {
+  try {
+    const db = getDb();
+    const { candidates, relations, config } = req.body;
+
+    // Validate required fields
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      return res.status(400).json({ error: 'candidates 数组不能为空' });
+    }
+    if (!Array.isArray(relations)) {
+      return res.status(400).json({ error: 'relations 数组不能为空' });
+    }
+
+    // Verify session exists
+    const session = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(req.params.id);
+    if (!session) {
+      return res.status(404).json({ error: '会话不存在' });
+    }
+
+    // Run the ontology build pipeline
+    const result = buildOntology({ candidates, relations, config });
+    const { data, meta, stats } = result;
+
+    // Store built ontology in DB
+    db.prepare(
+      `INSERT OR REPLACE INTO ontology (session_id, ontology_json, max_turn, updated_at)
+       VALUES (?, ?, ?, datetime('now'))`,
+    ).run(req.params.id, JSON.stringify(data), meta.maxTurn);
+
+    return res.status(201).json({ sessionId: req.params.id, ...result });
+  } catch (err) {
+    console.error('POST /:id/ontology/build error:', err);
+    return res.status(500).json({
+      error: err instanceof Error ? err.message : '构建本体数据时出错',
+    });
   }
 });
 

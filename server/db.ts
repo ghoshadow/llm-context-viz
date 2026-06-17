@@ -68,6 +68,7 @@ export function initDb(): void {
       cum_total INTEGER,
       cum_cache_hit INTEGER DEFAULT 0,
       cum_tools_json TEXT,
+      compression_reset INTEGER DEFAULT 0,
       dur_ms INTEGER,
       model_ms INTEGER,
       tool_ms INTEGER,
@@ -108,14 +109,11 @@ export function initDb(): void {
 }
 
 export function migrate(): void {
-  // Placeholder for future schema migrations.
-  // Example pattern:
-  //
-  //   const conn = getDb();
-  //   const userVersion = conn.pragma('user_version', { simple: true });
-  //
-  //   if (userVersion < 1) {
-  //     conn.exec(`ALTER TABLE sessions ADD COLUMN new_field TEXT;`);
-  //     conn.pragma('user_version = 1');
-  //   }
+  const conn = getDb();
+  const userVersion = conn.pragma('user_version', { simple: true }) as number;
+
+  if (userVersion < 1) {
+    conn.exec(`ALTER TABLE turns ADD COLUMN compression_reset INTEGER DEFAULT 0`);
+    conn.pragma('user_version = 1');
+  }
 }

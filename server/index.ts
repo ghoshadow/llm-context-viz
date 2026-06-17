@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 import sessionsRouter from './routes/sessions';
 import scannerRouter from './routes/scanner';
-import { initDb } from './db';
+import { initDb, migrate } from './db';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +46,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // Initialize database then start server
 initDb();
+migrate();
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
