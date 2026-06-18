@@ -66,11 +66,11 @@ interface FoundFile {
 function isQuickToolResult(obj: any): boolean {
   if (obj.message?.role !== 'user') return false;
   const content = obj.message?.content;
-  if (!content) return false;
+  if (typeof content === 'string') return false;
   if (Array.isArray(content)) {
-    return content.every((b: any) => b.type === 'tool_result');
+    return content.some((b: any) => b.type === 'tool_result');
   }
-  return false; // string content = real user message
+  return false;
 }
 
 function quickMeta(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
