@@ -338,7 +338,7 @@ export default function CalibratePage() {
                 color: 'oklch(0.12 0.01 265)', opacity: (applying || applied) ? 0.7 : 1,
               }}
             >
-              {applying ? '写入中...' : applied ? '✓ 已应用 — 重启服务生效' : '应用常量'}
+              {applying ? '写入中...' : applied ? '✓ 已应用 — 下次导入自动生效' : '应用常量'}
             </button>
             {!applied && (
               <span style={{ fontSize: 12, color: S.textDesc3 }}>

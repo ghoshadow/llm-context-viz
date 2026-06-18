@@ -38,6 +38,8 @@ import type { TimelineResult } from './compute-timeline';
 export { parseJsonl } from './parse-jsonl';
 export { identifyTurns } from './identify-turns';
 export { computeContext, setMemoryChars } from './compute-context';
+// Re-export for server-side use
+export { loadCalibratedConstants } from './compute-context';
 export { computeDeltas } from './compute-deltas';
 export { computeTimeline } from './compute-timeline';
 export { aggregateSession } from './aggregate-session';

@@ -70,9 +70,9 @@ let SYSTEM_REMINDER_CHROME_CHARS = 612;
 // MEMORY is set at runtime from actual CLAUDE.md files on disk.
 let MEMORY_FALLBACK_CHARS = 2474;
 
-// Load calibrated constants from disk if available (server-side only).
-// Use a plain function call so this works in both CJS and ESM contexts.
-(function loadCalibratedConstants() {
+// Load calibrated constants from disk. Called at module load AND on every
+// pipeline run so that applying new constants via the UI takes effect immediately.
+export function loadCalibratedConstants() {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('fs');
@@ -85,7 +85,8 @@ let MEMORY_FALLBACK_CHARS = 2474;
       if (data.SYSTEM_REMINDER_CHROME_CHARS) SYSTEM_REMINDER_CHROME_CHARS = data.SYSTEM_REMINDER_CHROME_CHARS;
     }
   } catch { /* browser-side or file not found — use defaults */ }
-})();
+}
+loadCalibratedConstants();
 
 export function setMemoryChars(chars: number): void {
   if (chars > 0) MEMORY_FALLBACK_CHARS = chars;

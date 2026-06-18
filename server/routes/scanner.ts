@@ -4,7 +4,7 @@ import { join, basename } from 'path';
 import { homedir } from 'os';
 import crypto from 'crypto';
 import { getDb } from '../db';
-import { runPipeline, setMemoryChars } from '../../src/pipeline/index';
+import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
 
 const router = Router();
 
@@ -382,6 +382,7 @@ router.post('/import', (req, res) => {
       }
     } catch { /* keep default */ }
     setMemoryChars(memChars);
+    loadCalibratedConstants(); // re-read system-constants.json (may have been updated via UI)
 
     const { summary, turns } = runPipeline(content, filename);
     const sessionId = hash.substring(0, 16);
