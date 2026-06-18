@@ -1468,6 +1468,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                       color: SEMANTIC.textMuted,
                       flex: 1,
                       textAlign: 'right',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {t.calls} 次调用{t.taskTag}
@@ -1475,7 +1476,6 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                     <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: SEMANTIC.textPrimary5 }}>
                       {t.resultFmt}
                     </span>
-                    {' tok'}
                   </span>
                 </div>
                 <div
