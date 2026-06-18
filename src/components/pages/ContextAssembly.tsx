@@ -111,6 +111,7 @@ function GrowthChart({
   onMouseMove,
   onMouseLeave,
 }: GrowthChartProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
   const W = 1000;
   const H = 260;
   // Use actual request count for X scale (not hardcoded to 510)
@@ -575,8 +576,6 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
   // ==========================================================================
   // Chart hover handler
   // ==========================================================================
-
-  const svgRef = useRef<SVGSVGElement>(null);
 
   const handleChartMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
