@@ -94,7 +94,7 @@ export default function ScannerModal() {
       const resp = await fetch(url);
       const data = await resp.json();
       const cachedNote = data.cached > 0 ? `（${data.cached} 个命中缓存）` : '';
-      setScanFiles(data.files || [], `发现 ${data.totalFiles} 个文件，其中 ${data.importedCount} 个已导入${cachedNote}`);
+      setScanFiles(data.files || [], `发现 ${data.totalFiles} 个有效文件，其中 ${data.importedCount} 个已导入${cachedNote}`);
     } catch (e) {
       setScanFiles(files, '扫描失败: ' + (e as Error).message);
     } finally {
