@@ -137,13 +137,6 @@ router.get('/scan', (_req, res) => {
     }
     allFiles.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
 
-    // Filter out empty sessions (0 turns, 0 requests)
-    const filteredFiles = allFiles.filter(f => {
-      // Quick check: if file is very small (< 500 bytes), likely empty
-      if (f.size < 500) return false;
-      return true;
-    });
-
     const db = getDb();
 
     // Load cached scan results
@@ -184,7 +177,7 @@ router.get('/scan', (_req, res) => {
     }
 
     let cached = 0, scanned = 0;
-    const files: FoundFile[] = filteredFiles.map(f => {
+    const files: FoundFile[] = allFiles.map(f => {
       const cachedMeta = cache.get(f.path);
       // Use cache if mtime unchanged and not forcing rescan
       if (!force && cachedMeta && cachedMeta.modified === f.modified) {
@@ -210,13 +203,16 @@ router.get('/scan', (_req, res) => {
       return { ...f, ...meta, hash, imported: dbImported.has(f.name) };
     });
 
+    // Filter out sessions with 0 turns and 0 requests (empty/irrelevant files)
+    const activeFiles = files.filter(f => (f.turnCount ?? 0) > 0 || (f.requests ?? 0) > 0);
+
     res.json({
       scannedDirs: dirs,
-      totalFiles: files.length,
-      importedCount: files.filter(f => f.imported).length,
+      totalFiles: activeFiles.length,
+      importedCount: activeFiles.filter(f => f.imported).length,
       cached,
       scanned,
-      files,
+      files: activeFiles,
     });
   } catch (err) {
     res.status(500).json({ error: '扫描失败: ' + (err as Error).message });
