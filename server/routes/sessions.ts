@@ -497,8 +497,8 @@ router.post('/:id/ontology/extract', (req, res) => {
 
         // Load model from session
         const sessionModel = (db.prepare('SELECT model FROM sessions WHERE id = ?').get(sessionId) as any)?.model || 'deepseek-v4-pro';
-        const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_API_KEY || '';
-        const API_URL = 'https://api.deepseek.com/anthropic/v1/messages';
+        const LLM_KEY = process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '';
+        const API_URL = (process.env.LLM_BASE_URL || 'https://api.deepseek.com/anthropic') + '/v1/messages';
 
         const allCandidates: any[] = [];
         const allRelations: any[] = [];
@@ -519,7 +519,7 @@ router.post('/:id/ontology/extract', (req, res) => {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'x-api-key': DEEPSEEK_KEY,
+                'x-api-key': LLM_KEY,
                 'anthropic-version': '2023-06-01',
               },
               body: JSON.stringify({
