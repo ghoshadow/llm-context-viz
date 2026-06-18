@@ -1469,54 +1469,54 @@ export default function TurnInspector() {
         </span>
       </footer>
 
-      {/* Peak request detail modal */}
-      {showPeakDetail && currentTurn && (
+      {/* Peak request detail modal — compute stepTools + scale once, share for both categories and tools */}
+      {showPeakDetail && currentTurn && (() => {
+        const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
+        const segs = turnDetail?.segs ?? (currentTurn as any).segs ?? [];
+
+        // Find stepTools at or before the peak step
+        let stepTools: any = null;
+        for (let i = Math.min(currentTurn.max_req_step ?? 0, segs.length - 1); i >= 0; i--) {
+          if (segs[i]?.det?.stepTools) { stepTools = segs[i]!.det!.stepTools; break; }
+        }
+        if (!stepTools) {
+          const ct = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+          if (Object.keys(ct).length > 0) stepTools = ct;
+        }
+
+        // Adjust comp to step level
+        const adjComp = { ...comp };
+        if (stepTools) {
+          const turnCt: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+          const turnSubRt = Object.entries(turnCt).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          const stepSubRt = Object.entries(stepTools).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          const turnToolRt = Object.entries(turnCt).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          const stepToolRt = Object.entries(stepTools).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          if (turnSubRt > 0) adjComp.subagent = stepSubRt;
+          if (turnToolRt > 0) adjComp.toolResults = stepToolRt;
+        }
+        const adjSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
+        const scaleP = currentTurn.max_input / adjSum;
+
+        return (
         <PeakModal
-          categories={(() => {
-            const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
-            const compSum = Object.values(comp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
-            // Raw estimates — no API scaling. subagent/toolResults trimmed to step-level.
-            const segs = turnDetail?.segs ?? (currentTurn as any).segs ?? [];
-            let stepTools: any = null;
-            for (let i = Math.min(currentTurn.max_req_step ?? 0, segs.length - 1); i >= 0; i--) {
-              if (segs[i]?.det?.stepTools) { stepTools = segs[i]!.det!.stepTools; break; }
-            }
-            if (!stepTools) {
-              const ct = JSON.parse((currentTurn as any).cum_tools_json || '{}');
-              if (Object.keys(ct).length > 0) stepTools = ct;
-            }
-            const adjComp = { ...comp };
-            if (stepTools) {
-              const turnCt: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
-              const turnSubRt = Object.entries(turnCt).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-              const stepSubRt = Object.entries(stepTools).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-              const turnToolRt = Object.entries(turnCt).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-              const stepToolRt = Object.entries(stepTools).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-              // Replace subagent/toolResults with exact stepTools totals instead of proportional scaling
-              if (turnSubRt > 0) adjComp.subagent = stepSubRt;
-              if (turnToolRt > 0) adjComp.toolResults = stepToolRt;
-            }
-            const adjSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
-            return buildCategories(adjComp, currentTurn.max_input, adjSum);
-          })()}
-          tools={(() => {
-            const segs = turnDetail?.segs ?? (currentTurn as any).segs ?? [];
-            let stepTools: any = null;
-            for (let i = Math.min(currentTurn.max_req_step ?? 0, segs.length - 1); i >= 0; i--) {
-              if (segs[i]?.det?.stepTools) { stepTools = segs[i]!.det!.stepTools; break; }
-            }
-            if (!stepTools) {
-              const ct = JSON.parse((currentTurn as any).cum_tools_json || '{}');
-              if (Object.keys(ct).length > 0) stepTools = ct;
-            }
-            if (!stepTools) return [];
-            return Object.entries(stepTools).map(([name, v]: any) => ({
-              name,
-              calls: v.calls ?? 0,
-              resultTokens: v.resultTokens ?? 0,  // raw, no API scaling
-              task: v.task ?? false,
-            }));
-          })()}
+          categories={buildCategories(adjComp, currentTurn.max_input, adjSum)}
+          tools={stepTools
+            ? (() => {
+                const entries = Object.entries(stepTools) as [string, any][];
+                const raw = entries.map(([, v]) => Math.round((v.resultTokens ?? 0) * scaleP));
+                const total = Math.round(entries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) * scaleP);
+                const drift = total - raw.reduce((a, b) => a + b, 0);
+                if (drift !== 0 && raw.length > 0) {
+                  let mi = 0;
+                  for (let i = 1; i < raw.length; i++) if (raw[i]! > raw[mi]!) mi = i;
+                  raw[mi]! += drift;
+                }
+                return entries.map(([name, v], i) => ({
+                  name, calls: v.calls ?? 0, resultTokens: raw[i]!, task: v.task ?? false,
+                }));
+              })()
+            : []}
           peakTokens={currentTurn.max_input}
           peakIndex={currentTurnIndex ?? 0}
           turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
@@ -1529,7 +1529,8 @@ export default function TurnInspector() {
           mode="peak"
           onClose={() => setShowPeakDetail(false)}
         />
-      )}
+        );
+      })()}
 
       {/* Cumulative context detail modal */}
       {showCumDetail && currentTurn && (
@@ -1545,10 +1546,21 @@ export default function TurnInspector() {
             const comp2: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
             const compSum2 = Object.values(comp2).reduce((a, b) => (a as number) + (b as number), 0) || 1;
             const scale = currentTurn.cum_total / compSum2;
-            return Object.entries(JSON.parse(ct)).map(([name, v]: [string, any]) => ({
+            const entries = Object.entries(JSON.parse(ct)) as [string, any][];
+            const rawTokens = entries.map(([, v]) => Math.round((v.resultTokens ?? 0) * scale));
+            const totalScaled = Math.round(entries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) * scale);
+            const drift = totalScaled - rawTokens.reduce((a, b) => a + b, 0);
+            if (drift !== 0 && rawTokens.length > 0) {
+              let maxI = 0;
+              for (let i = 1; i < rawTokens.length; i++) {
+                if (rawTokens[i]! > rawTokens[maxI]!) maxI = i;
+              }
+              rawTokens[maxI]! += drift;
+            }
+            return entries.map(([name, v], i) => ({
               name,
               calls: v.calls ?? 0,
-              resultTokens: Math.round((v.resultTokens ?? 0) * scale),
+              resultTokens: rawTokens[i]!,
               task: v.task ?? false,
             }));
           })()}
