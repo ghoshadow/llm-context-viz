@@ -139,11 +139,12 @@ router.get('/scan', (_req, res) => {
       }
     } catch { /* table might not exist yet */ }
 
-    // Check which files are already imported
+    // Check which files are already imported (by filename, since hash changes
+    // as the JSONL grows during an active session)
     const dbImported = new Set<string>();
     try {
-      const rows = db.prepare('SELECT file_hash FROM sessions').all() as { file_hash: string }[];
-      for (const row of rows) dbImported.add(row.file_hash);
+      const rows = db.prepare('SELECT filename FROM sessions').all() as { filename: string }[];
+      for (const row of rows) dbImported.add(row.filename);
     } catch { }
 
     const upsertStmt = db.prepare(`
@@ -172,7 +173,7 @@ router.get('/scan', (_req, res) => {
       // Use cache if mtime unchanged and not forcing rescan
       if (!force && cachedMeta && cachedMeta.modified === f.modified) {
         cached++;
-        return { ...f, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(cachedMeta.hash) };
+        return { ...f, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
       }
 
       // Compute hash and metadata for new/changed files
@@ -190,7 +191,7 @@ router.get('/scan', (_req, res) => {
       } catch { }
 
       scanned++;
-      return { ...f, ...meta, hash, imported: dbImported.has(hash) };
+      return { ...f, ...meta, hash, imported: dbImported.has(f.name) };
     });
 
     res.json({
