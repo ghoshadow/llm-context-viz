@@ -557,7 +557,7 @@ router.post('/:id/ontology/extract', (req, res) => {
               }
               send('shard-done', { shardIndex: shard.index, candidates: shardCandidates.length, relations: shardRelations.length });
             } else {
-              send('shardError', { shardIndex: shard.index, error: `API ${resp.status}` });
+              send('shard-error', { shardIndex: shard.index, error: `API ${resp.status}` });
             }
           } catch (e) {
             send('shard-error', { shardIndex: shard.index, error: (e as Error).message });
