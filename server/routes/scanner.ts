@@ -95,9 +95,18 @@ function quickMeta(filePath: string): { title?: string; model?: string; requests
           if (tok && tok > peakTokens) peakTokens = tok;
           if (!model && obj.message?.model) model = obj.message.model;
         } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isSidechain && !isQuickToolResult(obj)) {
-          if (!title && typeof obj.message?.content === 'string') {
-            title = (obj.message.content as string).slice(0, 80);
+          // Skip task notifications (same as pipeline's startsNewTurn)
+          const c = obj.message?.content;
+          if (typeof c === 'string' && c.startsWith('<task-notification>')) {
+            // skip
+          } else {
+            if (!title && typeof c === 'string') {
+              title = c.slice(0, 80);
+            }
+            turnCount++;
           }
+        } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isSidechain && obj.promptId) {
+          // promptId is a strong signal even for empty content
           turnCount++;
         }
       } catch { /* skip malformed lines */ }
