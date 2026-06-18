@@ -5,7 +5,6 @@ import {
   COLORS,
   LABELS,
   DELTA_LABELS,
-  EST,
   SEMANTIC,
   WINDOW,
   SELECTED_ITEM,
@@ -244,7 +243,6 @@ function ContextStructure({
     color: COLORS[k] ?? 'oklch(0.5 0 0)',
     tokensFmt: fmt(rawScaled[i]!) + ' tok',
     pctFmt: ((comp[k]! / compSum) * 100).toFixed(2) + '%',
-    estimated: EST.has(k),
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
   }));
 
@@ -314,7 +312,6 @@ function ContextStructure({
           >
             <span className="legend-dot" style={{ background: l.color }} />
             <span className="legend-label">{l.label}</span>
-            {l.estimated && <span className="legend-badge">估算</span>}
             <span className="legend-tokens" style={{ width: 85, textAlign: 'right', whiteSpace: 'nowrap' }}>
               {l.tokensFmt}
             </span>

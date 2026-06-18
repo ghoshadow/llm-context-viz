@@ -56,7 +56,6 @@ export interface LegendRow {
   barPct: number;
   op: number;
   onEnter: () => void;
-  estBadge: string;
 }
 
 export interface GroupMember {
@@ -436,7 +435,6 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
       barPct: (c.tokens / maxTok) * 100,
       op: opFor(c.key),
       onEnter: setH[c.key]!,
-      estBadge: c.estimated ? '估算' : '',
     }));
 
     // ── Treemap cells ──
@@ -1155,19 +1153,6 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                       color: SEMANTIC.textMuted,
                     }}
                   >
-                    {r.estBadge}
-                  </span>
-                  <span
-                    style={{
-                      fontFamily: "'IBM Plex Mono', monospace",
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: SEMANTIC.textPrimary3,
-                      width: 85,
-                      textAlign: 'right',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
                     {r.tokensFmt}
                   </span>
                   <span
@@ -1203,28 +1188,6 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                 </div>
               </div>
             ))}
-          </div>
-          <div
-            style={{
-              marginTop: 14,
-              display: 'flex',
-              gap: 5,
-              alignItems: 'center',
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontSize: 10.5,
-              color: SEMANTIC.textMuted2,
-            }}
-          >
-            <span
-              style={{
-                border: `1px solid oklch(0.40 0.012 265)`,
-                borderRadius: 4,
-                padding: '1px 5px',
-              }}
-            >
-              估算
-            </span>
-            <span>= 日志中未记录,按典型 schema 大小估算</span>
           </div>
         </div>
       </section>
