@@ -318,7 +318,7 @@ function ContextStructure({
             <span className="legend-tokens" style={{ width: 85, textAlign: 'right', whiteSpace: 'nowrap' }}>
               {l.tokensFmt}
             </span>
-            <span className="legend-pct" style={{ width: 46, textAlign: 'right' }}>
+            <span className="legend-pct" style={{ width: 65, textAlign: 'right' }}>
               {l.pctFmt}
             </span>
           </div>

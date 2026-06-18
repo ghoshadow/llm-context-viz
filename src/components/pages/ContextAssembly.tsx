@@ -1174,7 +1174,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                       fontFamily: "'IBM Plex Mono', monospace",
                       fontSize: 12,
                       color: SEMANTIC.textDesc,
-                      width: 50,
+                      width: 65,
                       textAlign: 'right',
                     }}
                   >
