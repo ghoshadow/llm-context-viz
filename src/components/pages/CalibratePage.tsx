@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { useUIStore } from '../../store/uiStore';
+import { useSessionStore } from '../../store/sessionStore';
 import { post, put, get } from '../../api/client';
 import { SEMANTIC } from '../../styles/theme';
 import { fmt, fmtK } from '../../utils/format';
@@ -80,7 +81,16 @@ function StatCard({ label, value, unit, accent }: { label: string; value: string
 
 export default function CalibratePage() {
   const setPage = useUIStore((s) => s.setPage);
+  const sessionCwd = useSessionStore((s) => s.currentSession?.cwd);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Pre-fill the proxy command with the session's cwd if available
+  const proxyCommand = useMemo(() => {
+    if (sessionCwd) {
+      return `cd ${sessionCwd} && sudo node /path/to/llm-context-viz/scripts/transparent-proxy.cjs --cwd ${sessionCwd} -- claude -p "say hi"`;
+    }
+    return `cd /path/to/session-project && sudo node /path/to/llm-context-viz/scripts/transparent-proxy.cjs --cwd $(pwd) -- claude -p "say hi"`;
+  }, [sessionCwd]);
 
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -179,7 +189,7 @@ export default function CalibratePage() {
       <section style={{ marginTop: 28 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>1. 上传截获的 API 日志</h2>
         <p style={{ fontSize: 13, color: S.textDesc3, marginBottom: 16, lineHeight: 1.6 }}>
-          使用 <code style={{ fontFamily: MONO, background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4 }}>sudo node scripts/transparent-proxy.js -- claude -p "say hi"</code> 截获一次请求，然后上传生成的 <code style={{ fontFamily: MONO, background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4 }}>.claude-trace/api-log-*.jsonl</code> 文件。
+          在终端运行以下命令截获一次请求（{sessionCwd ? '已自动填入当前会话的项目目录' : '请先打开一个会话'}}），然后上传生成的 <code style={{ fontFamily: MONO, background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4 }}>.claude-trace/api-log-*.jsonl</code> 文件。
         </p>
 
         {/* Drop zone */}
@@ -388,11 +398,10 @@ export default function CalibratePage() {
           <div style={{ marginTop: 10, background: 'oklch(0.18 0.01 265)', padding: '14px 18px', borderRadius: 10, border: `1px solid ${S.borderSubtle1}` }}>
             <div style={{ fontFamily: MONO, fontSize: 11, color: 'oklch(0.80 0.05 148)' }}>
               # 1. 启动透明代理（会临时修改 /etc/hosts，退出时自动恢复）<br/>
-              cd llm-context-viz<br/>
-              # 在待分析会话的项目目录下运行，确保 sysPrompt/tools 与该会话一致<br/>
-              cd /path/to/session-project<br/>
-              sudo node /path/to/llm-context-viz/scripts/transparent-proxy.cjs --cwd $(pwd) -- claude -p "say hi"<br/><br/>
-              # 2. 代理会在当前目录生成 .claude-trace/api-log-*.jsonl<br/>
+              {sessionCwd
+                ? `# 已自动填入当前会话的项目目录 (${sessionCwd})<br/><span style="background:oklch(0.24 0.01 265);padding:2px 4px;border-radius:3px;display:inline-block;margin-top:4px;white-space:pre-wrap;word-break:break-all">${proxyCommand}</span><br/><br/>`
+                : '# 未加载会话，请先打开一个会话以自动检测项目目录<br/>sudo node scripts/transparent-proxy.cjs --cwd /path/to/project -- claude -p "say hi"<br/><br/>'}
+              # 2. 代理会在运行目录生成 .claude-trace/api-log-*.jsonl<br/>
               # 3. 在此页面拖拽上传该文件
             </div>
           </div>
