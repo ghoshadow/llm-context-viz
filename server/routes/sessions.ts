@@ -505,7 +505,7 @@ router.post('/:id/ontology/extract', (req, res) => {
         const seenEntities = new Set<string>();
 
         for (const shard of shards) {
-          send('shardStart', { shardIndex: shard.index });
+          send('shard-start', { shardIndex: shard.index });
 
           // Build context text for this shard
           const context = shard.turns.map(t =>
@@ -555,12 +555,12 @@ router.post('/:id/ontology/extract', (req, res) => {
                 }
                 allRelations.push(...shardRelations);
               }
-              send('shardDone', { shardIndex: shard.index, candidates: shardCandidates.length, relations: shardRelations.length });
+              send('shard-done', { shardIndex: shard.index, candidates: shardCandidates.length, relations: shardRelations.length });
             } else {
               send('shardError', { shardIndex: shard.index, error: `API ${resp.status}` });
             }
           } catch (e) {
-            send('shardError', { shardIndex: shard.index, error: (e as Error).message });
+            send('shard-error', { shardIndex: shard.index, error: (e as Error).message });
           }
         }
 
