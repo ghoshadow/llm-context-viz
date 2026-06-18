@@ -1162,8 +1162,9 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                       fontSize: 12.5,
                       fontWeight: 600,
                       color: SEMANTIC.textPrimary3,
-                      width: 62,
+                      width: 85,
                       textAlign: 'right',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {r.tokensFmt}
@@ -1308,7 +1309,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
                       marginTop: 3,
                     }}
                   >
-                    {g.tokensFmt} tok
+                    {g.tokensFmt}
                   </div>
                   <div
                     style={{

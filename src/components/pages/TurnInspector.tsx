@@ -315,7 +315,7 @@ function ContextStructure({
             <span className="legend-dot" style={{ background: l.color }} />
             <span className="legend-label">{l.label}</span>
             {l.estimated && <span className="legend-badge">估算</span>}
-            <span className="legend-tokens" style={{ width: 56, textAlign: 'right' }}>
+            <span className="legend-tokens" style={{ width: 85, textAlign: 'right', whiteSpace: 'nowrap' }}>
               {l.tokensFmt}
             </span>
             <span className="legend-pct" style={{ width: 46, textAlign: 'right' }}>
