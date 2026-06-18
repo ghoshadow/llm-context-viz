@@ -40,10 +40,21 @@ export default function OntologyPage() {
   // Auto-extract state
   const [shardSize, setShardSize] = useState(50);
   const [overlap, setOverlap] = useState(5);
+  const [showExtractModal, setShowExtractModal] = useState(false);
+  const [extractMode, setExtractMode] = useState<'full' | 'incremental'>('full');
 
-  const handleStartExtract = useCallback(async () => {
-    await extractOntology({ shardSize, overlap });
-  }, [extractOntology, shardSize, overlap]);
+  const handleStartExtract = useCallback(async (mode: 'full' | 'incremental') => {
+    const fromTurn = mode === 'incremental' && ontologyData
+      ? Math.max(...ontologyData.nodes.map(n => n.firstTurn), 0)
+      : 0;
+    setExtractMode(mode);
+    await extractOntology({ shardSize, overlap, fromTurn });
+  }, [extractOntology, shardSize, overlap, ontologyData]);
+
+  const openExtractModal = useCallback((mode: 'full' | 'incremental') => {
+    setExtractMode(mode);
+    setShowExtractModal(true);
+  }, []);
 
   // Refs
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -234,7 +245,7 @@ export default function OntologyPage() {
               </div>
 
               {/* Start button */}
-              <button onClick={handleStartExtract}
+              <button onClick={() => handleStartExtract('full')}
                 disabled={extractPhase !== 'idle' || ontologyLoading}
                 style={{
                   padding: '9px 20px', borderRadius: 8, cursor: extractPhase === 'idle' ? 'pointer' : 'default',
@@ -346,6 +357,8 @@ export default function OntologyPage() {
           types={ontologyData.types} nodes={ontologyData.nodes} activeTypes={activeTypes}
           turn={turn} maxTurn={maxTurn} playing={playing}
           onToggleType={onToggleType} onSetTurn={onSetTurn} onTogglePlay={onTogglePlay} onRecenter={onRecenter}
+          onUpdate={() => openExtractModal('incremental')}
+          onRebuild={() => openExtractModal('full')}
         />
         <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 350px', gap: 16, marginTop: 16, minHeight: 0 }}>
           <div style={{ position: 'relative', border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 16, background: 'oklch(0.17 0.008 265 / 0.6)', overflow: 'hidden' }}>

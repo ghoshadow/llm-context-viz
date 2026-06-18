@@ -48,7 +48,7 @@ export interface SessionStore {
   deleteSession: (id: string) => Promise<void>;
   fetchOntology: () => Promise<void>;
   buildOntology: (body: { candidates: unknown[]; relations: unknown[]; config?: Record<string, unknown> }) => Promise<boolean>;
-  extractOntology: (options?: { shardSize?: number; overlap?: number }) => Promise<boolean>;
+  extractOntology: (options?: { shardSize?: number; overlap?: number; fromTurn?: number }) => Promise<boolean>;
 
   // Ontology state
   ontologyData: OntologyData | null;
@@ -241,6 +241,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         {
           shardSize: options?.shardSize,
           overlap: options?.overlap,
+          fromTurn: options?.fromTurn ?? 0,
         },
         {
           onStart: (data) => {

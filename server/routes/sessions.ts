@@ -488,21 +488,36 @@ router.post('/:id/ontology/extract', (req, res) => {
 
         const shardSize = Number(req.body.shardSize) || 5;
         const overlap = Number(req.body.overlap) || 1;
+        const fromTurn = Number(req.body.fromTurn) || 0;
         const shards: Array<{ index: number; turns: typeof turns }> = [];
         for (let i = 0; i < turns.length; i += shardSize - overlap) {
-          shards.push({ index: shards.length, turns: turns.slice(i, i + shardSize) });
+          const shardTurns = turns.slice(i, i + shardSize).filter(t => t.index >= fromTurn);
+          if (shardTurns.length > 0) {
+            shards.push({ index: shards.length, turns: shardTurns });
+          }
         }
 
-        send('start', { shards: shards.length, totalTurns: turns.length });
+        send('start', { shards: shards.length, totalTurns: turns.length, fromTurn });
 
         // Load model from session
         const sessionModel = (db.prepare('SELECT model FROM sessions WHERE id = ?').get(sessionId) as any)?.model || 'deepseek-v4-pro';
         const LLM_KEY = process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '';
         const API_URL = (process.env.LLM_BASE_URL || 'https://api.deepseek.com/anthropic') + '/v1/messages';
 
-        const allCandidates: any[] = [];
-        const allRelations: any[] = [];
-        const seenEntities = new Set<string>();
+        // For incremental mode, load existing ontology to merge
+        const existingOntology = fromTurn > 0
+          ? (db.prepare('SELECT ontology_json FROM ontology WHERE session_id = ?').get(sessionId) as any)
+          : null;
+        const existingCandidates = existingOntology
+          ? (JSON.parse(existingOntology.ontology_json)?.nodes || [])
+          : [];
+        const existingIds = new Set(existingCandidates.map((c: any) => c.id));
+
+        const allCandidates: any[] = [...existingCandidates];
+        const allRelations = existingOntology
+          ? (JSON.parse(existingOntology.ontology_json)?.edges || [])
+          : [];
+        const seenEntities = new Set(existingIds);
         const concurrency = 8;
 
         const processShard = async (shard: typeof shards[0]) => {

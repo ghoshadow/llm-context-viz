@@ -12,6 +12,8 @@ interface OntologyToolbarProps {
   onSetTurn: (turn: number) => void;
   onTogglePlay: () => void;
   onRecenter: () => void;
+  onUpdate?: () => void;
+  onRebuild?: () => void;
 }
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -101,6 +103,8 @@ const OntologyToolbar: React.FC<OntologyToolbarProps> = ({
   onSetTurn,
   onTogglePlay,
   onRecenter,
+  onUpdate,
+  onRebuild,
 }) => {
   return (
     <div style={s.bar}>
@@ -156,6 +160,22 @@ const OntologyToolbar: React.FC<OntologyToolbarProps> = ({
             </button>
           );
         })}
+      </div>
+
+      {/* Update / Rebuild buttons */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {onUpdate && (
+          <button onClick={onUpdate} title="增量更新：仅提取新增轮次的实体"
+            style={{ border: '1px solid oklch(0.45 0.09 165 / 0.5)', borderRadius: 8, padding: '6px 12px', background: 'oklch(0.74 0.12 165 / 0.10)', color: 'oklch(0.84 0.10 165)', cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, whiteSpace: 'nowrap' as const }}>
+            + 更新
+          </button>
+        )}
+        {onRebuild && (
+          <button onClick={onRebuild} title="重建：从零重新提取全部实体"
+            style={{ border: '1px solid oklch(0.45 0.09 165 / 0.35)', borderRadius: 8, padding: '6px 12px', background: 'transparent', color: 'oklch(0.74 0.10 165)', cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, whiteSpace: 'nowrap' as const }}>
+            ↻ 重建
+          </button>
+        )}
       </div>
 
       {/* Spacer */}
