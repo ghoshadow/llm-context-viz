@@ -46,6 +46,11 @@ router.post('/upload', upload.single('file'), (req, res) => {
     }
 
     // Run the full pipeline
+    loadCalibratedConstants();
+    try {
+      const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
+      if (existsSync(globalMd)) setMemoryChars(readFileSync(globalMd, 'utf-8').length);
+    } catch {}
     const { summary, turns } = runPipeline(content, originalFilename);
 
     const sessionId = hash.substring(0, 16);
@@ -62,72 +67,47 @@ router.post('/upload', upload.single('file'), (req, res) => {
     const insertSession = db.prepare(`
       INSERT INTO sessions (
         id, filename, file_hash, model, version, cwd,
-        total_requests, peak_index, peak_tokens, total_output, context_limit,
+        total_requests, peak_index, peak_tokens, peak_cache_hit, peak_turn_idx, peak_step, total_output, context_limit,
         turn_count, raw_size, categories_json, tools_json, series_json, raw_jsonl
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?
       )
     `);
 
     const insertTurn = db.prepare(`
       INSERT INTO turns (
-        id, session_id, turn_index, prompt, timestamp,
-        asst_reqs, max_input, out_tok, cum_total, dur_ms,
-        model_ms, tool_ms, sub_ms, step_count,
-        comp_json, delta_json, tools_json, segs_json, longest_json
-      ) VALUES (
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?, ?, ?
-      )
+        id, session_id, turn_index, prompt, timestamp, asst_reqs,
+        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, cum_tools_json, compression_reset, dur_ms, model_ms, tool_ms, sub_ms,
+        step_count, comp_json, delta_json, tools_json, segs_json, longest_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const txn = db.transaction(() => {
       insertSession.run(
-        sessionId,
-        originalFilename,
-        hash,
-        summary.session.model,
-        summary.session.version,
-        summary.session.cwd,
-        summary.session.requests,
-        summary.session.peakIndex,
-        summary.session.peakTokens,
-        summary.session.totalOutput,
-        summary.session.contextLimit,
-        turns.length,
-        Buffer.byteLength(content, 'utf-8'),
-        JSON.stringify(summary.categories),
-        JSON.stringify(summary.tools),
-        JSON.stringify(summary.series),
+        sessionId, originalFilename, hash,
+        summary.session.model, summary.session.version, summary.session.cwd,
+        summary.session.requests, summary.session.peakIndex,
+        summary.session.peakTokens, summary.session.peakCacheHit ?? 0,
+        summary.session.peakTurnIdx ?? 0, summary.session.peakStep ?? 0,
+        summary.session.totalOutput, summary.session.contextLimit,
+        turns.length, Buffer.byteLength(content, 'utf-8'),
+        JSON.stringify(summary.categories), JSON.stringify(summary.tools), JSON.stringify(summary.series),
         content,
       );
 
       for (const turn of turns) {
         const turnId = `${sessionId}-${turn.i}`;
         insertTurn.run(
-          turnId,
-          sessionId,
-          turn.i,
-          turn.prompt,
-          turn.ts,
-          turn.asstReqs,
-          turn.maxInput,
-          turn.outTok,
-          turn.cumTotal,
-          turn.durMs,
-          turn.modelMs,
-          turn.toolMs,
-          turn.subMs,
-          turn.stepCount,
-          JSON.stringify(turn.comp),
-          JSON.stringify(turn.delta),
-          JSON.stringify(turn.tools),
-          JSON.stringify(turn.segs),
-          JSON.stringify(turn.longest),
+          turnId, sessionId, turn.i, turn.prompt, turn.ts, turn.asstReqs,
+          turn.maxInput, turn.maxCacheHit ?? 0, turn.maxReqIdx ?? 0, turn.maxReqStep ?? 0,
+          turn.outTok, turn.cumTotal, (turn as any).cumCacheHit ?? 0,
+          JSON.stringify((turn as any).cumTools ?? {}),
+          (turn as any).compressionReset ? 1 : 0,
+          turn.durMs, turn.modelMs, turn.toolMs, turn.subMs, turn.stepCount,
+          JSON.stringify(turn.comp), JSON.stringify(turn.delta), JSON.stringify(turn.tools),
+          JSON.stringify(turn.segs), JSON.stringify(turn.longest),
         );
       }
     });
@@ -248,15 +228,22 @@ function findJsonlFile(filename: string): string | null {
 router.post('/:id/refresh', (req, res) => {
   try {
     const db = getDb();
-    const session = db.prepare('SELECT id, filename, file_hash FROM sessions WHERE id = ?').get(req.params.id) as { id: string; filename: string; file_hash: string } | undefined;
+    const session = db.prepare('SELECT id, filename, file_hash, raw_jsonl FROM sessions WHERE id = ?').get(req.params.id) as { id: string; filename: string; file_hash: string; raw_jsonl?: string } | undefined;
     if (!session) return res.status(404).json({ error: '会话不存在' });
 
+    let content: string;
+    let sessDir: string;
     const filePath = findJsonlFile(session.filename);
-    if (!filePath) return res.status(404).json({ error: '找不到原始 JSONL 文件: ' + session.filename });
-
-    const content = readFileSync(filePath, 'utf-8');
+    if (filePath) {
+      content = readFileSync(filePath, 'utf-8');
+      sessDir = filePath.replace(/\.jsonl$/, '');
+    } else if (session.raw_jsonl) {
+      content = session.raw_jsonl;
+      sessDir = ''; // sub-agents not available for uploaded sessions
+    } else {
+      return res.status(404).json({ error: '找不到原始 JSONL 数据' });
+    }
     const sids = req.params.id;
-    const sessDir = filePath.replace(/\.jsonl$/, '');
 
     // Re-run pipeline
     loadCalibratedConstants();
@@ -271,7 +258,7 @@ router.post('/:id/refresh', (req, res) => {
     setMemoryChars(memChars);
 
     const { summary, turns } = runPipeline(content, session.filename);
-    enrichWithSubAgents(turns, sessDir);
+    if (sessDir) enrichWithSubAgents(turns, sessDir);
 
     // Replace turns in a transaction
     const deleteTurns = db.prepare('DELETE FROM turns WHERE session_id = ?');
