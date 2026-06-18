@@ -431,7 +431,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
       key: c.key,
       label: c.label,
       color: COLORS[c.key] ?? 'oklch(0.5 0 0)',
-      tokensFmt: fmt(c.tokens),
+      tokensFmt: fmt(c.tokens) + ' tok',
       pctFmt: ((c.tokens / CATSUM) * 100).toFixed(2) + '%',
       barPct: (c.tokens / maxTok) * 100,
       op: opFor(c.key),
@@ -501,7 +501,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
         label: meta.label,
         desc: meta.desc,
         accent: meta.accent,
-        tokensFmt: fmt(gtot),
+        tokensFmt: fmt(gtot) + ' tok',
         pctFmt: ((gtot / CATSUM) * 100).toFixed(2) + '%',
         conic: `conic-gradient(${stops.join(',')})`,
         members: mem.map((c) => ({
