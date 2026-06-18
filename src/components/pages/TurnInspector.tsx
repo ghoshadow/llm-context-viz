@@ -1388,7 +1388,7 @@ export default function TurnInspector() {
                   </div>
                   <div className="stat-card">
                     <div className="stat-value" style={{ color: SEMANTIC.textAccent }}>
-                      {fmt(currentTurn.max_input)} tok
+                      {fmt(currentTurn.max_input)}<span style={{fontSize:11,color:'oklch(0.55 0.012 265)',marginLeft:4}}>tok</span>
                     </div>
                     <div className="stat-label">
                       峰值输入 · 步骤 #{(currentTurn.max_req_step ?? 0) + 1}
