@@ -503,65 +503,43 @@ router.post('/:id/ontology/extract', (req, res) => {
         const allCandidates: any[] = [];
         const allRelations: any[] = [];
         const seenEntities = new Set<string>();
+        const concurrency = 8;
 
-        for (const shard of shards) {
+        const processShard = async (shard: typeof shards[0]) => {
           send('shard-start', { shardIndex: shard.index });
-
-          // Build context text for this shard
           const context = shard.turns.map(t =>
             `[Turn ${t.index}] User: ${t.userMsg.slice(0, 300)}\nThinking: ${t.thinking.slice(0, 500)}\nReply: ${t.asstText.slice(0, 200)}`
           ).join('\n---\n');
-
-          const prompt = `Analyze this conversation transcript and extract key entities and their relationships.\n\nOutput a JSON object with "candidates" (entities) and "relations" (relationships between entities).\n\nEach candidate: { id: kebab-case, label: short name, type: "mechanism"|"agent"|"system"|"error"|"func"|"code"|"command", conf: 0-1, firstTurn: number, turns: [turn numbers], snippet: "brief description" }\n\nEach relation: { s: source_id, t: target_id, label: relationship, firstTurn: number, conf: 0-1 }\n\nConversation:\n${context.slice(0, 8000)}`;
-
+          const prompt = `Analyze this conversation transcript and extract key entities and their relationships.\n\nOutput ONLY a JSON object with "candidates" (entities) and "relations" (relationships between entities). No other text.\n\nEach candidate: { id: kebab-case, label: short name, type: "mechanism"|"agent"|"system"|"error"|"func"|"code"|"command", conf: 0-1, firstTurn: number, turns: [turn numbers], snippet: "brief description" }\n\nEach relation: { s: source_id, t: target_id, label: relationship, firstTurn: number, conf: 0-1 }\n\nConversation:\n${context.slice(0, 8000)}`;
           try {
             const resp = await fetch(API_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': LLM_KEY,
-                'anthropic-version': '2023-06-01',
-              },
-              body: JSON.stringify({
-                model: sessionModel,
-                max_tokens: 4000,
-                messages: [{ role: 'user', content: prompt }],
-              }),
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': LLM_KEY, 'anthropic-version': '2023-06-01' },
+              body: JSON.stringify({ model: sessionModel, max_tokens: 4000, messages: [{ role: 'user', content: prompt }] }),
               signal: AbortSignal.timeout(120000),
             });
-
             if (resp.ok) {
               const data = await resp.json() as any;
-              const text = data.content?.find((b: any) => b.type === 'text')?.text
-                || data.content?.[0]?.text || '';
-              // Try to parse JSON from LLM response
+              const text = data.content?.find((b: any) => b.type === 'text')?.text || data.content?.[0]?.text || '';
               const jsonMatch = text.match(/\{[\s\S]*\}/);
-              let shardCandidates: any[] = [];
-              let shardRelations: any[] = [];
+              let sc: any[] = [], sr: any[] = [];
               if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-                shardCandidates = (parsed.candidates || []).map((c: any) => ({
-                  ...c, firstTurn: shard.turns[0]?.index ?? c.firstTurn,
-                  turns: c.turns || [],
-                }));
-                shardRelations = (parsed.relations || []).map((r: any) => ({
-                  ...r, firstTurn: shard.turns[0]?.index ?? r.firstTurn,
-                }));
-                for (const c of shardCandidates) {
-                  if (!seenEntities.has(c.id)) {
-                    seenEntities.add(c.id);
-                    allCandidates.push(c);
-                  }
-                }
-                allRelations.push(...shardRelations);
+                sc = (parsed.candidates || []).map((c: any) => ({ ...c, firstTurn: shard.turns[0]?.index ?? c.firstTurn, turns: c.turns || [] }));
+                sr = (parsed.relations || []).map((r: any) => ({ ...r, firstTurn: shard.turns[0]?.index ?? r.firstTurn }));
+                for (const c of sc) { if (!seenEntities.has(c.id)) { seenEntities.add(c.id); allCandidates.push(c); } }
+                allRelations.push(...sr);
               }
-              send('shard-done', { shardIndex: shard.index, candidates: shardCandidates.length, relations: shardRelations.length });
+              send('shard-done', { shardIndex: shard.index, candidates: sc.length, relations: sr.length });
             } else {
               send('shard-error', { shardIndex: shard.index, error: `API ${resp.status}` });
             }
           } catch (e) {
             send('shard-error', { shardIndex: shard.index, error: (e as Error).message });
           }
+        };
+
+        for (let i = 0; i < shards.length; i += concurrency) {
+          await Promise.all(shards.slice(i, i + concurrency).map(processShard));
         }
 
         // Run buildOntology pipeline
