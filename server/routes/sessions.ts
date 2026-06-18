@@ -532,16 +532,19 @@ router.post('/:id/ontology/extract', (req, res) => {
 
             if (resp.ok) {
               const data = await resp.json() as any;
-              const text = data.content?.[0]?.text || '';
+              const text = data.content?.find((b: any) => b.type === 'text')?.text
+                || data.content?.[0]?.text || '';
               // Try to parse JSON from LLM response
               const jsonMatch = text.match(/\{[\s\S]*\}/);
+              let shardCandidates: any[] = [];
+              let shardRelations: any[] = [];
               if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-                const shardCandidates = (parsed.candidates || []).map((c: any) => ({
+                shardCandidates = (parsed.candidates || []).map((c: any) => ({
                   ...c, firstTurn: shard.turns[0]?.index ?? c.firstTurn,
                   turns: c.turns || [],
                 }));
-                const shardRelations = (parsed.relations || []).map((r: any) => ({
+                shardRelations = (parsed.relations || []).map((r: any) => ({
                   ...r, firstTurn: shard.turns[0]?.index ?? r.firstTurn,
                 }));
                 for (const c of shardCandidates) {
@@ -552,7 +555,7 @@ router.post('/:id/ontology/extract', (req, res) => {
                 }
                 allRelations.push(...shardRelations);
               }
-              send('shardDone', { shardIndex: shard.index, candidates: shardCandidates?.length || 0, relations: shardRelations?.length || 0 });
+              send('shardDone', { shardIndex: shard.index, candidates: shardCandidates.length, relations: shardRelations.length });
             } else {
               send('shardError', { shardIndex: shard.index, error: `API ${resp.status}` });
             }
