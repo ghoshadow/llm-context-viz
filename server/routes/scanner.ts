@@ -137,6 +137,13 @@ router.get('/scan', (_req, res) => {
     }
     allFiles.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
 
+    // Filter out empty sessions (0 turns, 0 requests)
+    const filteredFiles = allFiles.filter(f => {
+      // Quick check: if file is very small (< 500 bytes), likely empty
+      if (f.size < 500) return false;
+      return true;
+    });
+
     const db = getDb();
 
     // Load cached scan results
@@ -177,7 +184,7 @@ router.get('/scan', (_req, res) => {
     }
 
     let cached = 0, scanned = 0;
-    const files: FoundFile[] = allFiles.map(f => {
+    const files: FoundFile[] = filteredFiles.map(f => {
       const cachedMeta = cache.get(f.path);
       // Use cache if mtime unchanged and not forcing rescan
       if (!force && cachedMeta && cachedMeta.modified === f.modified) {
