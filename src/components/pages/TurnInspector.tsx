@@ -1069,13 +1069,19 @@ export default function TurnInspector() {
   // Local hover state for context bar (not in UI store to keep it scoped)
   const [hoveredComp, setHoveredComp] = useState<string | null>(null);
 
-  // On mount or session change: fetch turns, reset index, auto-select latest
+  // On mount or session change: fetch turns, auto-select latest
   useEffect(() => {
     if (currentSessionId) {
-      selectTurn(null as any); // reset
       fetchTurns(currentSessionId);
     }
-  }, [currentSessionId, fetchTurns, selectTurn]);
+  }, [currentSessionId, fetchTurns]);
+
+  // Reset turn selection when session changes
+  useEffect(() => {
+    if (currentSessionId) {
+      useSessionStore.setState({ currentTurnIndex: null, currentTurn: null });
+    }
+  }, [currentSessionId]);
 
   useEffect(() => {
     if (turns.length > 0 && currentTurnIndex === null) {
