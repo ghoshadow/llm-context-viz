@@ -952,7 +952,7 @@ function DeltaPanel({ delta }: DeltaPanelProps) {
                     color: SEMANTIC.textPrimary6,
                   }}
                 >
-                  +{r.tokensFmt}
+                  +{r.tokensFmt} tok
                 </span>
               </div>
               <div style={{ height: 6, borderRadius: 4, background: 'oklch(0.24 0.01 265)', overflow: 'hidden' }}>
