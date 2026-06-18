@@ -237,7 +237,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
 
     try {
       await consumeSSE(
-        '/sessions/' + currentSessionId + '/ontology/extract',
+        '/api/sessions/' + currentSessionId + '/ontology/extract',
         {
           shardSize: options?.shardSize,
           overlap: options?.overlap,

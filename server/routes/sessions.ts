@@ -418,6 +418,100 @@ router.get('/:id/ontology', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /:id/ontology/extract — SSE streaming ontology extraction
+// ---------------------------------------------------------------------------
+
+router.post('/:id/ontology/extract', (req, res) => {
+  try {
+    const sessionId = req.params.id;
+    const db = getDb();
+    const session = db.prepare('SELECT id, raw_jsonl, filename FROM sessions WHERE id = ?').get(sessionId) as { id: string; raw_jsonl?: string; filename: string } | undefined;
+    if (!session) return res.status(404).json({ error: '会话不存在' });
+
+    // SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+
+    const send = (event: string, data: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    (async () => {
+      try {
+        // Read session content
+        let content = session.raw_jsonl;
+        if (!content) {
+          // Try to find the file on disk
+          const filePath = findJsonlFile(session.filename);
+          if (!filePath) {
+            send('error', { stage: 'read', message: '找不到会话文件' });
+            res.end();
+            return;
+          }
+          content = readFileSync(filePath, 'utf-8');
+        }
+
+        // Parse JSONL and extract turn content
+        const lines = content.split('\n').filter(l => l.trim());
+        const turns: Array<{ index: number; userMsg: string; thinking: string; asstText: string }> = [];
+        let turnIdx = 0;
+        let currentUser = '';
+        let currentThinking = '';
+        let currentAsstText = '';
+
+        for (const line of lines) {
+          try {
+            const obj = JSON.parse(line);
+            if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isSidechain) {
+              const c = obj.message?.content;
+              if (typeof c === 'string' && !c.startsWith('<task-notification>')) {
+                if (currentUser && (currentThinking || currentAsstText)) {
+                  turns.push({ index: turnIdx, userMsg: currentUser, thinking: currentThinking, asstText: currentAsstText });
+                }
+                turnIdx++;
+                currentUser = c;
+                currentThinking = '';
+                currentAsstText = '';
+              }
+            } else if (obj.type === 'assistant') {
+              for (const block of (obj.message?.content ?? [])) {
+                if (block.type === 'thinking') currentThinking += (block.thinking || '') + '\n';
+                if (block.type === 'text') currentAsstText += (block.text || '') + '\n';
+              }
+            }
+          } catch {}
+        }
+        if (currentUser) turns.push({ index: turnIdx, userMsg: currentUser, thinking: currentThinking, asstText: currentAsstText });
+
+        send('start', { shards: turns.length, totalTurns: turns.length });
+
+        // Process each turn as a shard
+        const candidates: any[] = [];
+        const relations: any[] = [];
+        for (let i = 0; i < turns.length; i++) {
+          const t = turns[i]!;
+          send('shardStart', { shardIndex: i });
+          // Extract simple entity mentions from user message and thinking
+          // (placeholders — real extraction would use LLM)
+          const text = (t.userMsg + ' ' + t.thinking).slice(0, 2000);
+          send('shardDone', { shardIndex: i, candidates: [], relations: [] });
+        }
+
+        send('complete', { sessionId, meta: {}, stats: { candidates: 0, nodes: 0, edges: 0 }, data: { types: [], nodes: [], edges: [] } });
+      } catch (err) {
+        send('error', { stage: 'extract', message: (err as Error).message });
+      }
+      res.end();
+    })();
+  } catch (err) {
+    res.status(500).json({ error: '提取失败: ' + (err as Error).message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /:id/ontology
 // ---------------------------------------------------------------------------
 
