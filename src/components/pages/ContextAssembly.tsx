@@ -1094,6 +1094,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
               }}
             >
               模块明细
+              <span style={{fontSize:10,fontWeight:400,color:'oklch(0.55 0.012 265)',marginLeft:6,border:'1px solid oklch(0.40 0.012 265)',borderRadius:4,padding:'1px 5px'}}>估算</span>
             </h2>
             <span
               style={{
@@ -1207,6 +1208,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
           }}
         >
           上下文的三个层次
+          <span style={{fontSize:10,fontWeight:400,color:'oklch(0.55 0.012 265)',marginLeft:6,border:'1px solid oklch(0.40 0.012 265)',borderRadius:4,padding:'1px 5px'}}>估算</span>
         </h2>
         <div
           style={{
@@ -1482,6 +1484,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
             }}
           >
             子 Agent（Task）
+            <span style={{fontSize:10,fontWeight:400,color:'oklch(0.55 0.012 265)',marginLeft:6,border:'1px solid oklch(0.40 0.012 265)',borderRadius:4,padding:'1px 5px'}}>估算</span>
           </h2>
           <p
             style={{
