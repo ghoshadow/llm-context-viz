@@ -78,6 +78,7 @@ export default function ScannerModal() {
 
   const files = useSessionStore(s => s.scanFiles);
   const status = useSessionStore(s => s.scanStatus);
+  const closeScanner = useSessionStore(s => s.closeScanner);
   const setScanFiles = useSessionStore(s => s.setScanFiles);
   const closeScanner = useSessionStore(s => s.closeScanner);
   const fetchSessions = useSessionStore(s => s.fetchSessions);
@@ -117,12 +118,8 @@ export default function ScannerModal() {
       });
       const data = await resp.json();
       if (data.imported || data.sessionId) {
-        // Mark as imported in cached state and update the count
-        const updated = files.map(f => f.path === file.path ? { ...f, imported: true } : f);
-        const newImported = updated.filter(f => f.imported).length;
-        setScanFiles(updated, `发现 ${updated.length} 个文件，其中 ${newImported} 个已导入`);
+        closeScanner();
         await fetchSessions();
-        // Navigate to the new session
         setPage('inspector');
         await selectSession(data.sessionId);
       }
