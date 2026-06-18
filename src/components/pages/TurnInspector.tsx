@@ -1069,7 +1069,7 @@ export default function TurnInspector() {
   // Local hover state for context bar (not in UI store to keep it scoped)
   const [hoveredComp, setHoveredComp] = useState<string | null>(null);
 
-  // On mount: fetch turns, then auto-select peak turn
+  // On mount: fetch turns, then auto-select latest turn
   useEffect(() => {
     if (currentSessionId) {
       fetchTurns(currentSessionId);
@@ -1078,17 +1078,8 @@ export default function TurnInspector() {
 
   useEffect(() => {
     if (turns.length > 0 && currentTurnIndex === null) {
-      // Auto-select the turn with highest maxInput
-      let bestIdx = 0;
-      let bestVal = -1;
-      turns.forEach((t, i) => {
-        const val = t.max_input ?? 0;
-        if (val > bestVal) {
-          bestVal = val;
-          bestIdx = i;
-        }
-      });
-      selectTurn(bestIdx);
+      // Auto-select the latest turn (first in DESC list)
+      selectTurn(turns[0]!.turn_index);
     }
   }, [turns, currentTurnIndex, selectTurn]);
 
