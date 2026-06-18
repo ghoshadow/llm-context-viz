@@ -102,13 +102,10 @@ export default function ScannerModal() {
     }
   }, [setScanFiles, files]);
 
-  // Auto-load on first open
+  // Auto-load every time the modal opens
   useEffect(() => {
-    if (!hasScanned.current && files.length === 0) {
-      hasScanned.current = true;
-      doScan();
-    }
-  }, [doScan, files.length]);
+    doScan();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doImport = useCallback(async (file: FoundFile) => {
     setImporting(file.path);
