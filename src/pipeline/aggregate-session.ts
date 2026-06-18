@@ -16,33 +16,31 @@ import type { TimelineResult } from './compute-timeline';
 // Session metadata extraction
 // ============================================================================
 
-/** Extract model and version from an assistant or system line. */
+/** Extract model, version, and cwd from the session transcript. */
 function extractSessionMeta(
   groups: TurnGroup[],
 ): Pick<SessionSummary['session'], 'model' | 'version' | 'cwd'> & { gitBranch?: string } {
+  let model = 'unknown';
+  let version = 'unknown';
+  let cwd = '';
+
   for (const group of groups) {
+    // Extract cwd from the userLine (it's on every SessionLine)
+    if (!cwd && group.userLine.cwd) {
+      cwd = group.userLine.cwd;
+    }
+    // Extract model from assistant messages
     for (const line of group.asstLines) {
-      const msg = line.message;
-      if (msg.model) {
-        // model format: "claude-sonnet-4-20250514" -> version is the date part
-        const parts = msg.model.split('-');
-        const version = parts[parts.length - 1] ?? '';
-        return { model: msg.model, version, cwd: '', gitBranch: undefined };
+      if (model === 'unknown' && line.message.model) {
+        model = line.message.model;
+        const parts = model.split('-');
+        version = parts[parts.length - 1] ?? '';
       }
     }
-  }
-  // Fallback: check system lines for project metadata
-  for (const group of groups) {
-    for (const line of group.systemLines) {
-      const msg = line.message as Record<string, unknown> | undefined;
-      if (msg && msg.cwd) {
-        // We already found model from assistant, but supplement cwd from system
-        break;
-      }
-    }
+    if (model !== 'unknown' && cwd) break;
   }
 
-  return { model: 'unknown', version: 'unknown', cwd: '', gitBranch: undefined };
+  return { model, version, cwd, gitBranch: undefined };
 }
 
 // ============================================================================

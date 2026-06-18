@@ -313,6 +313,8 @@ export function parseJsonl(text: string): ParseResult {
       uuid,
       timestamp,
       sessionId: isString(parsed.sessionId) ? parsed.sessionId : '',
+      cwd: isString(parsed.cwd) ? parsed.cwd : '',
+      gitBranch: isString(parsed.gitBranch) ? parsed.gitBranch : '',
     };
 
     if (isString(parsed.parentUuid)) {

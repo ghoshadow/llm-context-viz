@@ -46,6 +46,8 @@ export interface SessionLine {
   parentUuid?: string;
   timestamp: string;
   sessionId: string;
+  cwd?: string;
+  gitBranch?: string;
 }
 
 // --- Assistant line ---
