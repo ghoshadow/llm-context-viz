@@ -255,14 +255,23 @@ function tryParse(contentType, body) {
 async function main() {
   if (process.getuid && process.getuid() !== 0) {
     console.error("This script must be run with sudo (needs port 443 and /etc/hosts access).");
-    console.error("Usage: sudo node transparent-proxy.js [-- claude args...]");
+    console.error("Usage: sudo node transparent-proxy.cjs [--cwd <dir>] [-- claude args...]");
     process.exit(1);
   }
 
   const args = process.argv.slice(2);
   const dashDashIdx = args.indexOf("--");
+  const preArgs = dashDashIdx >= 0 ? args.slice(0, dashDashIdx) : args;
   const claudeArgs = dashDashIdx >= 0 ? args.slice(dashDashIdx + 1) : [];
   if (claudeArgs.length === 0) claudeArgs.push("-p", "say hi"); // default: one-shot
+
+  // Parse --cwd <dir> from pre-args (before --)
+  let workDir = process.cwd();
+  const cwdIdx = preArgs.indexOf("--cwd");
+  if (cwdIdx >= 0 && cwdIdx + 1 < preArgs.length) {
+    workDir = path.resolve(preArgs[cwdIdx + 1]);
+    log(`Working directory: ${workDir}`);
+  }
 
   // Setup log file
   ensureDir(LOG_DIR);
@@ -296,7 +305,7 @@ async function main() {
       NODE_TLS_REJECT_UNAUTHORIZED: "0",
     },
     stdio: "inherit",
-    cwd: process.cwd(),
+    cwd: workDir,
   });
 
   const cleanup = () => {

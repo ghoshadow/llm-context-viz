@@ -389,7 +389,9 @@ export default function CalibratePage() {
             <div style={{ fontFamily: MONO, fontSize: 11, color: 'oklch(0.80 0.05 148)' }}>
               # 1. 启动透明代理（会临时修改 /etc/hosts，退出时自动恢复）<br/>
               cd llm-context-viz<br/>
-              sudo node scripts/transparent-proxy.cjs -- claude -p "say hi"<br/><br/>
+              # 在待分析会话的项目目录下运行，确保 sysPrompt/tools 与该会话一致<br/>
+              cd /path/to/session-project<br/>
+              sudo node /path/to/llm-context-viz/scripts/transparent-proxy.cjs --cwd $(pwd) -- claude -p "say hi"<br/><br/>
               # 2. 代理会在当前目录生成 .claude-trace/api-log-*.jsonl<br/>
               # 3. 在此页面拖拽上传该文件
             </div>
