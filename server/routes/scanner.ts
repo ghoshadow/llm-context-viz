@@ -156,6 +156,19 @@ router.get('/scan', (_req, res) => {
         last_seen=excluded.last_seen
     `);
 
+    // When forcing rescan, delete all session records so they can be re-imported
+    if (force) {
+      try {
+        const hashRows = db.prepare('SELECT hash FROM scanned_files').all() as { hash: string }[];
+        for (const r of hashRows) {
+          if (r.hash) {
+            db.prepare('DELETE FROM sessions WHERE file_hash = ?').run(r.hash);
+          }
+        }
+        dbImported.clear();
+      } catch { }
+    }
+
     let cached = 0, scanned = 0;
     const files: FoundFile[] = allFiles.map(f => {
       const cachedMeta = cache.get(f.path);
