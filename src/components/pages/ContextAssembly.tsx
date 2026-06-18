@@ -96,7 +96,7 @@ interface GrowthChartProps {
   contextLimit: number;
   xUnit?: string;
   chartHover: { req: number; assembled: number; input: number; output: number; total: number } | null;
-  onMouseMove: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onHoverAt: (frac: number) => void;
   onMouseLeave: () => void;
 }
 
@@ -108,7 +108,7 @@ function GrowthChart({
   requests,
   xUnit,
   chartHover,
-  onMouseMove,
+  onHoverAt,
   onMouseLeave,
 }: GrowthChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -158,7 +158,12 @@ function GrowthChart({
         position: 'relative',
         marginTop: 18,
       }}
-      onMouseMove={onMouseMove}
+      onMouseMove={(e) => {
+        if (!svgRef.current) return;
+        const rect = svgRef.current.getBoundingClientRect();
+        const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        onHoverAt(frac);
+      }}
       onMouseLeave={onMouseLeave}
     >
       <svg
@@ -577,27 +582,19 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
   // Chart hover handler
   // ==========================================================================
 
-  const handleChartMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!series.length || !svgRef.current) return;
-      const rect = svgRef.current.getBoundingClientRect();
-      let frac = (e.clientX - rect.left) / rect.width;
-      frac = Math.max(0, Math.min(1, frac));
+  const handleChartHoverAt = useCallback(
+    (frac: number) => {
+      if (!series.length) return;
       const req = frac * (series[series.length - 1]?.i ?? 510);
       let best = series[0]!;
       let bd = Infinity;
       for (const p of series) {
         const d = Math.abs(p.i - req);
-        if (d < bd) {
-          bd = d;
-          best = p;
-        }
+        if (d < bd) { bd = d; best = p; }
       }
       setChartHover({
-        req: best.i,
-        assembled: best.assembled,
-        input: best.input,
-        output: best.output,
+        req: best.i, assembled: best.assembled,
+        input: best.input, output: best.output,
         total: best.input + best.output,
       });
     },
@@ -1769,7 +1766,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
           contextLimit={derived.contextLimit}
           xUnit={isCum ? '轮' : undefined}
           chartHover={chartHover}
-          onMouseMove={handleChartMouseMove}
+          onHoverAt={handleChartHoverAt}
           onMouseLeave={handleChartMouseLeave}
         />
 
