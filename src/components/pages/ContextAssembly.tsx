@@ -1838,7 +1838,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
         }}
       >
         <span>
-          Token 数量按 会话记录 ~4 字符/token 估算 · {derived.cwd} · v{derived.version}
+          Token 数量按 ~3.0 字符/token 估算（DeepSeek 官方：英文 3.33 / 中文 1.67） · {derived.cwd} · v{derived.version}
         </span>
         <span>
           标"估算"的模块（系统提示词 · 工具 schema）为近似值 —— 日志中未记录

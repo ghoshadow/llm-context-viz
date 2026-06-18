@@ -22,8 +22,11 @@ import type { TurnContextComposition } from './compute-context';
 
 // Token estimation: use the same 3.5 chars/token ratio as the pipeline
 // calibrator so composition and timeline agree on token counts.
+// DeepSeek official ratio: 1 English char ≈ 0.3 tok (~3.33 chars/tok),
+// 1 Chinese char ≈ 0.6 tok (~1.67 chars/tok). Claude Code sessions are
+// mostly English/code, so 3.0 is a reasonable weighted average.
 function estTokens(text: string): number {
-  return text.length / 3.5;
+  return text.length / 3.0;
 }
 
 function roundTok(text: string): number {

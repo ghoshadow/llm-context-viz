@@ -62,12 +62,12 @@ export type { TimelineResult } from './compute-timeline';
  *
  * The hardcoded system-module character counts used previously turned out to
  * be unreliable — the actual system prompt varies by CLI version, enabled
- * skills, MCP servers, etc.  Instead we use a fixed 3.5 chars/token ratio
- * that sits between ~4 (prose) and ~2.5 (code/JSON), giving reasonable
- * estimates for mixed-content Claude Code sessions.
+ * skills, MCP servers, etc.  Instead we use 3.0 chars/token, a weighted
+ * average between English (1 char ≈ 0.3 tok → 3.33) and Chinese
+ * (1 char ≈ 0.6 tok → 1.67), per DeepSeek official docs.
  */
 function calibrateEstimator(_groups: TurnGroup[]): TokenEstimator {
-  return { estimate(text: string): number { return text.length / 3.5; } };
+  return { estimate(text: string): number { return text.length / 3.0; } };
 }
 
 /** Default token estimator: ~4 chars per token (English text heuristic). */

@@ -102,7 +102,7 @@ export function setMemoryChars(chars: number): void {
  * Handles text blocks, nested tool_result blocks, and nested text children.
  * Image blocks are ignored (no text contribution).
  */
-/** Per-block JSON wrapper overhead: {"type":"text","text":"..."} ≈ 23 chars. */
+/** Per-block JSON wrapper overhead: {"type":"text","text":"..."} ≈ 23 chars ≈ 8 tok @ 3.0. */
 const BLOCK_WRAPPER_CHARS = 23;
 
 function extractContentText(content: string | ContentBlock[]): string {

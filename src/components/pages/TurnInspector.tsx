@@ -1455,7 +1455,7 @@ export default function TurnInspector() {
       {/* ================================================================ */}
       <footer className="app-footer">
         <span>
-          Token 数量按 ~4 字符/token 估算 · "累计拼装"为到该轮为止拼入上下文的内容总量 · 标"估算"的模块为近似值
+          Token 数量按 ~3.0 字符/token 估算（基于 DeepSeek 官方比率：英文 3.33 / 中文 1.67） · "累计拼装"为到该轮为止拼入上下文的内容总量 · 标"估算"的模块为近似值
         </span>
       </footer>
 
