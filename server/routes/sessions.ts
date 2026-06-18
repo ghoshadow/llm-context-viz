@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import crypto from 'crypto';
 import { getDb } from '../db';
-import { runPipeline } from '../../src/pipeline/index';
+import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
 import { buildOntology } from '../../src/pipeline/build-ontology';
 import { enrichWithSubAgents } from './scanner';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
@@ -259,8 +259,7 @@ router.post('/:id/refresh', (req, res) => {
     const sessDir = filePath.replace(/\.jsonl$/, '');
 
     // Re-run pipeline
-    const { setMemoryChars } = require('../../src/pipeline/index');
-    const { runPipeline: rp } = require('../../src/pipeline/index');
+    loadCalibratedConstants();
     let memChars = 0;
     const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
     if (existsSync(globalMd)) memChars += readFileSync(globalMd, 'utf-8').length;
@@ -270,11 +269,8 @@ router.post('/:id/refresh', (req, res) => {
       if (cwd) { const pm = join(cwd, '.claude', 'CLAUDE.md'); if (existsSync(pm)) memChars += readFileSync(pm, 'utf-8').length; }
     } catch {}
     setMemoryChars(memChars);
-    const { loadCalibratedConstants } = require('../../src/pipeline/index');
-    loadCalibratedConstants();
 
-    const { summary, turns } = rp(content, session.filename);
-    const { enrichWithSubAgents } = require('./scanner');
+    const { summary, turns } = runPipeline(content, session.filename);
     enrichWithSubAgents(turns, sessDir);
 
     // Replace turns in a transaction
