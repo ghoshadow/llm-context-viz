@@ -346,7 +346,7 @@ export default function CalibratePage() {
 
       {/* Step 3: Current constants */}
       <section style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 22 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>3. 当前生效的常量</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>2. 当前生效的常量</h2>
         <div style={{
           border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
           background: 'oklch(0.185 0.009 265)',
@@ -383,32 +383,29 @@ export default function CalibratePage() {
 
       {/* Footer: proxy usage */}
       <footer style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 18 }}>
-        <details open style={{ fontSize: 12.5, color: S.textDesc3, lineHeight: 1.7 }}>
-          <summary style={{ cursor: 'pointer', color: S.textSecondary, fontSize: 13, fontWeight: 500 }}>
-            如何截获 API 请求？</summary>
-          <div style={{ marginTop: 10, background: 'oklch(0.18 0.01 265)', padding: '14px 18px', borderRadius: 10, border: `1px solid ${S.borderSubtle1}` }}>
-            <div style={{ fontFamily: MONO, fontSize: 11, color: 'oklch(0.80 0.05 148)', lineHeight: 1.8 }}>
-              <div># 1. 启动透明代理（会临时修改 /etc/hosts，退出时自动恢复）</div>
-              {sessionCwd ? (
-                <div>
-                  <div style={{ color: S.textMuted }}># 已自动填入当前会话的项目目录 ({sessionCwd})</div>
-                  <span style={{ background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {proxyCommand}
-                  </span>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ color: S.textMuted }}># 未加载会话，请先打开一个会话以自动检测项目目录</div>
-                  <span style={{ background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {`sudo node ${projectRoot || '/path/to/llm-context-viz'}/scripts/transparent-proxy.cjs --cwd /path/to/project -- claude -p "say hi"`}
-                  </span>
-                </div>
-              )}
-              <div style={{ marginTop: 8 }}># 2. 代理会在运行目录生成 .claude-trace/api-log-*.jsonl</div>
-              <div># 3. 在此页面拖拽上传该文件</div>
-            </div>
+        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>3. 如何截获 API 请求？</h2>
+        <div style={{ background: 'oklch(0.18 0.01 265)', padding: '14px 18px', borderRadius: 10, border: `1px solid ${S.borderSubtle1}` }}>
+          <div style={{ fontFamily: MONO, fontSize: 11, color: 'oklch(0.80 0.05 148)', lineHeight: 1.8 }}>
+            <div># 1. 启动透明代理（会临时修改 /etc/hosts，退出时自动恢复）</div>
+            {sessionCwd ? (
+              <div>
+                <div style={{ color: S.textMuted }}># 已自动填入当前会话的项目目录 ({sessionCwd})</div>
+                <span style={{ background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                  {proxyCommand}
+                </span>
+              </div>
+            ) : (
+              <div>
+                <div style={{ color: S.textMuted }}># 未加载会话，请先打开一个会话以自动检测项目目录</div>
+                <span style={{ background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                  {`sudo node ${projectRoot || '/path/to/llm-context-viz'}/scripts/transparent-proxy.cjs --cwd /path/to/project -- claude -p "say hi"`}
+                </span>
+              </div>
+            )}
+            <div style={{ marginTop: 8 }}># 2. 代理会在运行目录生成 .claude-trace/api-log-*.jsonl</div>
+            <div># 3. 在此页面拖拽上传该文件</div>
           </div>
-        </details>
+        </div>
       </footer>
     </div>
   );
