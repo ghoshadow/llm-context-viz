@@ -189,7 +189,7 @@ export default function CalibratePage() {
       <section style={{ marginTop: 28 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>1. 上传截获的 API 日志</h2>
         <p style={{ fontSize: 13, color: S.textDesc3, marginBottom: 16, lineHeight: 1.6 }}>
-          在终端运行以下命令截获一次请求（{sessionCwd ? '已自动填入当前会话的项目目录' : '请先打开一个会话'}}），然后上传生成的 <code style={{ fontFamily: MONO, background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4 }}>.claude-trace/api-log-*.jsonl</code> 文件。
+          在终端运行以下命令截获一次请求（{sessionCwd ? '已自动填入当前会话的项目目录' : '请先打开一个会话'}），然后上传生成的 <code style={{ fontFamily: MONO, background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4 }}>.claude-trace/api-log-*.jsonl</code> 文件。
         </p>
 
         {/* Drop zone */}
