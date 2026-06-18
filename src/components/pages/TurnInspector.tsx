@@ -1199,6 +1199,23 @@ export default function TurnInspector() {
           >
             本体建模
           </a>
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setPage('calibrate');
+            }}
+            style={{
+              textDecoration: 'none',
+              border: `1px solid ${SEMANTIC.borderColor}`,
+              borderRadius: 9,
+              padding: '9px 14px',
+              color: SEMANTIC.textSecondary,
+              background: 'oklch(0.20 0.01 265 / 0.6)',
+            }}
+          >
+            校准常量
+          </a>
           <span
             style={{
               border: `1px solid ${SEMANTIC.borderAccent}`,

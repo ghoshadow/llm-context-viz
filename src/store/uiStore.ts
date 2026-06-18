@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-type Page = 'home' | 'assembly' | 'inspector' | 'ontology';
+type Page = 'home' | 'assembly' | 'inspector' | 'ontology' | 'calibrate';
 
 interface UIStore {
   // Page navigation

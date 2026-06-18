@@ -4,6 +4,7 @@ import HomePage from './components/home/HomePage';
 import ContextAssembly from './components/pages/ContextAssembly';
 import TurnInspector from './components/pages/TurnInspector';
 import OntologyPage from './components/ontology/OntologyPage';
+import CalibratePage from './components/pages/CalibratePage';
 import UploadModal from './components/upload/UploadModal';
 import ScannerModal from './components/upload/ScannerModal';
 
@@ -19,6 +20,7 @@ function App() {
       {page === 'assembly' && currentSessionId && <ContextAssembly />}
       {page === 'inspector' && currentSessionId && <TurnInspector />}
       {page === 'ontology' && currentSessionId && <OntologyPage />}
+      {page === 'calibrate' && <CalibratePage />}
       {uploadOpen && <UploadModal />}
       {scannerOpen && <ScannerModal />}
     </div>
