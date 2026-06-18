@@ -63,6 +63,16 @@ interface FoundFile {
 }
 
 /** Quick metadata extraction from JSONL without running the full pipeline. */
+function isQuickToolResult(obj: any): boolean {
+  if (obj.message?.role !== 'user') return false;
+  const content = obj.message?.content;
+  if (!content) return false;
+  if (Array.isArray(content)) {
+    return content.every((b: any) => b.type === 'tool_result');
+  }
+  return false; // string content = real user message
+}
+
 function quickMeta(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
   let title: string | undefined;
   let model: string | undefined;
@@ -84,7 +94,7 @@ function quickMeta(filePath: string): { title?: string; model?: string; requests
           const tok = obj.message?.usage?.input_tokens;
           if (tok && tok > peakTokens) peakTokens = tok;
           if (!model && obj.message?.model) model = obj.message.model;
-        } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isSidechain) {
+        } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isSidechain && !isQuickToolResult(obj)) {
           if (!title && typeof obj.message?.content === 'string') {
             title = (obj.message.content as string).slice(0, 80);
           }

@@ -15,6 +15,7 @@
  */
 
 import { getDb } from '../server/db.js';
+import { extractSessionContent } from '../server/content/extract-session.js';
 import { readFileSync, existsSync } from 'fs';
 
 const arg = process.argv[2];
@@ -31,7 +32,7 @@ if (arg.endsWith('.jsonl')) {
     process.exit(1);
   }
   const raw = readFileSync(arg, 'utf-8');
-  outputFromRaw(raw);
+  process.stdout.write(extractSessionContent(raw));
   process.exit(0);
 }
 
@@ -49,7 +50,7 @@ if (!session) {
 
 // 来源 1: raw_jsonl
 if (session.raw_jsonl) {
-  outputFromRaw(session.raw_jsonl);
+  process.stdout.write(extractSessionContent(session.raw_jsonl));
   process.exit(0);
 }
 
@@ -60,56 +61,9 @@ const scanned = db
 
 if (scanned?.path && existsSync(scanned.path)) {
   const content = readFileSync(scanned.path, 'utf-8');
-  outputFromRaw(content);
+  process.stdout.write(extractSessionContent(content));
   process.exit(0);
 }
 
 console.error('无法获取原始 JSONL 内容。尝试通过 API 兜底...');
 process.exit(1);
-
-// ════════════════════════════════════════════════════════════════════════════
-
-function outputFromRaw(raw: string): void {
-  const lines = raw.trim().split('\n').filter(Boolean);
-  let turnNum = 0;
-  const out: string[] = [];
-
-  for (const line of lines) {
-    try {
-      const obj = JSON.parse(line);
-      const { type, message: msg } = obj;
-
-      if (type === 'user' && msg?.role === 'user') {
-        turnNum++;
-        let content = '';
-        if (typeof msg.content === 'string') {
-          content = msg.content;
-        } else if (Array.isArray(msg.content)) {
-          // 跳过纯工具结果行
-          if (msg.content.every((b: { type: string }) => b.type === 'tool_result')) continue;
-          const texts: string[] = [];
-          for (const block of msg.content) {
-            if (block.type === 'text' && block.text) texts.push(block.text);
-          }
-          content = texts.join('\n');
-        }
-        if (content.trim()) {
-          out.push(`\n=== TURN ${turnNum} (USER) ===\n${content}`);
-        }
-      } else if (type === 'assistant' && msg?.content) {
-        const blocks = Array.isArray(msg.content) ? msg.content : [msg.content];
-        for (const block of blocks) {
-          if (block.type === 'thinking' && block.thinking) {
-            out.push(`[THINK] ${block.thinking}`);
-          } else if (block.type === 'text' && block.text) {
-            out.push(`[REPLY] ${block.text}`);
-          }
-        }
-      }
-    } catch {
-      // 跳过非法 JSON 行
-    }
-  }
-
-  process.stdout.write(out.join('\n'));
-}

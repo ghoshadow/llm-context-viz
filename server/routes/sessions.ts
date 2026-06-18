@@ -5,7 +5,7 @@ import { getDb } from '../db';
 import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
 import { buildOntology } from '../../src/pipeline/build-ontology';
 import { enrichWithSubAgents } from './scanner';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -218,7 +218,7 @@ router.get('/:id', (req, res) => {
 // POST /:id/refresh — re-parse the original JSONL and update DB turns
 // ---------------------------------------------------------------------------
 
-import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 
 function findJsonlFile(filename: string): string | null {
@@ -536,6 +536,77 @@ router.post('/:id/ontology/build', (req, res) => {
     return res.status(500).json({
       error: err instanceof Error ? err.message : '构建本体数据时出错',
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/ontology/extract — SSE 流式执行 LLM 本体提取
+// ---------------------------------------------------------------------------
+
+router.post('/:id/ontology/extract', async (req, res) => {
+  // SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const send = (event: string, data: Record<string, unknown>) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const db = getDb();
+    const sessionId = req.params.id;
+
+    // 验证会话存在并获取 raw_jsonl
+    const session = db.prepare('SELECT id, raw_jsonl, filename FROM sessions WHERE id = ?').get(sessionId) as
+      | { id: string; raw_jsonl: string | null; filename: string }
+      | undefined;
+    if (!session) {
+      send('error', { message: '会话不存在' });
+      return;
+    }
+
+    // 优先使用 DB 中的 raw_jsonl，否则尝试从磁盘读取
+    let rawJsonl = session.raw_jsonl;
+    if (!rawJsonl) {
+      const filePath = findJsonlFile(session.filename);
+      if (filePath && existsSync(filePath)) {
+        rawJsonl = readFileSync(filePath, 'utf-8');
+      }
+    }
+
+    if (!rawJsonl) {
+      send('error', { message: '该会话的原始 JSONL 数据不可用' });
+      return;
+    }
+
+    // 动态导入 LLM 提取模块
+    const { extractAndBuild } = await import('../llm/extract-ontology.js');
+    const { shardSize, overlap } = req.body || {};
+
+    const result = await extractAndBuild(rawJsonl, sessionId, send, {
+      shardSize: shardSize ?? 50,
+      overlap: overlap ?? 5,
+    });
+
+    if (result.success) {
+      const { data, meta } = result.buildOutput;
+      db.prepare(
+        `INSERT OR REPLACE INTO ontology (session_id, ontology_json, max_turn, updated_at)
+         VALUES (?, ?, ?, datetime('now'))`,
+      ).run(sessionId, JSON.stringify(data), meta.maxTurn);
+      send('complete', { sessionId, maxTurn: meta.maxTurn, stats: result.shardStats });
+    } else {
+      send('error', { message: result.message, detail: result.detail, stage: result.stage });
+    }
+  } catch (err) {
+    console.error('POST /:id/ontology/extract error:', err);
+    send('error', { message: '提取本体数据时出错: ' + (err instanceof Error ? err.message : String(err)) });
+  } finally {
+    res.end();
   }
 });
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { get, post, del } from '../api/client';
+import { consumeSSE } from '../utils/sse.js';
 import type {
   SessionListItem,
   SessionDetail,
@@ -47,12 +48,16 @@ export interface SessionStore {
   deleteSession: (id: string) => Promise<void>;
   fetchOntology: () => Promise<void>;
   buildOntology: (body: { candidates: unknown[]; relations: unknown[]; config?: Record<string, unknown> }) => Promise<boolean>;
+  extractOntology: (options?: { shardSize?: number; overlap?: number }) => Promise<boolean>;
 
   // Ontology state
   ontologyData: OntologyData | null;
   ontologyLoading: boolean;
   ontologyError: string | null;
   ontologyFetched: boolean;
+  extractPhase: 'idle' | 'extracting' | 'merging' | 'building';
+  extractProgress: { shardsTotal: number; shardsCompleted: number; shardDetails: Array<{ index: number; status: 'pending' | 'running' | 'done' | 'error'; candidates?: number; relations?: number; error?: string }> };
+  extractError: string | null;
 }
 
 export const useSessionStore = create<SessionStore>((set, getState) => ({
@@ -81,6 +86,10 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   ontologyLoading: false,
   ontologyError: null,
   ontologyFetched: false,
+
+  extractPhase: 'idle' as const,
+  extractProgress: { shardsTotal: 0, shardsCompleted: 0, shardDetails: [] },
+  extractError: null,
 
   fetchSessions: async () => {
     set({ sessionsLoading: true, sessionsError: null });
@@ -214,6 +223,108 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       set({
         ontologyLoading: false,
         ontologyError: err instanceof Error ? err.message : 'Build failed',
+      });
+      return false;
+    }
+  },
+
+  extractOntology: async (options) => {
+    const { currentSessionId } = getState();
+    if (!currentSessionId) return false;
+
+    set({ extractPhase: 'extracting', extractError: null });
+    let succeeded = false;
+
+    try {
+      await consumeSSE(
+        '/sessions/' + currentSessionId + '/ontology/extract',
+        {
+          shardSize: options?.shardSize,
+          overlap: options?.overlap,
+        },
+        {
+          onStart: (data) => {
+            const shardDetails = Array.from({ length: data.shards }, (_, i) => ({
+              index: i,
+              status: 'pending' as const,
+            }));
+            set({
+              extractProgress: {
+                shardsTotal: data.shards,
+                shardsCompleted: 0,
+                shardDetails,
+              },
+            });
+          },
+          onShardStart: (data) => {
+            set((state) => {
+              const details = state.extractProgress.shardDetails.map((s) =>
+                s.index === data.shardIndex ? { ...s, status: 'running' as const } : s,
+              );
+              return { extractProgress: { ...state.extractProgress, shardDetails: details } };
+            });
+          },
+          onShardDone: (data) => {
+            set((state) => {
+              const details = state.extractProgress.shardDetails.map((s) =>
+                s.index === data.shardIndex
+                  ? {
+                      ...s,
+                      status: 'done' as const,
+                      candidates: Array.isArray(data.candidates) ? data.candidates.length : undefined,
+                      relations: Array.isArray(data.relations) ? data.relations.length : undefined,
+                    }
+                  : s,
+              );
+              return {
+                extractProgress: {
+                  ...state.extractProgress,
+                  shardsCompleted: state.extractProgress.shardsCompleted + 1,
+                  shardDetails: details,
+                },
+              };
+            });
+          },
+          onShardError: (data) => {
+            set((state) => {
+              const details = state.extractProgress.shardDetails.map((s) =>
+                s.index === data.shardIndex
+                  ? { ...s, status: 'error' as const, error: data.error }
+                  : s,
+              );
+              return {
+                extractProgress: {
+                  ...state.extractProgress,
+                  shardDetails: details,
+                },
+              };
+            });
+          },
+          onMerge: () => {
+            set({ extractPhase: 'merging' });
+          },
+          onBuild: () => {
+            set({ extractPhase: 'building' });
+          },
+          onComplete: () => {
+            succeeded = true;
+            getState().fetchOntology();
+            set({ extractPhase: 'idle' });
+          },
+          onError: (data) => {
+            set({
+              extractError: data.message,
+              extractPhase: 'idle',
+            });
+          },
+        },
+      );
+
+      return succeeded;
+    } catch (err) {
+      set({
+        extractPhase: 'idle',
+        extractError: err instanceof Error ? err.message : 'Extraction failed',
       });
       return false;
     }

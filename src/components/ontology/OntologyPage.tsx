@@ -25,6 +25,10 @@ export default function OntologyPage() {
   const ontologyFetched = useSessionStore((s) => s.ontologyFetched);
   const fetchOntology = useSessionStore((s) => s.fetchOntology);
   const buildOntology = useSessionStore((s) => s.buildOntology);
+  const extractOntology = useSessionStore((s) => s.extractOntology);
+  const extractPhase = useSessionStore((s) => s.extractPhase);
+  const extractProgress = useSessionStore((s) => s.extractProgress);
+  const extractError = useSessionStore((s) => s.extractError);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
 
   // Build form state
@@ -32,6 +36,14 @@ export default function OntologyPage() {
   const [buildExpanded, setBuildExpanded] = useState(false);
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [buildErr, setBuildErr] = useState<string | null>(null);
+
+  // Auto-extract state
+  const [shardSize, setShardSize] = useState(50);
+  const [overlap, setOverlap] = useState(5);
+
+  const handleStartExtract = useCallback(async () => {
+    await extractOntology({ shardSize, overlap });
+  }, [extractOntology, shardSize, overlap]);
 
   // Refs
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -187,9 +199,122 @@ export default function OntologyPage() {
           <h2 style={{ fontSize: 20, fontWeight: 600, color: SEMANTIC.textPrimary, marginBottom: 12 }}>暂无本体数据</h2>
           <p>本体数据需要从会话内容中通过语义抽取生成。两种方式提供数据：</p>
           <ol style={{ paddingInlineStart: 20, margin: '8px 0' }}>
+            <li>🤖 自动提取（推荐）：由 LLM 自动从会话内容中抽取实体和关系</li>
             <li>直接上传已构建好的 <code style={{ fontFamily: "'IBM Plex Mono', monospace", background: SEMANTIC.innerCardBg, padding: '2px 6px', borderRadius: 4 }}>OntologyData</code> JSON（POST /:id/ontology）</li>
             <li>通过下面的构建管线，提供候选实体 + 语义关系，自动过滤/消歧/组装</li>
           </ol>
+
+          {/* ── Auto-extract card ──────────────────────────────────────────── */}
+          <div style={{ marginTop: 20, border: '1px solid oklch(0.45 0.09 165 / 0.45)', borderRadius: 12, background: 'oklch(0.74 0.12 165 / 0.06)', overflow: 'hidden' }}>
+            <div style={{ padding: '16px 18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 16 }}>🤖</span>
+                <span style={{ fontSize: 15, fontWeight: 600, color: 'oklch(0.84 0.10 165)' }}>自动提取</span>
+              </div>
+              <p style={{ margin: '0 0 12px', fontSize: 12.5, color: 'oklch(0.60 0.03 165)', lineHeight: 1.6 }}>
+                从会话内容中自动抽取实体和关系。系统将对话按轮次分片，并行调用 LLM 并实时返回进度。
+              </p>
+
+              {/* Params */}
+              <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary }}>
+                  分片大小
+                  <input type="number" value={shardSize} min={10} max={200}
+                    onChange={(e) => setShardSize(Number(e.target.value) || 50)}
+                    disabled={extractPhase !== 'idle'}
+                    style={{ width: 58, padding: '4px 6px', borderRadius: 6, border: `1px solid ${SEMANTIC.borderColor}`, background: SEMANTIC.innerCardBg, color: SEMANTIC.textPrimary, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: 'center' }} />
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary }}>
+                  重叠
+                  <input type="number" value={overlap} min={0} max={50}
+                    onChange={(e) => setOverlap(Number(e.target.value) || 5)}
+                    disabled={extractPhase !== 'idle'}
+                    style={{ width: 58, padding: '4px 6px', borderRadius: 6, border: `1px solid ${SEMANTIC.borderColor}`, background: SEMANTIC.innerCardBg, color: SEMANTIC.textPrimary, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: 'center' }} />
+                </label>
+              </div>
+
+              {/* Start button */}
+              <button onClick={handleStartExtract}
+                disabled={extractPhase !== 'idle' || ontologyLoading}
+                style={{
+                  padding: '9px 20px', borderRadius: 8, cursor: extractPhase === 'idle' ? 'pointer' : 'default',
+                  border: '1px solid oklch(0.45 0.09 165)', fontFamily: "'IBM Plex Mono', monospace",
+                  background: 'oklch(0.74 0.12 165 / 0.16)', color: 'oklch(0.84 0.10 165)',
+                  fontSize: 12.5, opacity: extractPhase === 'idle' ? 1 : 0.5,
+                  transition: 'opacity .15s',
+                }}>
+                {extractPhase === 'idle' ? '▶ 开始自动提取' : extractPhase === 'extracting' ? '提取中...' : extractPhase === 'merging' ? '合并中...' : '构建中...'}
+              </button>
+
+              {/* ── Progress ──────────────────────────────────────────────────── */}
+              {extractPhase !== 'idle' && (
+                <div style={{ marginTop: 14 }}>
+                  {/* Phase text */}
+                  <div style={{ fontSize: 12, color: 'oklch(0.70 0.06 165)', marginBottom: 8, fontFamily: "'IBM Plex Mono', monospace" }}>
+                    {extractPhase === 'extracting'
+                      ? `正在提取实体 (${extractProgress.shardsCompleted}/${extractProgress.shardsTotal} 分片)`
+                      : extractPhase === 'merging'
+                        ? '正在合并分片结果...'
+                        : '正在构建知识图谱...'}
+                  </div>
+
+                  {/* Progress bar */}
+                  {extractPhase === 'extracting' && extractProgress.shardsTotal > 0 && (
+                    <div style={{ height: 5, borderRadius: 3, background: 'oklch(0.24 0.012 265)', overflow: 'hidden', marginBottom: 10 }}>
+                      <div style={{
+                        height: '100%', borderRadius: 3,
+                        width: `${Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)}%`,
+                        background: 'oklch(0.74 0.12 165)',
+                        transition: 'width .3s ease',
+                      }} />
+                    </div>
+                  )}
+
+                  {/* Shard details */}
+                  {extractProgress.shardDetails.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 180, overflowY: 'auto' }}>
+                      {extractProgress.shardDetails.map((s) => (
+                        <div key={s.index} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }}>
+                          <span style={{ flexShrink: 0 }}>
+                            {s.status === 'done' ? '✓' : s.status === 'running' ? '⏳' : s.status === 'error' ? '✗' : '○'}
+                          </span>
+                          <span style={{ color: s.status === 'error' ? 'oklch(0.76 0.13 45)' : s.status === 'done' ? 'oklch(0.78 0.12 150)' : 'oklch(0.58 0.012 265)', minWidth: 52 }}>
+                            分片 {s.index + 1}
+                          </span>
+                          {s.status === 'done' && (
+                            <span style={{ color: SEMANTIC.textMuted }}>
+                              {s.candidates} 实体 · {s.relations} 关系
+                            </span>
+                          )}
+                          {s.status === 'running' && (
+                            <span style={{ color: SEMANTIC.textMuted }}>调用 LLM...</span>
+                          )}
+                          {s.status === 'error' && (
+                            <span style={{ color: 'oklch(0.66 0.12 45)' }}>{s.error || '失败'}</span>
+                          )}
+                          {s.status === 'pending' && (
+                            <span style={{ color: SEMANTIC.textMuted }}>等待中</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Error */}
+                  {extractError && (
+                    <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'oklch(0.66 0.17 25 / 0.12)', border: '1px solid oklch(0.66 0.17 25 / 0.3)', fontSize: 12, color: 'oklch(0.76 0.13 45)', lineHeight: 1.5 }}>
+                      ❌ {extractError}
+                      <button onClick={handleStartExtract}
+                        style={{ marginLeft: 10, padding: '3px 10px', borderRadius: 6, border: '1px solid oklch(0.76 0.13 45 / 0.5)', background: 'transparent', color: 'oklch(0.76 0.13 45)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>
+                        重试
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div style={{ marginTop: 24, border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 12, background: SEMANTIC.cardBg, overflow: 'hidden' }}>
             <button onClick={() => setBuildExpanded(!buildExpanded)}
               style={{ width: '100%', textAlign: 'left', border: 'none', padding: '14px 18px', background: 'transparent', color: SEMANTIC.textPrimary, cursor: 'pointer', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

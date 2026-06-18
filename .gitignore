@@ -5,3 +5,4 @@ data/*.db
 data/*.db-*
 .claude-trace/
 src/pipeline/system-constants.json
+.env
