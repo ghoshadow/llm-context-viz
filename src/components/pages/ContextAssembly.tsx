@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useRef } from 'react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUIStore } from '../../store/uiStore';
 import {
@@ -161,6 +161,7 @@ function GrowthChart({
       onMouseLeave={onMouseLeave}
     >
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         style={{
@@ -575,10 +576,12 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
   // Chart hover handler
   // ==========================================================================
 
+  const svgRef = useRef<SVGSVGElement>(null);
+
   const handleChartMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!series.length) return;
-      const rect = e.currentTarget.getBoundingClientRect();
+      if (!series.length || !svgRef.current) return;
+      const rect = svgRef.current.getBoundingClientRect();
       let frac = (e.clientX - rect.left) / rect.width;
       frac = Math.max(0, Math.min(1, frac));
       const req = frac * (series[series.length - 1]?.i ?? 510);
