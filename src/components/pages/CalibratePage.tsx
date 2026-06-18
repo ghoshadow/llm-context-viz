@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useUIStore } from '../../store/uiStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { post, put, get } from '../../api/client';
@@ -83,14 +83,25 @@ export default function CalibratePage() {
   const setPage = useUIStore((s) => s.setPage);
   const sessionCwd = useSessionStore((s) => s.currentSession?.cwd);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [projectRoot, setProjectRoot] = useState<string | null>(null);
 
-  // Pre-fill the proxy command with the session's cwd if available
+  // Fetch project root from health endpoint
+  useEffect(() => {
+    get<{ projectRoot?: string }>('/health').then(d => {
+      if (d.projectRoot) setProjectRoot(d.projectRoot);
+    }).catch(() => {});
+  }, []);
+
+  // Pre-fill the proxy command with the session's cwd and project root
   const proxyCommand = useMemo(() => {
+    const scriptPath = projectRoot
+      ? `${projectRoot}/scripts/transparent-proxy.cjs`
+      : '/path/to/llm-context-viz/scripts/transparent-proxy.cjs';
     if (sessionCwd) {
-      return `cd ${sessionCwd} && sudo node /path/to/llm-context-viz/scripts/transparent-proxy.cjs --cwd ${sessionCwd} -- claude -p "say hi"`;
+      return `cd ${sessionCwd} && sudo node ${scriptPath} --cwd ${sessionCwd} -- claude -p "say hi"`;
     }
-    return `cd /path/to/session-project && sudo node /path/to/llm-context-viz/scripts/transparent-proxy.cjs --cwd $(pwd) -- claude -p "say hi"`;
-  }, [sessionCwd]);
+    return `cd /path/to/session-project && sudo node ${scriptPath} --cwd $(pwd) -- claude -p "say hi"`;
+  }, [sessionCwd, projectRoot]);
 
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -409,7 +420,7 @@ export default function CalibratePage() {
                 <div>
                   <div style={{ color: S.textMuted }}># 未加载会话，请先打开一个会话以自动检测项目目录</div>
                   <span style={{ background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    sudo node scripts/transparent-proxy.cjs --cwd /path/to/project -- claude -p "say hi"
+                    {`sudo node ${projectRoot || '/path/to/llm-context-viz'}/scripts/transparent-proxy.cjs --cwd /path/to/project -- claude -p "say hi"`}
                   </span>
                 </div>
               )}

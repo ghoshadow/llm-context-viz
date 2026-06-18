@@ -33,8 +33,10 @@ app.use('/api/sessions', sessionsRouter);
 app.use('/api/scanner', scannerRouter);
 app.use('/api/calibrate', calibrateRouter);
 
+const PROJECT_ROOT = path.join(__dirname, '..');
+
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', db: 'connected' });
+  res.json({ status: 'ok', db: 'connected', projectRoot: PROJECT_ROOT });
 });
 
 // In production, serve the built frontend
