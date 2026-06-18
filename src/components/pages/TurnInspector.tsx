@@ -1267,9 +1267,10 @@ export default function TurnInspector() {
                 border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 6, padding: '3px 10px',
                 fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, cursor: 'pointer',
                 background: 'oklch(0.20 0.01 265 / 0.6)', color: SEMANTIC.textSecondary,
+                marginRight: 6,
               }}
             >
-              校准
+              校准常量
             </button>
             <button
               onClick={async () => {
