@@ -1533,37 +1533,40 @@ export default function TurnInspector() {
       })()}
 
       {/* Cumulative context detail modal */}
-      {showCumDetail && currentTurn && (
+      {showCumDetail && currentTurn && (() => {
+        const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
+        const ct: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+        // Replace subagent/toolResults with exact cumTools values to eliminate the
+        // 1-token discrepancy between composition and cumTools estimation paths.
+        const adjComp = { ...comp };
+        if (Object.keys(ct).length > 0) {
+          const subRt = Object.entries(ct).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          const toolRt = Object.entries(ct).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          if (subRt > 0) adjComp.subagent = subRt;
+          if (toolRt > 0) adjComp.toolResults = toolRt;
+        }
+        const compSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
+        const scale = currentTurn.cum_total / compSum;
+
+        return (
         <PeakModal
-          categories={(() => {
-            const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
-            const compSum = Object.values(comp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
-            return buildCategories(comp, currentTurn.cum_total, compSum);
-          })()}
-          tools={(() => {
-            const ct = (currentTurn as any).cum_tools_json;
-            if (!ct) return [];
-            const comp2: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
-            const compSum2 = Object.values(comp2).reduce((a, b) => (a as number) + (b as number), 0) || 1;
-            const scale = currentTurn.cum_total / compSum2;
-            const entries = Object.entries(JSON.parse(ct)) as [string, any][];
-            const rawTokens = entries.map(([, v]) => Math.round((v.resultTokens ?? 0) * scale));
-            const totalScaled = Math.round(entries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) * scale);
-            const drift = totalScaled - rawTokens.reduce((a, b) => a + b, 0);
-            if (drift !== 0 && rawTokens.length > 0) {
-              let maxI = 0;
-              for (let i = 1; i < rawTokens.length; i++) {
-                if (rawTokens[i]! > rawTokens[maxI]!) maxI = i;
-              }
-              rawTokens[maxI]! += drift;
-            }
-            return entries.map(([name, v], i) => ({
-              name,
-              calls: v.calls ?? 0,
-              resultTokens: rawTokens[i]!,
-              task: v.task ?? false,
-            }));
-          })()}
+          categories={buildCategories(adjComp, currentTurn.cum_total, compSum)}
+          tools={Object.keys(ct).length > 0
+            ? (() => {
+                const entries = Object.entries(ct) as [string, any][];
+                const raw = entries.map(([, v]) => Math.round((v.resultTokens ?? 0) * scale));
+                const total = Math.round(entries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) * scale);
+                const drift = total - raw.reduce((a, b) => a + b, 0);
+                if (drift !== 0 && raw.length > 0) {
+                  let mi = 0;
+                  for (let i = 1; i < raw.length; i++) if (raw[i]! > raw[mi]!) mi = i;
+                  raw[mi]! += drift;
+                }
+                return entries.map(([name, v], i) => ({
+                  name, calls: v.calls ?? 0, resultTokens: raw[i]!, task: v.task ?? false,
+                }));
+              })()
+            : []}
           peakTokens={currentTurn.cum_total}
           peakIndex={currentTurnIndex ?? 0}
           turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
@@ -1584,7 +1587,8 @@ export default function TurnInspector() {
           mode="cumulative"
           onClose={() => setShowCumDetail(false)}
         />
-      )}
+        );
+      })()}
     </>
   );
 }
