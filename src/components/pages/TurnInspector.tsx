@@ -228,11 +228,21 @@ function ContextStructure({
     title: `${LABELS[k] ?? k} — ${fmt(comp[k]!)} tok`,
   }));
 
-  const legendRows = order.map((k) => ({
+  // Compute scaled token counts with rounding drift absorbed into the largest category
+  const rawScaled = order.map(k => Math.round(comp[k]! * scale));
+  const drift = cumTotal - rawScaled.reduce((a, b) => a + b, 0);
+  if (drift !== 0 && rawScaled.length > 0) {
+    let maxIdx = 0;
+    for (let i = 1; i < rawScaled.length; i++) {
+      if (rawScaled[i]! > rawScaled[maxIdx]!) maxIdx = i;
+    }
+    rawScaled[maxIdx]! += drift;
+  }
+  const legendRows = order.map((k, i) => ({
     key: k,
     label: LABELS[k] ?? k,
     color: COLORS[k] ?? 'oklch(0.5 0 0)',
-    tokensFmt: fmt(Math.round(comp[k]! * scale)),
+    tokensFmt: fmt(rawScaled[i]!),
     pctFmt: ((comp[k]! / compSum) * 100).toFixed(2) + '%',
     estimated: EST.has(k),
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
