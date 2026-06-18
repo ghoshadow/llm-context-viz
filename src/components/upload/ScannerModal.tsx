@@ -80,7 +80,6 @@ export default function ScannerModal() {
   const status = useSessionStore(s => s.scanStatus);
   const closeScanner = useSessionStore(s => s.closeScanner);
   const setScanFiles = useSessionStore(s => s.setScanFiles);
-  const closeScanner = useSessionStore(s => s.closeScanner);
   const fetchSessions = useSessionStore(s => s.fetchSessions);
   const setPage = useUIStore(s => s.setPage);
   const selectSession = useSessionStore(s => s.selectSession);
