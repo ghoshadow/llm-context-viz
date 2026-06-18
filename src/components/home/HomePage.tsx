@@ -342,7 +342,7 @@ export default function HomePage() {
 
   const handleSelect = async (id: string) => {
     await selectSession(id);
-    setPage('assembly');
+    setPage('inspector');
   };
 
   const handleDelete = (id: string) => {
