@@ -1278,8 +1278,12 @@ export default function TurnInspector() {
               共 {turns.length} 轮
             </span>
             <button
-              onClick={() => {
-                if (currentSessionId) fetchTurns(currentSessionId);
+              onClick={async () => {
+                if (!currentSessionId) return;
+                try {
+                  await fetch('/api/sessions/' + currentSessionId + '/refresh', { method: 'POST' });
+                  fetchTurns(currentSessionId);
+                } catch { fetchTurns(currentSessionId); }
               }}
               disabled={turnsLoading}
               title="刷新轮次列表"

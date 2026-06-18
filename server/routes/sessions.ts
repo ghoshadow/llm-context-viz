@@ -215,6 +215,108 @@ router.get('/:id', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /:id/refresh — re-parse the original JSONL and update DB turns
+// ---------------------------------------------------------------------------
+
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { homedir } from 'os';
+
+function findJsonlFile(filename: string): string | null {
+  const dirs = [join(homedir(), '.claude', 'projects')];
+  for (const dir of dirs) {
+    try {
+      const queue = [dir];
+      while (queue.length > 0) {
+        const d = queue.shift()!;
+        for (const entry of readdirSync(d)) {
+          const full = join(d, entry);
+          try {
+            const st = statSync(full);
+            if (st.isDirectory() && !entry.startsWith('.') && entry !== 'subagents') {
+              if (queue.length < 50) queue.push(full);
+            } else if (st.isFile() && entry === filename) {
+              return full;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+router.post('/:id/refresh', (req, res) => {
+  try {
+    const db = getDb();
+    const session = db.prepare('SELECT id, filename, file_hash FROM sessions WHERE id = ?').get(req.params.id) as { id: string; filename: string; file_hash: string } | undefined;
+    if (!session) return res.status(404).json({ error: '会话不存在' });
+
+    const filePath = findJsonlFile(session.filename);
+    if (!filePath) return res.status(404).json({ error: '找不到原始 JSONL 文件: ' + session.filename });
+
+    const content = readFileSync(filePath, 'utf-8');
+    const sids = req.params.id;
+    const sessDir = filePath.replace(/\.jsonl$/, '');
+
+    // Re-run pipeline
+    const { setMemoryChars } = require('../../src/pipeline/index');
+    const { runPipeline: rp } = require('../../src/pipeline/index');
+    let memChars = 0;
+    const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
+    if (existsSync(globalMd)) memChars += readFileSync(globalMd, 'utf-8').length;
+    try {
+      const firstLine = JSON.parse(content.split('\n')[0]!);
+      const cwd = firstLine.cwd;
+      if (cwd) { const pm = join(cwd, '.claude', 'CLAUDE.md'); if (existsSync(pm)) memChars += readFileSync(pm, 'utf-8').length; }
+    } catch {}
+    setMemoryChars(memChars);
+    const { loadCalibratedConstants } = require('../../src/pipeline/index');
+    loadCalibratedConstants();
+
+    const { summary, turns } = rp(content, session.filename);
+    const { enrichWithSubAgents } = require('./scanner');
+    enrichWithSubAgents(turns, sessDir);
+
+    // Replace turns in a transaction
+    const deleteTurns = db.prepare('DELETE FROM turns WHERE session_id = ?');
+    const insertTurn = db.prepare(`
+      INSERT INTO turns (
+        id, session_id, turn_index, prompt, timestamp, asst_reqs,
+        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, cum_tools_json, compression_reset, dur_ms, model_ms, tool_ms, sub_ms,
+        step_count, comp_json, delta_json, tools_json, segs_json, longest_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const updateSession = db.prepare('UPDATE sessions SET turn_count = ?, total_requests = ?, peak_tokens = ?, peak_cache_hit = ?, peak_turn_idx = ?, peak_step = ?, total_output = ?, context_limit = ?, categories_json = ?, tools_json = ?, series_json = ?, updated_at = datetime(\'now\') WHERE id = ?');
+
+    db.transaction(() => {
+      deleteTurns.run(sids);
+      for (const turn of turns) {
+        insertTurn.run(
+          `${sids}_${turn.i}`, sids, turn.i, turn.prompt, turn.ts, turn.asstReqs,
+          turn.maxInput, turn.maxCacheHit ?? 0, turn.maxReqIdx ?? 0, turn.maxReqStep ?? 0,
+          turn.outTok, turn.cumTotal, (turn as any).cumCacheHit ?? 0,
+          JSON.stringify((turn as any).cumTools ?? {}),
+          (turn as any).compressionReset ? 1 : 0,
+          turn.durMs, turn.modelMs, turn.toolMs, turn.subMs, turn.stepCount,
+          JSON.stringify(turn.comp), JSON.stringify(turn.delta), JSON.stringify(turn.tools),
+          JSON.stringify(turn.segs), JSON.stringify(turn.longest),
+        );
+      }
+      updateSession.run(
+        turns.length, summary.session.requests, summary.session.peakTokens,
+        summary.session.peakCacheHit, summary.session.peakTurnIdx, summary.session.peakStep,
+        summary.session.totalOutput, summary.session.contextLimit,
+        JSON.stringify(summary.categories), JSON.stringify(summary.tools), JSON.stringify(summary.series),
+        sids,
+      );
+    })();
+
+    res.json({ ok: true, turnCount: turns.length });
+  } catch (err) {
+    res.status(500).json({ error: '刷新失败: ' + (err as Error).message });
+  }
+});
+
 // GET /:id/turns
 // ---------------------------------------------------------------------------
 
