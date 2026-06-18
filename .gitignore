@@ -3,3 +3,5 @@ dist
 data/*.db
 .DS_Store
 data/*.db-*
+.claude-trace/
+src/pipeline/system-constants.json
