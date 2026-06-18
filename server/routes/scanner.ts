@@ -177,42 +177,44 @@ router.get('/scan', (_req, res) => {
     }
 
     let cached = 0, scanned = 0;
-    const files: FoundFile[] = allFiles.map(f => {
+    const files: FoundFile[] = [];
+    for (const f of allFiles) {
       const cachedMeta = cache.get(f.path);
-      // Use cache if mtime unchanged and not forcing rescan
+      let result: FoundFile;
       if (!force && cachedMeta && cachedMeta.modified === f.modified) {
-        cached++;
-        return { ...f, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
+        result = { ...f, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
+      } else {
+        let hash = '';
+        let meta: ReturnType<typeof quickMeta> = { requests: 0, peakTokens: 0, turnCount: 0 };
+        try {
+          const content = readFileSync(f.path, 'utf-8');
+          hash = crypto.createHash('sha256').update(content).digest('hex');
+          meta = quickMeta(f.path);
+        } catch { /* can't read */ }
+        try {
+          upsertStmt.run(f.path, f.name, f.size, f.modified, hash, meta.title || null, meta.model || null, meta.requests, meta.peakTokens, meta.turnCount);
+        } catch { }
+        result = { ...f, ...meta, hash, imported: dbImported.has(f.name) };
       }
 
-      // Compute hash and metadata for new/changed files
-      let hash = '';
-      let meta: ReturnType<typeof quickMeta> = { requests: 0, peakTokens: 0, turnCount: 0 };
-      try {
-        const content = readFileSync(f.path, 'utf-8');
-        hash = crypto.createHash('sha256').update(content).digest('hex');
-        meta = quickMeta(f.path);
-      } catch { /* can't read */ }
+      // Filter out sessions with 0 turns and 0 requests
+      if ((result.turnCount ?? 0) === 0 && (result.requests ?? 0) === 0) continue;
 
-      // Persist to cache
-      try {
-        upsertStmt.run(f.path, f.name, f.size, f.modified, hash, meta.title || null, meta.model || null, meta.requests, meta.peakTokens, meta.turnCount);
-      } catch { }
-
-      scanned++;
-      return { ...f, ...meta, hash, imported: dbImported.has(f.name) };
-    });
-
-    // Filter out sessions with 0 turns and 0 requests (empty/irrelevant files)
-    const activeFiles = files.filter(f => (f.turnCount ?? 0) > 0 || (f.requests ?? 0) > 0);
+      files.push(result);
+      if (!force && cachedMeta && cachedMeta.modified === f.modified) {
+        cached++;
+      } else {
+        scanned++;
+      }
+    }
 
     res.json({
       scannedDirs: dirs,
-      totalFiles: activeFiles.length,
-      importedCount: activeFiles.filter(f => f.imported).length,
+      totalFiles: files.length,
+      importedCount: files.filter(f => f.imported).length,
       cached,
       scanned,
-      files: activeFiles,
+      files,
     });
   } catch (err) {
     res.status(500).json({ error: '扫描失败: ' + (err as Error).message });
