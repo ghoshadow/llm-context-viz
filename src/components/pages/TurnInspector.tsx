@@ -1564,11 +1564,12 @@ export default function TurnInspector() {
           asstReqs={turns.filter(t => (t.turn_index ?? 0) <= (currentTurn.turn_index ?? currentTurnIndex ?? 0)).reduce((s, t) => s + (t.asst_reqs ?? 0), 0)}
           series={turns
             .filter(t => (t.turn_index ?? 0) <= (currentTurn.turn_index ?? 0))
+            .sort((a, b) => (a.turn_index ?? 0) - (b.turn_index ?? 0))
             .map(t => ({
-              i: t.turn_index,
-              assembled: t.cum_total,
-              input: t.max_input,
-              output: t.out_tok,
+              i: t.turn_index ?? 0,
+              assembled: t.cum_total ?? 0,
+              input: t.max_input ?? 0,
+              output: t.out_tok ?? 0,
             }))}
           mode="cumulative"
           onClose={() => setShowCumDetail(false)}
