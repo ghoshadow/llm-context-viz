@@ -186,12 +186,12 @@ export default function CalibratePage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 9, fontFamily: MONO, fontSize: 12 }}>
-          <a href="#" onClick={e => { e.preventDefault(); setPage('home'); }}
+          <a href="#" onClick={e => { e.preventDefault(); setPage('inspector'); }}
             style={{ textDecoration: 'none', border: `1px solid ${S.borderColor}`, borderRadius: 9, padding: '9px 14px', color: S.textSecondary, background: 'oklch(0.20 0.01 265 / 0.6)' }}>
-            &larr; 首页
+            &larr; 逐轮检查
           </a>
           <span style={{ border: `1px solid ${S.borderAccent}`, borderRadius: 9, padding: '9px 14px', color: S.textAccent2, background: 'oklch(0.74 0.13 60 / 0.12)' }}>
-            校准
+            校准常量
           </span>
         </div>
       </header>
