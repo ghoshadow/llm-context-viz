@@ -324,7 +324,7 @@ router.get('/:id/turns', (req, res) => {
         `SELECT id, turn_index, prompt, timestamp, asst_reqs, max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, compression_reset, dur_ms, step_count
          FROM turns
          WHERE session_id = ?
-         ORDER BY turn_index`,
+         ORDER BY turn_index DESC`,
       )
       .all(req.params.id);
 
