@@ -381,6 +381,57 @@ export default function OntologyPage() {
     );
   };
 
+  // ─── Extract modal ──────────────────────────────────────────────────────
+
+  const renderExtractModal = () => (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'oklch(0.10 0.006 265 / 0.74)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}
+      onClick={() => { if (extractPhase === 'idle') setShowExtractModal(false); }}>
+      <div style={{ width: 'min(600px, 96vw)', background: 'oklch(0.155 0.008 265)', border: '1px solid oklch(0.36 0.014 265)', borderRadius: 18, overflow: 'hidden', boxShadow: '0 34px 90px oklch(0 0 0 / 0.6)' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 18px', borderBottom: '1px solid oklch(0.28 0.012 265)', background: 'oklch(0.185 0.009 265)' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.91 0.01 265)' }}>
+            {extractMode === 'incremental' ? '🔄 增量更新本体' : '🆕 重建本体'}
+          </span>
+          <button onClick={() => setShowExtractModal(false)} disabled={extractPhase !== 'idle'}
+            style={{ border: '1px solid oklch(0.32 0.014 265)', borderRadius: 8, width: 30, height: 30, background: 'oklch(0.22 0.01 265)', color: 'oklch(0.82 0.01 265)', cursor: 'pointer', fontSize: 14 }}>✕</button>
+        </div>
+        <div style={{ padding: '20px 18px' }}>
+          <p style={{ margin: '0 0 16px', fontSize: 13, color: SEMANTIC.textDesc3 }}>
+            {extractMode === 'incremental'
+              ? `仅提取第 ${ontologyData ? Math.max(...ontologyData.nodes.map(n => n.firstTurn), 0) : 0} 轮之后的新增内容，保留已有实体。`
+              : '清空已有数据，从零重新提取全部实体和关系。'}
+          </p>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary }}>
+              分片大小 <input type="number" value={shardSize} min={10} max={200}
+                onChange={e => setShardSize(Number(e.target.value) || 50)} disabled={extractPhase !== 'idle'}
+                style={{ width: 58, padding: '4px 6px', borderRadius: 6, border: `1px solid ${SEMANTIC.borderColor}`, background: SEMANTIC.innerCardBg, color: SEMANTIC.textPrimary, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: 'center' }} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary }}>
+              重叠 <input type="number" value={overlap} min={0} max={50}
+                onChange={e => setOverlap(Number(e.target.value) || 5)} disabled={extractPhase !== 'idle'}
+                style={{ width: 58, padding: '4px 6px', borderRadius: 6, border: `1px solid ${SEMANTIC.borderColor}`, background: SEMANTIC.innerCardBg, color: SEMANTIC.textPrimary, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: 'center' }} />
+            </label>
+          </div>
+          <button onClick={() => handleStartExtract(extractMode)} disabled={extractPhase !== 'idle'}
+            style={{ padding: '10px 24px', borderRadius: 8, cursor: 'pointer', border: '1px solid oklch(0.45 0.09 165)', background: 'oklch(0.74 0.12 165 / 0.16)', color: 'oklch(0.84 0.10 165)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, opacity: extractPhase === 'idle' ? 1 : 0.5 }}>
+            ▶ 开始提取
+          </button>
+          {extractPhase !== 'idle' && (
+            <div style={{ marginTop: 12, fontSize: 12, color: 'oklch(0.70 0.06 165)', fontFamily: "'IBM Plex Mono', monospace" }}>
+              进度: {extractProgress.shardsCompleted}/{extractProgress.shardsTotal} 分片
+            </div>
+          )}
+          {extractError && (
+            <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'oklch(0.66 0.17 25 / 0.12)', fontSize: 12, color: 'oklch(0.76 0.13 45)' }}>
+              ❌ {extractError}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   // ─── Page shell ───────────────────────────────────────────────────────
 
   return (
@@ -397,6 +448,9 @@ export default function OntologyPage() {
         overflow: 'hidden',
       }}
     >
+      {/* Extract modal overlay */}
+      {showExtractModal && renderExtractModal()}
+
       {/* ================================================================ */}
       {/* HEADER                                                           */}
       {/* ================================================================ */}
