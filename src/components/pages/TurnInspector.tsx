@@ -215,41 +215,41 @@ function ContextStructure({
       .sort((a, b) => comp[b]! - comp[a]!);
   }, [comp]);
 
-  // Scale composition to match API actual total
+  // Raw character counts (comp values are tokens = chars/3.0)
   const compSum = Object.values(comp).reduce((a, b) => a! + b!, 0) || 1;
-  const scale = cumTotal / compSum;
+  const charTotal = Math.round(compSum * 3.0);
 
   const barSegs = order.map((k) => ({
     key: k,
     color: COLORS[k] ?? 'oklch(0.5 0 0)',
-    pct: ((comp[k]! * scale) / cumTotal) * 100,
+    pct: (comp[k]! / compSum) * 100,
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
-    title: `${LABELS[k] ?? k} — ${fmt(comp[k]!)} tok`,
+    title: `${LABELS[k] ?? k} — ${fmt(Math.round(comp[k]! * 3.0))} chars`,
   }));
 
-  // Compute scaled token counts with rounding drift absorbed into the largest category
-  const rawScaled = order.map(k => Math.round(comp[k]! * scale));
-  const drift = cumTotal - rawScaled.reduce((a, b) => a + b, 0);
-  if (drift !== 0 && rawScaled.length > 0) {
+  const charValues = order.map(k => Math.round(comp[k]! * 3.0));
+  const charDrift = charTotal - charValues.reduce((a, b) => a + b, 0);
+  if (charDrift !== 0 && charValues.length > 0) {
     let maxIdx = 0;
-    for (let i = 1; i < rawScaled.length; i++) {
-      if (rawScaled[i]! > rawScaled[maxIdx]!) maxIdx = i;
+    for (let i = 1; i < charValues.length; i++) {
+      if (charValues[i]! > charValues[maxIdx]!) maxIdx = i;
     }
-    rawScaled[maxIdx]! += drift;
+    charValues[maxIdx]! += charDrift;
   }
   const legendRows = order.map((k, i) => ({
     key: k,
     label: LABELS[k] ?? k,
     color: COLORS[k] ?? 'oklch(0.5 0 0)',
-    tokensFmt: fmt(rawScaled[i]!) + ' tok',
+    tokensFmt: fmt(charValues[i]!) + ' chars',
     pctFmt: ((comp[k]! / compSum) * 100).toFixed(2) + '%',
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
   }));
 
+  const ctxPct = ((maxInput / ctxLimit) * 100).toFixed(2);
   const over = cumTotal > ctxLimit;
   const overflowNote = over
     ? `累计拼装内容已超过 ${fmtK(ctxLimit)} 上下文窗口 —— 实际请求依靠缓存与压缩才能容纳，峰值输入仅 ${fmt(maxInput)} tok。`
-    : `本轮峰值输入 ${fmt(maxInput)} tok，占 ${fmtK(ctxLimit)} 窗口的 ${((maxInput / ctxLimit) * 100).toFixed(2)}%。`;
+    : `本轮峰值输入 ${fmt(maxInput)} tok，占 ${fmtK(ctxLimit)} 窗口的 ${ctxPct}%。`;
 
   return (
     <div
@@ -259,7 +259,7 @@ function ContextStructure({
       <div className="section-header">
         <h2>本轮上下文拼装结构</h2>
         <span className="helper-text" style={{ fontSize: 11, color: SEMANTIC.textMuted }}>
-          总计 {fmt(cumTotal)} · 宽度 = 占比
+          总计 {fmt(charTotal)} chars · 宽度 = 占比
         </span>
       </div>
 
@@ -923,7 +923,7 @@ function DeltaPanel({ delta }: DeltaPanelProps) {
       key: k,
       label: DELTA_LABELS[k] ?? k,
       color: COLORS[k] ?? 'oklch(0.5 0 0)',
-      tokensFmt: fmt(delta[k]!),
+      tokensFmt: fmt(Math.round(delta[k]! * 3.0)) + ' chars',
       barPct: Math.max(3, (delta[k]! / dmax) * 100),
     }));
   }, [delta]);
@@ -949,7 +949,7 @@ function DeltaPanel({ delta }: DeltaPanelProps) {
                     color: SEMANTIC.textPrimary6,
                   }}
                 >
-                  +{r.tokensFmt} tok
+                  +{r.tokensFmt}
                 </span>
               </div>
               <div style={{ height: 6, borderRadius: 4, background: 'oklch(0.24 0.01 265)', overflow: 'hidden' }}>
