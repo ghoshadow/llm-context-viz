@@ -486,21 +486,99 @@ router.post('/:id/ontology/extract', (req, res) => {
         }
         if (currentUser) turns.push({ index: turnIdx, userMsg: currentUser, thinking: currentThinking, asstText: currentAsstText });
 
-        send('start', { shards: turns.length, totalTurns: turns.length });
-
-        // Process each turn as a shard
-        const candidates: any[] = [];
-        const relations: any[] = [];
-        for (let i = 0; i < turns.length; i++) {
-          const t = turns[i]!;
-          send('shardStart', { shardIndex: i });
-          // Extract simple entity mentions from user message and thinking
-          // (placeholders — real extraction would use LLM)
-          const text = (t.userMsg + ' ' + t.thinking).slice(0, 2000);
-          send('shardDone', { shardIndex: i, candidates: [], relations: [] });
+        const shardSize = Number(req.body.shardSize) || 5;
+        const overlap = Number(req.body.overlap) || 1;
+        const shards: Array<{ index: number; turns: typeof turns }> = [];
+        for (let i = 0; i < turns.length; i += shardSize - overlap) {
+          shards.push({ index: shards.length, turns: turns.slice(i, i + shardSize) });
         }
 
-        send('complete', { sessionId, meta: {}, stats: { candidates: 0, nodes: 0, edges: 0 }, data: { types: [], nodes: [], edges: [] } });
+        send('start', { shards: shards.length, totalTurns: turns.length });
+
+        // Load model from session
+        const sessionModel = (db.prepare('SELECT model FROM sessions WHERE id = ?').get(sessionId) as any)?.model || 'deepseek-v4-pro';
+        const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_API_KEY || '';
+        const API_URL = 'https://api.deepseek.com/anthropic/v1/messages';
+
+        const allCandidates: any[] = [];
+        const allRelations: any[] = [];
+        const seenEntities = new Set<string>();
+
+        for (const shard of shards) {
+          send('shardStart', { shardIndex: shard.index });
+
+          // Build context text for this shard
+          const context = shard.turns.map(t =>
+            `[Turn ${t.index}] User: ${t.userMsg.slice(0, 300)}\nThinking: ${t.thinking.slice(0, 500)}\nReply: ${t.asstText.slice(0, 200)}`
+          ).join('\n---\n');
+
+          const prompt = `Analyze this conversation transcript and extract key entities and their relationships.\n\nOutput a JSON object with "candidates" (entities) and "relations" (relationships between entities).\n\nEach candidate: { id: kebab-case, label: short name, type: "mechanism"|"agent"|"system"|"error"|"func"|"code"|"command", conf: 0-1, firstTurn: number, turns: [turn numbers], snippet: "brief description" }\n\nEach relation: { s: source_id, t: target_id, label: relationship, firstTurn: number, conf: 0-1 }\n\nConversation:\n${context.slice(0, 8000)}`;
+
+          try {
+            const resp = await fetch(API_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': DEEPSEEK_KEY,
+                'anthropic-version': '2023-06-01',
+              },
+              body: JSON.stringify({
+                model: sessionModel,
+                max_tokens: 4000,
+                messages: [{ role: 'user', content: prompt }],
+              }),
+              signal: AbortSignal.timeout(120000),
+            });
+
+            if (resp.ok) {
+              const data = await resp.json() as any;
+              const text = data.content?.[0]?.text || '';
+              // Try to parse JSON from LLM response
+              const jsonMatch = text.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                const shardCandidates = (parsed.candidates || []).map((c: any) => ({
+                  ...c, firstTurn: shard.turns[0]?.index ?? c.firstTurn,
+                  turns: c.turns || [],
+                }));
+                const shardRelations = (parsed.relations || []).map((r: any) => ({
+                  ...r, firstTurn: shard.turns[0]?.index ?? r.firstTurn,
+                }));
+                for (const c of shardCandidates) {
+                  if (!seenEntities.has(c.id)) {
+                    seenEntities.add(c.id);
+                    allCandidates.push(c);
+                  }
+                }
+                allRelations.push(...shardRelations);
+              }
+              send('shardDone', { shardIndex: shard.index, candidates: shardCandidates?.length || 0, relations: shardRelations?.length || 0 });
+            } else {
+              send('shardError', { shardIndex: shard.index, error: `API ${resp.status}` });
+            }
+          } catch (e) {
+            send('shardError', { shardIndex: shard.index, error: (e as Error).message });
+          }
+        }
+
+        // Run buildOntology pipeline
+        const result = buildOntology({
+          candidates: allCandidates,
+          relations: allRelations,
+          config: {
+            sources: ['user_message', 'assistant_final_reply', 'assistant_thinking'],
+            keepTypes: ['mechanism', 'agent', 'system'],
+            pruneOrphans: true,
+            maxTurn: turns.length,
+          },
+        });
+
+        // Store in DB
+        db.prepare(
+          `INSERT OR REPLACE INTO ontology (session_id, ontology_json, max_turn, updated_at) VALUES (?, ?, ?, datetime('now'))`
+        ).run(sessionId, JSON.stringify(result.data), result.meta.maxTurn);
+
+        send('complete', { sessionId, meta: result.meta, stats: result.stats, data: result.data });
       } catch (err) {
         send('error', { stage: 'extract', message: (err as Error).message });
       }
