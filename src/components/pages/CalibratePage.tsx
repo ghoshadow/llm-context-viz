@@ -110,15 +110,10 @@ export default function CalibratePage() {
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [currentConstants, setCurrentConstants] = useState<CurrentConstants | null>(null);
-  const [showCurrent, setShowCurrent] = useState(false);
 
   // Load current constants on mount
-  const loadCurrent = useCallback(async () => {
-    try {
-      const data = await get<CurrentConstants>('/calibrate/calibrate/current');
-      setCurrentConstants(data);
-      setShowCurrent(true);
-    } catch { /* ignore */ }
+  useEffect(() => {
+    get<CurrentConstants>('/calibrate/calibrate/current').then(setCurrentConstants).catch(() => {});
   }, []);
 
   // Handle file drop
@@ -351,59 +346,44 @@ export default function CalibratePage() {
 
       {/* Step 3: Current constants */}
       <section style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 22 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>3. 当前生效的常量</h2>
-          <button
-            onClick={loadCurrent}
-            style={{
-              border: `1px solid ${S.borderColor}`, borderRadius: 7, padding: '6px 14px',
-              fontSize: 12, fontFamily: MONO, cursor: 'pointer',
-              background: 'oklch(0.20 0.01 265 / 0.6)', color: S.textSecondary,
-            }}
-          >
-            {showCurrent ? '刷新' : '查看'}
-          </button>
-        </div>
-
-        {showCurrent && currentConstants && (
-          <div style={{
-            border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
-            background: 'oklch(0.185 0.009 265)',
-          }}>
-            {currentConstants.appliedAt ? (
-              <>
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
-                  <StatCard label="校准时间" value={new Date(currentConstants.appliedAt).toLocaleString()} />
-                  <StatCard label="CC 版本" value={currentConstants.ccVersion || '-'} />
-                  <StatCard label="模型" value={currentConstants.model || '-'} />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                  <div>
-                    <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYS_PROMPT_FALLBACK_CHARS</div>
-                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYS_PROMPT_FALLBACK_CHARS.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>TOOL_DEFS_FALLBACK_CHARS</div>
-                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.TOOL_DEFS_FALLBACK_CHARS.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYSTEM_REMINDER_CHROME_CHARS</div>
-                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYSTEM_REMINDER_CHROME_CHARS.toLocaleString()}</div>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div style={{ fontSize: 13, color: S.textDesc3 }}>
-                使用默认常量。上传截获日志并应用以覆盖。
+        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>3. 当前生效的常量</h2>
+        <div style={{
+          border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
+          background: 'oklch(0.185 0.009 265)',
+        }}>
+          {currentConstants?.appliedAt ? (
+            <>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+                <StatCard label="校准时间" value={new Date(currentConstants.appliedAt).toLocaleString()} />
+                <StatCard label="CC 版本" value={currentConstants.ccVersion || '-'} />
+                <StatCard label="模型" value={currentConstants.model || '-'} />
               </div>
-            )}
-          </div>
-        )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <div>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYS_PROMPT_FALLBACK_CHARS</div>
+                  <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYS_PROMPT_FALLBACK_CHARS.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>TOOL_DEFS_FALLBACK_CHARS</div>
+                  <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.TOOL_DEFS_FALLBACK_CHARS.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYSTEM_REMINDER_CHROME_CHARS</div>
+                  <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYSTEM_REMINDER_CHROME_CHARS.toLocaleString()}</div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, color: S.textDesc3 }}>
+              加载中...
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Footer: proxy usage */}
       <footer style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 18 }}>
-        <details style={{ fontSize: 12.5, color: S.textDesc3, lineHeight: 1.7 }}>
+        <details open style={{ fontSize: 12.5, color: S.textDesc3, lineHeight: 1.7 }}>
           <summary style={{ cursor: 'pointer', color: S.textSecondary, fontSize: 13, fontWeight: 500 }}>
             如何截获 API 请求？</summary>
           <div style={{ marginTop: 10, background: 'oklch(0.18 0.01 265)', padding: '14px 18px', borderRadius: 10, border: `1px solid ${S.borderSubtle1}` }}>
