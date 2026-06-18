@@ -149,6 +149,9 @@ const cardS = {
     fontWeight: 600,
     color: 'oklch(0.93 0.006 265)',
     letterSpacing: '-0.01em',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
   },
 
   filename: {
