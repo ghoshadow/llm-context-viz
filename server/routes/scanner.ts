@@ -105,8 +105,8 @@ function quickMeta(filePath: string): { title?: string; model?: string; requests
             }
             turnCount++;
           }
-        } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isSidechain && obj.promptId) {
-          // promptId is a strong signal even for empty content
+        } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isSidechain && !isQuickToolResult(obj) && obj.promptId) {
+          // promptId fallback (pipeline: startsNewTurn returns true for promptId even without content)
           turnCount++;
         }
       } catch { /* skip malformed lines */ }
