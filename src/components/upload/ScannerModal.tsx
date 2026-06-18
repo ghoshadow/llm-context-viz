@@ -120,11 +120,13 @@ export default function ScannerModal() {
       });
       const data = await resp.json();
       if (data.imported || data.sessionId) {
-        // Mark as imported in cached state
-        setScanFiles(files.map(f => f.path === file.path ? { ...f, imported: true } : f), status);
+        // Mark as imported in cached state and update the count
+        const updated = files.map(f => f.path === file.path ? { ...f, imported: true } : f);
+        const newImported = updated.filter(f => f.imported).length;
+        setScanFiles(updated, `发现 ${updated.length} 个文件，其中 ${newImported} 个已导入`);
         await fetchSessions();
         // Navigate to the new session
-        setPage('assembly');
+        setPage('inspector');
         await selectSession(data.sessionId);
       }
     } catch (e) {
