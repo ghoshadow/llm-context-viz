@@ -1388,7 +1388,7 @@ export default function TurnInspector() {
                   </div>
                   <div className="stat-card">
                     <div className="stat-value" style={{ color: SEMANTIC.textAccent }}>
-                      {fmt(currentTurn.max_input)}
+                      {fmt(currentTurn.max_input)} tok
                     </div>
                     <div className="stat-label">
                       峰值输入 · 步骤 #{(currentTurn.max_req_step ?? 0) + 1}
@@ -1400,12 +1400,12 @@ export default function TurnInspector() {
                   </div>
                   <div className="stat-card">
                     <div className="stat-value" style={{ color: STEP_COLORS.model }}>
-                      {fmt(currentTurn.out_tok)}
+                      {fmt(currentTurn.out_tok)} tok
                     </div>
                     <div className="stat-label">输出 Token</div>
                   </div>
                   <div className="stat-card">
-                    <div className="stat-value">{fmt(currentTurn.cum_total)}</div>
+                    <div className="stat-value">{fmt(currentTurn.cum_total)} tok</div>
                     <div className="stat-label">
                       累计拼装{(currentTurn.cum_cache_hit ?? 0) > 0 ? ` · 缓存 ${fmt(currentTurn.cum_cache_hit ?? 0)}（${(((currentTurn.cum_cache_hit ?? 0) / currentTurn.cum_total) * 100).toFixed(2)}%）` : ''}
                       <span
