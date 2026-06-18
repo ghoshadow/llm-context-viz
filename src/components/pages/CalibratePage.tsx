@@ -384,7 +384,10 @@ export default function CalibratePage() {
       {/* Footer: proxy usage */}
       <footer style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 18 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>3. 如何截获 API 请求？</h2>
-        <div style={{ background: 'oklch(0.18 0.01 265)', padding: '14px 18px', borderRadius: 10, border: `1px solid ${S.borderSubtle1}` }}>
+        <div style={{
+          border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
+          background: 'oklch(0.185 0.009 265)',
+        }}>
           <div style={{ fontFamily: MONO, fontSize: 11, color: 'oklch(0.80 0.05 148)', lineHeight: 1.8 }}>
             <div># 1. 启动透明代理（会临时修改 /etc/hosts，退出时自动恢复）</div>
             {sessionCwd ? (
