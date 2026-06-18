@@ -156,13 +156,13 @@ router.get('/scan', (_req, res) => {
         last_seen=excluded.last_seen
     `);
 
-    // When forcing rescan, delete all session records and scanned_files cache
+    // When forcing rescan, only clear the scanned_files cache so hashes
+    // are recomputed.  Sessions are left intact — a file is "imported" iff
+    // its current hash already exists in the sessions table.
     if (force) {
       try {
-        db.prepare('DELETE FROM sessions').run();
         db.prepare('DELETE FROM scanned_files').run();
         cache.clear();
-        dbImported.clear();
       } catch { }
     }
 
