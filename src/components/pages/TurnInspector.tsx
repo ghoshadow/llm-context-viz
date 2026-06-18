@@ -1277,6 +1277,22 @@ export default function TurnInspector() {
             >
               共 {turns.length} 轮
             </span>
+            <button
+              onClick={() => {
+                if (currentSessionId) fetchTurns(currentSessionId);
+              }}
+              disabled={turnsLoading}
+              title="刷新轮次列表"
+              style={{
+                border: `1px solid ${SEMANTIC.borderColor}`,
+                borderRadius: 6, padding: '3px 10px',
+                fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, cursor: turnsLoading ? 'not-allowed' : 'pointer',
+                background: 'oklch(0.20 0.01 265 / 0.6)', color: SEMANTIC.textSecondary,
+                opacity: turnsLoading ? 0.5 : 1,
+              }}
+            >
+              {turnsLoading ? '刷新中...' : '↻ 刷新'}
+            </button>
           </div>
 
           {turnsLoading ? (
