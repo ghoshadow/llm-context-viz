@@ -43,7 +43,7 @@ export default function PeakModal({
     series: series ?? [],
   };
 
-  const sub = `第 ${turnIndex} 轮 · 完整输入 ${fmt(fullCtx)} tok · 计费 ${fmt(peakTokens)} tok${cacheHit > 0 ? ` · 缓存 ${fmt(cacheHit)}（${((cacheHit / fullCtx) * 100).toFixed(2)}%）` : ''}`;
+  const sub = `第 ${turnIndex} 轮 · 步骤 #${reqStep + 1} · 完整输入 ${fmt(fullCtx)} tok · 计费 ${fmt(peakTokens)} tok${cacheHit > 0 ? ` · 缓存 ${fmt(cacheHit)}（${((cacheHit / fullCtx) * 100).toFixed(2)}%）` : ''}`;
 
   return (
     <div style={{
