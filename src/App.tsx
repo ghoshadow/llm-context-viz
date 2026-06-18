@@ -19,7 +19,7 @@ function App() {
       {page === 'home' && <HomePage />}
       {page === 'assembly' && currentSessionId && <ContextAssembly />}
       {page === 'inspector' && currentSessionId && <TurnInspector />}
-      {page === 'ontology' && currentSessionId && <OntologyPage />}
+      {page === 'ontology' && <OntologyPage />}
       {page === 'calibrate' && <CalibratePage />}
       {uploadOpen && <UploadModal />}
       {scannerOpen && <ScannerModal />}
