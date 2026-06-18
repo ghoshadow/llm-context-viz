@@ -121,67 +121,97 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
       sessionGuidance: 0,
     };
 
-    // Find section boundaries
+    // Chrome measurement: split the user message into sections.
+    // Chrome = everything that is NOT actual file content (CLAUDE.md,
+    // skills listing, MCP instructions). This includes:
+    //   - <system-reminder> tag and intro text
+    //   - # claudeMd section header
+    //   - "Contents of ...CLAUDE.md..." section headers
+    //   - # MCP Server Instructions header
+    //   - "The following skills..." header
+    //   - Ultracode notice, # currentDate, IMPORTANT note, closing tag
+    //
+    // We find the actual content of each injected file (CLAUDE.md etc.)
+    // by looking for the content markers after the section headers.
+
     const globalStart = userText.indexOf('Contents of /Users/');
     const projStart = globalStart >= 0
       ? userText.indexOf('Contents of', globalStart + 20)
       : -1;
     const mcpStart = userText.indexOf('# MCP Server Instructions');
     const skillsStart = userText.indexOf('The following skills are available');
-    if (skillsStart < 0) {
-      const alt = userText.indexOf('The following skills');
-      if (alt >= 0 && alt > (mcpStart >= 0 ? mcpStart : 0)) {
-        // Found alternative skills section
-      }
-    }
-    const ultraStart = userText.indexOf('Ultracode is on');
     const currentDateStart = userText.indexOf('# currentDate');
-    const ctxMgmtStart = userText.indexOf('# Context management');
-    const envStart = userText.indexOf('# Environment');
-    const memoryStart = userText.indexOf('# Memory');
-    const guidanceStart = userText.indexOf('# Session-specific guidance');
     const closingTag = userText.indexOf('</system-reminder>');
+    const endOfText = closingTag >= 0 ? closingTag : userText.length;
 
-    // Extract known sections
-    if (globalStart >= 0 && projStart > globalStart) {
-      up.globalClaudeMd = projStart - globalStart;
-    } else if (globalStart >= 0 && mcpStart > globalStart) {
-      up.globalClaudeMd = mcpStart - globalStart;
-    } else if (globalStart >= 0) {
-      up.globalClaudeMd = userText.length - globalStart;
+    // Helper: find where the actual file content begins after a section
+    // header. The pattern is: "Header line\n\nContent starts here"
+    function contentStartAfter(pos: number): number {
+      const nl = userText.indexOf('\n\n', pos);
+      return nl >= 0 ? nl + 2 : pos;
+    }
+    // Helper: find the end of a block of content (before the next section
+    // marker or before trailing whitespace before the next header).
+    function contentEndBefore(pos: number): number {
+      // Walk back from pos to find the last non-blank content line
+      let p = pos - 1;
+      while (p > 0 && userText[p] === '\n') p--;
+      const nl = userText.lastIndexOf('\n', p);
+      return nl >= 0 ? nl + 1 : pos;
     }
 
+    let contentTotal = 0;
+
+    // Global CLAUDE.md content
+    if (globalStart >= 0) {
+      const cs = contentStartAfter(globalStart);
+      const ce = contentEndBefore(
+        projStart > globalStart ? projStart
+        : mcpStart > globalStart ? mcpStart
+        : skillsStart > globalStart ? skillsStart
+        : currentDateStart > globalStart ? currentDateStart
+        : endOfText
+      );
+      if (ce > cs) { up.globalClaudeMd = ce - cs; contentTotal += up.globalClaudeMd; }
+    }
+
+    // Project CLAUDE.md content
     if (projStart > 0) {
-      const projEnd = mcpStart > projStart ? mcpStart
+      const cs = contentStartAfter(projStart);
+      const ce = contentEndBefore(
+        mcpStart > projStart ? mcpStart
         : skillsStart > projStart ? skillsStart
         : currentDateStart > projStart ? currentDateStart
-        : userText.length;
-      up.projectClaudeMd = projEnd - projStart;
+        : endOfText
+      );
+      if (ce > cs) { up.projectClaudeMd = ce - cs; contentTotal += up.projectClaudeMd; }
     }
 
+    // MCP instructions content
     if (mcpStart >= 0) {
-      const mcpEnd = skillsStart > mcpStart ? skillsStart
-        : ultraStart > mcpStart ? ultraStart
+      const cs = contentStartAfter(mcpStart);
+      const ce = contentEndBefore(
+        skillsStart > mcpStart ? skillsStart
         : currentDateStart > mcpStart ? currentDateStart
-        : userText.length;
-      up.mcpInstructions = mcpEnd - mcpStart;
+        : endOfText
+      );
+      if (ce > cs) { up.mcpInstructions = ce - cs; contentTotal += up.mcpInstructions; }
     }
 
+    // Skills listing content
     if (skillsStart >= 0) {
-      const skillsEnd = ultraStart > skillsStart ? ultraStart
-        : currentDateStart > skillsStart ? currentDateStart
-        : userText.length;
-      up.skillsListing = skillsEnd - skillsStart;
+      const cs = contentStartAfter(skillsStart);
+      const ce = contentEndBefore(currentDateStart > skillsStart ? currentDateStart : endOfText);
+      if (ce > cs) { up.skillsListing = ce - cs; contentTotal += up.skillsListing; }
     }
 
+    // currentDate + IMPORTANT + closing tag
     if (currentDateStart >= 0) {
-      up.currentDate = (closingTag >= 0 ? closingTag : userText.length) - currentDateStart;
+      up.currentDate = endOfText - currentDateStart;
     }
 
-    // Chrome = total - all identified content sections
-    const knownSections = up.globalClaudeMd + up.projectClaudeMd
-      + up.mcpInstructions + up.skillsListing + up.currentDate;
-    up.chrome = Math.max(0, up.total - knownSections);
+    // Chrome = total - actual file content (everything else is wrapper/chrome)
+    up.chrome = Math.max(0, endOfText - contentTotal);
 
     // --- API token count ---
     let firstRequestTokens = 0;
