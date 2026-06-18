@@ -1496,25 +1496,26 @@ export default function TurnInspector() {
           if (turnToolRt > 0) adjComp.toolResults = stepToolRt;
         }
         const adjSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
-
-        // Build categories first, then align tools to final category values
         const catsP = buildCategories(adjComp, currentTurn.max_input, adjSum);
-        const finalSubP = catsP.find(c => c.key === 'subagent')?.tokens ?? 0;
-        const finalToolP = catsP.find(c => c.key === 'toolResults')?.tokens ?? 0;
+        const catMapP = new Map(catsP.map(c => [c.key, c.tokens]));
 
+        // Build tools from category totals (same approach as cumulative)
+        const taskRtP = catMapP.get('subagent') ?? 0;
+        const toolRtP = catMapP.get('toolResults') ?? 0;
         const toolsP = stepTools ? (() => {
           const ents = Object.entries(stepTools) as [string, any][];
-          const taskE = ents.filter(([, v]) => v.task);
-          const nonTaskE = ents.filter(([, v]) => !v.task);
-          const taskRaw = taskE.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
-          const nonTaskRaw = nonTaskE.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
-          const build = (list: [string, any][], target: number, rawT: number) => {
-            const s = list.map(([, v]) => Math.round((v.resultTokens ?? 0) * target / rawT));
-            const d = target - s.reduce((a, b) => a + b, 0);
-            if (d !== 0 && s.length > 0) { let m = 0; for (let i = 1; i < s.length; i++) if (s[i]! > s[m]!) m = i; s[m]! += d; }
+          const tE = ents.filter(([, v]) => v.task);
+          const nE = ents.filter(([, v]) => !v.task);
+          const tR = tE.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
+          const nR = nE.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
+          const dist = (list: [string, any][], total: number, raw: number) => {
+            if (list.length === 0) return [];
+            const s = list.map(([, v]) => Math.round((v.resultTokens ?? 0) * total / raw));
+            const d = total - s.reduce((a, b) => a + b, 0);
+            if (d !== 0) { let m = 0; for (let i = 1; i < s.length; i++) if (s[i]! > s[m]!) m = i; s[m]! += d; }
             return list.map(([n, v], i) => ({ name: n, calls: v.calls ?? 0, resultTokens: s[i]!, task: v.task ?? false }));
           };
-          return [...build(nonTaskE, finalToolP, nonTaskRaw), ...build(taskE, finalSubP, taskRaw)];
+          return [...dist(nE, toolRtP, nR), ...dist(tE, taskRtP, tR)];
         })() : [];
 
         return (
@@ -1539,54 +1540,47 @@ export default function TurnInspector() {
       {/* Cumulative context detail modal */}
       {showCumDetail && currentTurn && (() => {
         const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
-        const ct: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+        // Replace subagent/toolResults with exact cumTools values
+        const ctRaw: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
         const adjComp = { ...comp };
-        if (Object.keys(ct).length > 0) {
-          const subRt = Object.entries(ct).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-          const toolRt = Object.entries(ct).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-          if (subRt > 0) adjComp.subagent = subRt;
-          if (toolRt > 0) adjComp.toolResults = toolRt;
+        if (Object.keys(ctRaw).length > 0) {
+          const sRt = Object.entries(ctRaw).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          const tRt = Object.entries(ctRaw).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          if (sRt > 0) adjComp.subagent = sRt;
+          if (tRt > 0) adjComp.toolResults = tRt;
         }
         const compSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
-
-        // Build categories first so we can read back the drift-adjusted values
         const cats = buildCategories(adjComp, currentTurn.cum_total, compSum);
-        // Read final subagent/toolResults values (after any drift compensation)
-        const finalSubagent = cats.find(c => c.key === 'subagent')?.tokens ?? 0;
-        const finalToolResults = cats.find(c => c.key === 'toolResults')?.tokens ?? 0;
 
-        // Build tools list, aligned to the final category values
+        // Read final category values and build tools list directly from them.
+        // This eliminates any discrepancy between the two estimation pipelines.
+        const catMap = new Map(cats.map(c => [c.key, c.tokens]));
+        const taskRt = catMap.get('subagent') ?? 0;
+        const toolRt = catMap.get('toolResults') ?? 0;
+
+        const ct: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
         const entries = Object.entries(ct) as [string, any][];
+        // Distribute category totals proportionally to each tool
         const taskEntries = entries.filter(([, v]) => v.task);
         const nonTaskEntries = entries.filter(([, v]) => !v.task);
-        // Scale each tool proportionally within its group so that
-        // task tools sum to finalSubagent, non-task sum to finalToolResults
-        const taskRawTotal = taskEntries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
-        const nonTaskRawTotal = nonTaskEntries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
+        const taskRaw = taskEntries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
+        const nonTaskRaw = nonTaskEntries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
 
-        function buildAlignedTools(list: [string, any][], targetTotal: number, rawTotal: number) {
-          const scaled = list.map(([, v]) => Math.round((v.resultTokens ?? 0) * targetTotal / rawTotal));
-          const sum = scaled.reduce((a, b) => a + b, 0);
-          const drift = targetTotal - sum;
-          if (drift !== 0 && scaled.length > 0) {
-            let mi = 0;
-            for (let i = 1; i < scaled.length; i++) if (scaled[i]! > scaled[mi]!) mi = i;
-            scaled[mi]! += drift;
-          }
-          return list.map(([name, v], i) => ({
-            name, calls: v.calls ?? 0, resultTokens: scaled[i]!, task: v.task ?? false,
-          }));
+        function distribute(list: [string, any][], total: number, rawSum: number) {
+          if (list.length === 0) return [];
+          const scaled = list.map(([, v]) => Math.round((v.resultTokens ?? 0) * total / rawSum));
+          const drift = total - scaled.reduce((a, b) => a + b, 0);
+          if (drift !== 0) { let mi = 0; for (let i = 1; i < scaled.length; i++) if (scaled[i]! > scaled[mi]!) mi = i; scaled[mi]! += drift; }
+          return list.map(([n, v], i) => ({ name: n, calls: v.calls ?? 0, resultTokens: scaled[i]!, task: v.task ?? false }));
         }
-
-        const tools = [
-          ...buildAlignedTools(nonTaskEntries, finalToolResults, nonTaskRawTotal),
-          ...buildAlignedTools(taskEntries, finalSubagent, taskRawTotal),
-        ];
 
         return (
         <PeakModal
           categories={cats}
-          tools={tools}
+          tools={[
+            ...distribute(nonTaskEntries, toolRt, nonTaskRaw),
+            ...distribute(taskEntries, taskRt, taskRaw),
+          ]}
           peakTokens={currentTurn.cum_total}
           peakIndex={currentTurnIndex ?? 0}
           turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
