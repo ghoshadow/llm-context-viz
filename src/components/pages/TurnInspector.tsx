@@ -1206,23 +1206,6 @@ export default function TurnInspector() {
           >
             本体建模
           </a>
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              setPage('calibrate');
-            }}
-            style={{
-              textDecoration: 'none',
-              border: `1px solid ${SEMANTIC.borderColor}`,
-              borderRadius: 9,
-              padding: '9px 14px',
-              color: SEMANTIC.textSecondary,
-              background: 'oklch(0.20 0.01 265 / 0.6)',
-            }}
-          >
-            校准常量
-          </a>
           <span
             style={{
               border: `1px solid ${SEMANTIC.borderAccent}`,
@@ -1277,6 +1260,17 @@ export default function TurnInspector() {
             >
               共 {turns.length} 轮
             </span>
+            <button
+              onClick={(e) => { e.preventDefault(); setPage('calibrate'); }}
+              title="校准上下文常量"
+              style={{
+                border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 6, padding: '3px 10px',
+                fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, cursor: 'pointer',
+                background: 'oklch(0.20 0.01 265 / 0.6)', color: SEMANTIC.textSecondary,
+              }}
+            >
+              校准
+            </button>
             <button
               onClick={async () => {
                 if (!currentSessionId) return;
