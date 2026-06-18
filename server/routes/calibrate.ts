@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { extractConstants, type ExtractedConstants } from '../../src/pipeline/extract-constants';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = join(__filename, '..', '..');
+const __dirname = join(__filename, '..'); // server/routes/
 
 const upload = multer({ dest: '/tmp/claude-trace-uploads' });
 const router = Router();

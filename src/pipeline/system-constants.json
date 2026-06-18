@@ -1,0 +1,8 @@
+{
+  "appliedAt": "2026-06-18T02:35:34.863Z",
+  "ccVersion": "test",
+  "model": "test",
+  "SYS_PROMPT_FALLBACK_CHARS": 5768,
+  "TOOL_DEFS_FALLBACK_CHARS": 98949,
+  "SYSTEM_REMINDER_CHROME_CHARS": 612
+}
