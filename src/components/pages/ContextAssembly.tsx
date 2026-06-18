@@ -517,7 +517,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
     const toolRows: ToolRow[] = tools.map((t) => ({
       name: t.name,
       calls: t.calls,
-      resultFmt: fmt(t.resultTokens),
+      resultFmt: fmt(t.resultTokens) + ' tok',
       barPct: (t.resultTokens / maxRes) * 100,
       color: t.task ? 'oklch(0.67 0.15 25)' : 'oklch(0.76 0.13 62)',
       taskTag: t.task ? ' · 子 Agent' : '',

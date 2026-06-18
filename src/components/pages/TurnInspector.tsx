@@ -1497,26 +1497,11 @@ export default function TurnInspector() {
         }
         const adjSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
         const catsP = buildCategories(adjComp, currentTurn.max_input, adjSum);
-        const catMapP = new Map(catsP.map(c => [c.key, c.tokens]));
-
-        // Build tools from category totals (same approach as cumulative)
-        const taskRtP = catMapP.get('subagent') ?? 0;
-        const toolRtP = catMapP.get('toolResults') ?? 0;
-        const toolsP = stepTools ? (() => {
-          const ents = Object.entries(stepTools) as [string, any][];
-          const tE = ents.filter(([, v]) => v.task);
-          const nE = ents.filter(([, v]) => !v.task);
-          const tR = tE.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
-          const nR = nE.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
-          const dist = (list: [string, any][], total: number, raw: number) => {
-            if (list.length === 0) return [];
-            const s = list.map(([, v]) => Math.round((v.resultTokens ?? 0) * total / raw));
-            const d = total - s.reduce((a, b) => a + b, 0);
-            if (d !== 0) { let m = 0; for (let i = 1; i < s.length; i++) if (s[i]! > s[m]!) m = i; s[m]! += d; }
-            return list.map(([n, v], i) => ({ name: n, calls: v.calls ?? 0, resultTokens: s[i]!, task: v.task ?? false }));
-          };
-          return [...dist(nE, toolRtP, nR), ...dist(tE, taskRtP, tR)];
-        })() : [];
+        const toolsP = stepTools
+          ? Object.entries(stepTools).map(([name, v]: any) => ({
+              name, calls: v.calls ?? 0, resultTokens: v.resultTokens ?? 0, task: v.task ?? false,
+            }))
+          : [];
 
         return (
         <PeakModal
@@ -1552,35 +1537,19 @@ export default function TurnInspector() {
         const compSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
         const cats = buildCategories(adjComp, currentTurn.cum_total, compSum);
 
-        // Read final category values and build tools list directly from them.
-        // This eliminates any discrepancy between the two estimation pipelines.
-        const catMap = new Map(cats.map(c => [c.key, c.tokens]));
-        const taskRt = catMap.get('subagent') ?? 0;
-        const toolRt = catMap.get('toolResults') ?? 0;
-
+                // Build tools list directly from cumTools — raw values, no API scaling
         const ct: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
-        const entries = Object.entries(ct) as [string, any][];
-        // Distribute category totals proportionally to each tool
-        const taskEntries = entries.filter(([, v]) => v.task);
-        const nonTaskEntries = entries.filter(([, v]) => !v.task);
-        const taskRaw = taskEntries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
-        const nonTaskRaw = nonTaskEntries.reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0) || 1;
-
-        function distribute(list: [string, any][], total: number, rawSum: number) {
-          if (list.length === 0) return [];
-          const scaled = list.map(([, v]) => Math.round((v.resultTokens ?? 0) * total / rawSum));
-          const drift = total - scaled.reduce((a, b) => a + b, 0);
-          if (drift !== 0) { let mi = 0; for (let i = 1; i < scaled.length; i++) if (scaled[i]! > scaled[mi]!) mi = i; scaled[mi]! += drift; }
-          return list.map(([n, v], i) => ({ name: n, calls: v.calls ?? 0, resultTokens: scaled[i]!, task: v.task ?? false }));
-        }
+        const toolsRaw = Object.entries(ct).map(([name, v]: any) => ({
+          name,
+          calls: v.calls ?? 0,
+          resultTokens: v.resultTokens ?? 0,
+          task: v.task ?? false,
+        }));
 
         return (
         <PeakModal
           categories={cats}
-          tools={[
-            ...distribute(nonTaskEntries, toolRt, nonTaskRaw),
-            ...distribute(taskEntries, taskRt, taskRaw),
-          ]}
+          tools={toolsRaw}
           peakTokens={currentTurn.cum_total}
           peakIndex={currentTurnIndex ?? 0}
           turnIndex={currentTurn.turn_index ?? currentTurnIndex ?? 0}
