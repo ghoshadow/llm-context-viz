@@ -91,6 +91,47 @@ export function initDb(): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS ontology_shards (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      shard_index INTEGER NOT NULL,
+      turn_range TEXT NOT NULL,
+      start_turn INTEGER,
+      end_turn INTEGER,
+      status TEXT NOT NULL,
+      phase_theme TEXT,
+      candidates_json TEXT,
+      relations_json TEXT,
+      config_json TEXT,
+      error TEXT,
+      extraction_depth TEXT DEFAULT 'refined',
+      shard_size INTEGER,
+      max_shard_chars INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (session_id, shard_index, extraction_depth)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ontology_shards_session
+      ON ontology_shards(session_id, extraction_depth, shard_index);
+
+    CREATE TABLE IF NOT EXISTS ontology_card_summaries (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      topic_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'not_started',
+      summary TEXT,
+      error TEXT,
+      model TEXT,
+      prompt_hash TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT,
+      PRIMARY KEY (session_id, topic_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ontology_card_summaries_session
+      ON ontology_card_summaries(session_id, status, updated_at);
+
     CREATE TABLE IF NOT EXISTS scanned_files (
       path TEXT PRIMARY KEY,
       name TEXT NOT NULL,

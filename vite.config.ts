@@ -11,6 +11,15 @@ export default defineConfig({
   },
   server: {
     port: parseInt(process.env.VITE_PORT || '5173'),
+    watch: {
+      ignored: [
+        '**/data/extractions/**',
+        '**/data/*.db',
+        '**/data/*.db-*',
+        '**/.claude/**',
+        '**/.claude-trace/**',
+      ],
+    },
     proxy: {
       '/api': {
         target: `http://localhost:${API_PORT}`,

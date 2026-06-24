@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { SEMANTIC } from '../../styles/theme';
-import type { OntologyData, OntologyNode, OntologyEdge } from '../../types/ontology';
+import type { OntologyData, OntologyNode, OntologyEvidence } from '../../types/ontology';
 import { sortOntologyTypes } from './typeOrder';
+import { get, post, put } from '../../api/client';
 
 interface OntologyDetailPanelProps {
   data: OntologyData;
@@ -12,6 +13,19 @@ interface OntologyDetailPanelProps {
   onSelectNode: (id: string | null) => void;
   onClearSelection: () => void;
   onJumpToTurn: (turn: number) => void;
+  sessionId: string | null;
+}
+
+type SummaryStatus = 'not_started' | 'running' | 'done' | 'error';
+
+interface CardSummaryStatus {
+  topicId: string;
+  status: SummaryStatus;
+  summary: string | null;
+  error: string | null;
+  updatedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 function fmt(n: number): string {
@@ -22,6 +36,196 @@ function confColor(c: number): string {
   if (c >= 0.85) return 'oklch(0.78 0.12 150)';
   if (c >= 0.7) return 'oklch(0.80 0.11 95)';
   return 'oklch(0.76 0.13 45)';
+}
+
+function sourceLabel(source: string): string {
+  if (source === 'user') return '用户';
+  if (source === 'reply') return '回复';
+  if (source === 'tool_summary') return '工具摘要';
+  if (source === 'reasoning_summary') return '推理摘要';
+  return source;
+}
+
+function sortedEvidence(evidence: OntologyEvidence[]): OntologyEvidence[] {
+  return [...evidence].sort((a, b) => a.turn - b.turn || b.weight - a.weight || a.source.localeCompare(b.source));
+}
+
+function statusLabel(status?: string): { label: string; color: string } {
+  if (status === 'confirmed') return { label: '已确认', color: 'oklch(0.78 0.12 150)' };
+  if (status === 'needs_confirmation') return { label: '待确认', color: 'oklch(0.78 0.13 45)' };
+  return { label: '推断', color: 'oklch(0.74 0.10 210)' };
+}
+
+function getCardNodes(topic: OntologyNode, data: OntologyData): OntologyNode[] {
+  const aggregateNodes = topic.aggregateId
+    ? data.nodes.filter((n) => n.aggregateId === topic.aggregateId)
+    : [];
+  if (aggregateNodes.length > 0) return aggregateNodes;
+
+  const relatedIds = new Set<string>([topic.id]);
+  data.edges.forEach((e) => {
+    if (e.s === topic.id) relatedIds.add(e.t);
+    if (e.t === topic.id) relatedIds.add(e.s);
+  });
+  return data.nodes.filter((n) => relatedIds.has(n.id));
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    const token = match[0];
+    const key = `${keyPrefix}-${match.index}`;
+
+    if (token.startsWith('**')) {
+      nodes.push(<strong key={key} style={{ color: 'oklch(0.90 0.01 265)', fontWeight: 650 }}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith('`')) {
+      nodes.push(
+        <code key={key} style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '0.92em', color: 'oklch(0.84 0.10 165)', background: 'oklch(0.24 0.012 265)', borderRadius: 4, padding: '1px 4px' }}>
+          {token.slice(1, -1)}
+        </code>,
+      );
+    } else {
+      const linkMatch = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
+      if (linkMatch) {
+        nodes.push(
+          <a key={key} href={linkMatch[2]} target="_blank" rel="noreferrer" style={{ color: 'oklch(0.78 0.12 165)', textDecoration: 'none' }}>
+            {linkMatch[1]}
+          </a>,
+        );
+      }
+    }
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
+}
+
+function MarkdownSummary({ text }: { text: string }) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const blocks: React.ReactNode[] = [];
+  let paragraph: string[] = [];
+  let list: Array<{ ordered: boolean; text: string }> = [];
+  let code: string[] | null = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    const content = paragraph.join(' ').trim();
+    if (content) {
+      blocks.push(
+        <p key={`p-${blocks.length}`} style={{ margin: '0 0 10px', lineHeight: 1.68 }}>
+          {renderInlineMarkdown(content, `p-${blocks.length}`)}
+        </p>,
+      );
+    }
+    paragraph = [];
+  };
+
+  const flushList = () => {
+    if (list.length === 0) return;
+    const ordered = list[0]!.ordered;
+    const Tag = ordered ? 'ol' : 'ul';
+    blocks.push(
+      <Tag key={`list-${blocks.length}`} style={{ margin: '0 0 10px', paddingLeft: 18, lineHeight: 1.6 }}>
+        {list.map((item, idx) => (
+          <li key={idx} style={{ marginBottom: 5 }}>
+            {renderInlineMarkdown(item.text, `li-${blocks.length}-${idx}`)}
+          </li>
+        ))}
+      </Tag>,
+    );
+    list = [];
+  };
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trimEnd();
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('```')) {
+      flushParagraph();
+      flushList();
+      if (code) {
+        blocks.push(
+          <pre key={`code-${blocks.length}`} style={{ margin: '0 0 10px', padding: '9px 10px', borderRadius: 8, overflowX: 'auto', background: 'oklch(0.15 0.008 265)', border: '1px solid oklch(0.28 0.012 265)', color: 'oklch(0.82 0.01 265)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, lineHeight: 1.55 }}>
+            <code>{code.join('\n')}</code>
+          </pre>,
+        );
+        code = null;
+      } else {
+        code = [];
+      }
+      return;
+    }
+
+    if (code) {
+      code.push(rawLine);
+      return;
+    }
+
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      return;
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      const level = heading[1]!.length;
+      const fontSize = level === 1 ? 14.5 : level === 2 ? 13.5 : 12.5;
+      blocks.push(
+        <div key={`h-${blocks.length}`} style={{ margin: blocks.length === 0 ? '0 0 8px' : '13px 0 8px', fontSize, fontWeight: 700, color: 'oklch(0.88 0.01 265)' }}>
+          {renderInlineMarkdown(heading[2]!, `h-${blocks.length}`)}
+        </div>,
+      );
+      return;
+    }
+
+    const quote = trimmed.match(/^>\s?(.+)$/);
+    if (quote) {
+      flushParagraph();
+      flushList();
+      blocks.push(
+        <blockquote key={`q-${blocks.length}`} style={{ margin: '0 0 10px', padding: '5px 0 5px 10px', borderLeft: '2px solid oklch(0.45 0.09 165)', color: SEMANTIC.textMuted, lineHeight: 1.6 }}>
+          {renderInlineMarkdown(quote[1]!, `q-${blocks.length}`)}
+        </blockquote>,
+      );
+      return;
+    }
+
+    const unordered = trimmed.match(/^[-*]\s+(.+)$/);
+    const ordered = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (unordered || ordered) {
+      flushParagraph();
+      const isOrdered = Boolean(ordered);
+      if (list.length > 0 && list[0]!.ordered !== isOrdered) flushList();
+      list.push({ ordered: isOrdered, text: (unordered?.[1] || ordered?.[1] || '').trim() });
+      return;
+    }
+
+    flushList();
+    paragraph.push(trimmed);
+  });
+
+  flushParagraph();
+  flushList();
+
+  const openCode = code as string[] | null;
+  if (openCode) {
+    blocks.push(
+      <pre key={`code-${blocks.length}`} style={{ margin: '0 0 10px', padding: '9px 10px', borderRadius: 8, overflowX: 'auto', background: 'oklch(0.15 0.008 265)', border: '1px solid oklch(0.28 0.012 265)', color: 'oklch(0.82 0.01 265)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, lineHeight: 1.55 }}>
+        <code>{openCode.join('\n')}</code>
+      </pre>,
+    );
+  }
+
+  return <div style={{ fontSize: 12.5, color: 'oklch(0.82 0.01 265)' }}>{blocks}</div>;
 }
 
 // ─── Empty State ────────────────────────────────────────────────────────────
@@ -130,6 +334,7 @@ function SelectedEntity({
   onSelectNode,
   onClearSelection,
   onJumpToTurn,
+  sessionId,
 }: {
   node: OntologyNode;
   typeColor: string;
@@ -141,9 +346,155 @@ function SelectedEntity({
   onSelectNode: (id: string | null) => void;
   onClearSelection: () => void;
   onJumpToTurn: (turn: number) => void;
+  sessionId: string | null;
 }) {
+  const [summaryStatus, setSummaryStatus] = useState<CardSummaryStatus>({
+    topicId: node.id,
+    status: 'not_started',
+    summary: null,
+    error: null,
+    updatedAt: null,
+    startedAt: null,
+    completedAt: null,
+  });
+  const [summaryChecking, setSummaryChecking] = useState(false);
+  const [summaryEditing, setSummaryEditing] = useState(false);
+  const [summaryDraft, setSummaryDraft] = useState('');
+  const [summarySaving, setSummarySaving] = useState(false);
+  const [summarySaveError, setSummarySaveError] = useState<string | null>(null);
   const c = node.conf;
   const cfColor = confColor(c);
+  const st = statusLabel(node.status);
+  const orderedEvidence = sortedEvidence(node.evidence || []);
+  const evidenceTurnCount = new Set(orderedEvidence.map((ev) => ev.turn)).size;
+  const cardNodes = useMemo(() => getCardNodes(node, data), [node, data]);
+  const cardEdges = useMemo(() => {
+    const ids = new Set(cardNodes.map((n) => n.id));
+    return data.edges.filter((e) => ids.has(e.s) && ids.has(e.t));
+  }, [cardNodes, data.edges]);
+  const summaryNodeCount = Math.max(0, cardNodes.length - 1);
+  const summaryRunning = summaryStatus.status === 'running';
+  const summaryDone = summaryStatus.status === 'done' && Boolean(summaryStatus.summary);
+  const summaryFailed = summaryStatus.status === 'error';
+  const summaryLabel = summaryRunning
+    ? '知识总结 总结中'
+    : summaryDone
+      ? '知识总结 已总结'
+      : summaryFailed
+        ? '知识总结 总结失败'
+        : '知识总结 未总结';
+  const summaryHint = summaryFailed
+    ? `点击再次总结 ${summaryNodeCount}节点`
+    : summaryDone || summaryRunning
+      ? `${summaryNodeCount}节点`
+      : `点击进行总结 ${summaryNodeCount}节点`;
+
+  const loadSummaryStatus = async () => {
+    if (!sessionId || node.type !== 'topic') return;
+    setSummaryChecking(true);
+    try {
+      const result = await get<CardSummaryStatus>(`/sessions/${sessionId}/ontology/summarize-card/${encodeURIComponent(node.id)}`);
+      setSummaryStatus(result);
+    } catch (err) {
+      setSummaryStatus({
+        topicId: node.id,
+        status: 'error',
+        summary: null,
+        error: err instanceof Error ? err.message : '获取知识总结状态失败',
+        updatedAt: null,
+        startedAt: null,
+        completedAt: null,
+      });
+    } finally {
+      setSummaryChecking(false);
+    }
+  };
+
+  const handleGenerateSummary = async () => {
+    if (!sessionId || summaryStatus.status === 'running' || summaryDone) return;
+    setSummaryEditing(false);
+    setSummarySaveError(null);
+    setSummaryStatus((prev) => ({ ...prev, topicId: node.id, status: 'running', error: null }));
+    try {
+      const result = await post<CardSummaryStatus>(`/sessions/${sessionId}/ontology/summarize-card`, {
+        topicId: node.id,
+      });
+      setSummaryStatus(result);
+    } catch (err) {
+      setSummaryStatus({
+        topicId: node.id,
+        status: 'error',
+        summary: null,
+        error: err instanceof Error ? err.message : '生成知识总结失败',
+        updatedAt: null,
+        startedAt: null,
+        completedAt: null,
+      });
+    }
+  };
+
+  const handleEditSummary = () => {
+    setSummaryDraft(summaryStatus.summary || '');
+    setSummarySaveError(null);
+    setSummaryEditing(true);
+  };
+
+  const handleCancelSummaryEdit = () => {
+    setSummaryEditing(false);
+    setSummaryDraft('');
+    setSummarySaveError(null);
+  };
+
+  const handleSaveSummary = async () => {
+    if (!sessionId || summarySaving) return;
+    if (!summaryDraft.trim()) {
+      setSummarySaveError('知识总结内容不能为空');
+      return;
+    }
+
+    setSummarySaving(true);
+    setSummarySaveError(null);
+    try {
+      const result = await put<CardSummaryStatus>(
+        `/sessions/${sessionId}/ontology/summarize-card/${encodeURIComponent(node.id)}`,
+        { summary: summaryDraft.trim() },
+      );
+      setSummaryStatus(result);
+      setSummaryEditing(false);
+      setSummaryDraft('');
+    } catch (err) {
+      setSummarySaveError(err instanceof Error ? err.message : '保存知识总结失败');
+    } finally {
+      setSummarySaving(false);
+    }
+  };
+
+  useEffect(() => {
+    setSummaryStatus({
+      topicId: node.id,
+      status: 'not_started',
+      summary: null,
+      error: null,
+      updatedAt: null,
+      startedAt: null,
+      completedAt: null,
+    });
+    setSummaryEditing(false);
+    setSummaryDraft('');
+    setSummarySaveError(null);
+    setSummarySaving(false);
+    loadSummaryStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node.id, sessionId]);
+
+  useEffect(() => {
+    if (summaryStatus.status !== 'running') return;
+    const timer = window.setInterval(() => {
+      loadSummaryStatus();
+    }, 2000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summaryStatus.status, node.id, sessionId]);
 
   // Related edges
   const visibleIds = new Set(
@@ -225,8 +576,179 @@ function SelectedEntity({
         {node.label}
       </h2>
 
+      {node.type === 'topic' && summaryNodeCount > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            onClick={handleGenerateSummary}
+            disabled={!sessionId || summaryDone || summaryRunning || summaryChecking}
+            style={{
+              width: '100%',
+              border: summaryFailed ? '1px solid oklch(0.66 0.17 25 / 0.5)' : '1px solid oklch(0.45 0.09 165 / 0.55)',
+              borderRadius: 8,
+              padding: '8px 11px',
+              background: summaryFailed
+                ? 'oklch(0.66 0.17 25 / 0.10)'
+                : summaryDone
+                  ? 'oklch(0.74 0.12 165 / 0.16)'
+                  : SEMANTIC.innerCardBg,
+              color: summaryFailed
+                ? 'oklch(0.76 0.13 45)'
+                : summaryDone
+                  ? 'oklch(0.84 0.10 165)'
+                  : 'oklch(0.78 0.01 265)',
+              cursor: !sessionId || summaryDone || summaryRunning || summaryChecking ? 'default' : 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 12.5,
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+            }}
+          >
+            <span>{summaryChecking ? '知识总结 检查中' : summaryLabel}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: SEMANTIC.textMuted }}>
+              {summaryChecking ? `${summaryNodeCount}节点` : summaryHint}
+            </span>
+          </button>
+
+          {(summaryStatus.summary || summaryStatus.error || summaryRunning) && (
+            <div style={{
+              marginTop: 9,
+              border: summaryFailed ? '1px solid oklch(0.66 0.17 25 / 0.4)' : '1px solid oklch(0.32 0.014 265)',
+              borderRadius: 10,
+              background: summaryFailed ? 'oklch(0.66 0.17 25 / 0.10)' : 'oklch(0.19 0.01 265 / 0.46)',
+              padding: '11px 12px',
+            }}>
+              {summaryRunning && (
+                <div style={{ fontSize: 12, color: SEMANTIC.textMuted, lineHeight: 1.55 }}>
+                  正在生成当前知识卡片总结。刷新页面后会自动恢复这个状态。
+                </div>
+              )}
+              {summaryStatus.error && (
+                <div style={{ fontSize: 12, color: 'oklch(0.76 0.13 45)', lineHeight: 1.55 }}>
+                  {summaryStatus.error}
+                </div>
+              )}
+              {summaryStatus.summary && !summaryEditing && (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+                    <span style={{ fontSize: 11, color: SEMANTIC.textMuted, fontFamily: "'IBM Plex Mono', monospace" }}>
+                      Markdown · 已保存
+                    </span>
+                    <span style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      onClick={handleEditSummary}
+                      disabled={summarySaving}
+                      style={{
+                        border: '1px solid oklch(0.45 0.09 165 / 0.45)',
+                        borderRadius: 7,
+                        padding: '4px 9px',
+                        background: 'oklch(0.24 0.012 265)',
+                        color: 'oklch(0.82 0.10 165)',
+                        cursor: summarySaving ? 'default' : 'pointer',
+                        fontFamily: 'inherit',
+                        fontSize: 11,
+                      }}
+                    >
+                      编辑
+                    </button>
+                  </div>
+                  <MarkdownSummary text={summaryStatus.summary} />
+                </>
+              )}
+              {summaryStatus.summary && summaryEditing && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <textarea
+                    value={summaryDraft}
+                    onChange={(event) => setSummaryDraft(event.target.value)}
+                    disabled={summarySaving}
+                    rows={12}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      resize: 'vertical',
+                      border: '1px solid oklch(0.34 0.014 265)',
+                      borderRadius: 8,
+                      padding: '9px 10px',
+                      background: 'oklch(0.16 0.008 265)',
+                      color: SEMANTIC.textPrimary,
+                      outline: 'none',
+                      fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                      fontSize: 12.5,
+                      lineHeight: 1.6,
+                    }}
+                  />
+                  {summarySaveError && (
+                    <div style={{ fontSize: 11.5, color: 'oklch(0.76 0.13 45)', lineHeight: 1.45 }}>
+                      {summarySaveError}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={handleCancelSummaryEdit}
+                      disabled={summarySaving}
+                      style={{
+                        border: '1px solid oklch(0.30 0.014 265)',
+                        borderRadius: 7,
+                        padding: '5px 10px',
+                        background: 'oklch(0.22 0.01 265)',
+                        color: 'oklch(0.76 0.01 265)',
+                        cursor: summarySaving ? 'default' : 'pointer',
+                        fontFamily: 'inherit',
+                        fontSize: 11.5,
+                      }}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveSummary}
+                      disabled={summarySaving}
+                      style={{
+                        border: '1px solid oklch(0.45 0.09 165 / 0.55)',
+                        borderRadius: 7,
+                        padding: '5px 11px',
+                        background: 'oklch(0.30 0.06 165 / 0.45)',
+                        color: 'oklch(0.86 0.10 165)',
+                        cursor: summarySaving ? 'default' : 'pointer',
+                        fontFamily: 'inherit',
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {summarySaving ? '保存中' : '保存'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {node.type !== 'topic' && node.claim && (
+        <div
+          style={{
+            marginTop: 10,
+            border: '1px solid oklch(0.32 0.014 265)',
+            borderRadius: 9,
+            padding: '9px 11px',
+            background: 'oklch(0.20 0.01 265 / 0.45)',
+            color: 'oklch(0.84 0.01 265)',
+            fontSize: 12.5,
+            lineHeight: 1.55,
+          }}
+        >
+          {node.claim}
+        </div>
+      )}
+
       {/* Aliases */}
-      {node.aliases.length > 0 && (
+      {node.type !== 'topic' && node.aliases.length > 0 && (
         <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: SEMANTIC.textMuted, marginTop: 2 }}>
           别名 · {node.aliases.join(' · ')}
         </div>
@@ -236,9 +758,14 @@ function SelectedEntity({
       <div style={{ marginTop: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
           <span style={{ fontSize: 11.5, color: SEMANTIC.textDesc3 }}>抽取置信度</span>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 600, color: cfColor }}>
-            {Math.round(c * 100)}%
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 10.5, color: st.color, border: `1px solid ${st.color}`, borderRadius: 999, padding: '1px 7px' }}>
+              {st.label}
+            </span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 600, color: cfColor }}>
+              {Math.round(c * 100)}%
+            </span>
+          </div>
         </div>
         <div style={{ height: 6, borderRadius: 4, background: 'oklch(0.24 0.01 265)', overflow: 'hidden' }}>
           <div
@@ -251,6 +778,42 @@ function SelectedEntity({
           />
         </div>
       </div>
+
+      {orderedEvidence.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 11.5, color: SEMANTIC.textDesc3, marginBottom: 7 }}>
+            证据 · {evidenceTurnCount}轮 · {orderedEvidence.length}条
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {orderedEvidence.map((ev, idx) => (
+              <div
+                key={`${ev.turn}-${ev.source}-${idx}`}
+                style={{
+                  border: '1px solid oklch(0.27 0.012 265)',
+                  borderRadius: 8,
+                  padding: '8px 9px',
+                  background: SEMANTIC.innerCardBg,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: 'oklch(0.70 0.08 165)' }}>
+                    第{ev.turn}轮
+                  </span>
+                  <span style={{ fontSize: 10, color: 'oklch(0.58 0.012 265)' }}>
+                    {sourceLabel(ev.source)}
+                  </span>
+                  <span style={{ marginLeft: 'auto', fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: SEMANTIC.textMuted }}>
+                    {Math.round(ev.weight * 100)}%
+                  </span>
+                </div>
+                <div style={{ fontSize: 11.5, color: 'oklch(0.76 0.01 265)', lineHeight: 1.45 }}>
+                  {ev.text}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Disambiguation note */}
       {node.note && (
@@ -377,6 +940,7 @@ const OntologyDetailPanel: React.FC<OntologyDetailPanelProps> = ({
   onSelectNode,
   onClearSelection,
   onJumpToTurn,
+  sessionId,
 }) => {
   const node = selectedNodeId ? data.nodes.find((n) => n.id === selectedNodeId) : null;
   const typeInfo = node ? data.types.find((t) => t.key === node.type) : null;
@@ -405,6 +969,7 @@ const OntologyDetailPanel: React.FC<OntologyDetailPanelProps> = ({
           onSelectNode={onSelectNode}
           onClearSelection={onClearSelection}
           onJumpToTurn={onJumpToTurn}
+          sessionId={sessionId}
         />
       ) : (
         <EmptyState data={data} degree={degree} onSelectNode={onSelectNode} />

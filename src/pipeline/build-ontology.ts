@@ -16,7 +16,14 @@
 //   const result = buildOntology({ candidates, relations, config });
 // ============================================================================
 
-import type { OntologyData, OntologyNode, OntologyEdge, OntologyType } from '../types/ontology';
+import type {
+  OntologyData,
+  OntologyNode,
+  OntologyEdge,
+  OntologyType,
+  OntologyEvidence,
+  OntologyEvidenceStatus,
+} from '../types/ontology';
 
 // ─── Type definitions for pipeline input ─────────────────────────────────────
 
@@ -30,7 +37,10 @@ export interface CandidateEntity {
   firstTurn: number;
   turns: number[];
   aliases?: string[];
+  claim?: string;
   snippet: string;
+  evidence?: OntologyEvidence[];
+  status?: OntologyEvidenceStatus;
   snippetQuality?: 'ok' | 'low';
   note?: string;
   aggregateId?: string;
@@ -43,6 +53,7 @@ export interface SemanticRelation {
   label: string;
   firstTurn: number;
   conf: number;
+  evidence?: OntologyEvidence[];
 }
 
 /** All 6 knowledge type definitions. */
@@ -104,7 +115,7 @@ export interface OntologyBuildOutput {
 
 const DEFAULT_KEEP_TYPES = ['topic', 'why', 'how_to', 'pitfall', 'heuristic', 'technique'];
 
-const DEFAULT_SOURCES = ['user_message', 'assistant_final_reply', 'assistant_thinking'];
+const DEFAULT_SOURCES = ['user', 'reply', 'reasoning_summary', 'tool_summary'];
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────
 
@@ -167,6 +178,9 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
     .map((k) => ({ key: k, label: TYPE_DEFS[k]!.label, color: TYPE_DEFS[k]!.color }));
 
   // ── Map to OntologyNode / OntologyEdge ────────────────────────────────
+  const sortEvidence = <T extends { turn: number; weight: number; source: string }>(evidence?: T[]): T[] =>
+    [...(evidence || [])].sort((a, b) => a.turn - b.turn || b.weight - a.weight || a.source.localeCompare(b.source));
+
   const outputNodes: OntologyNode[] = nodes.map((n) => ({
     id: n.id,
     label: n.label,
@@ -176,7 +190,10 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
     firstTurn: n.firstTurn,
     turns: n.turns,
     aliases: n.aliases || [],
+    claim: n.claim,
     snippet: n.snippet,
+    evidence: sortEvidence(n.evidence),
+    status: n.status || 'inferred',
     snippetQuality: n.snippetQuality || 'ok',
     note: n.note,
     aggregateId: n.aggregateId,
@@ -188,6 +205,7 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
     label: e.label,
     firstTurn: e.firstTurn,
     conf: e.conf,
+    evidence: sortEvidence(e.evidence),
   }));
 
   // ── Stats ─────────────────────────────────────────────────────────────

@@ -89,7 +89,7 @@ const HEADER = `# 会话上下文本体提取任务
 
 ## 重要规则
 
-1. **来源限定**：只从用户输入（\`### 用户输入\`）和模型内容（\`### 模型\` 中的 \`[THINK]\`、\`[REPLY]\`）中抽取语义。不从工具结果的结构化数据中提取。
+1. **来源限定**：只从用户输入（\`### 用户输入\`）和模型内容中抽取语义。优先使用 \`[REPLY]\`；\`[REASONING_SUMMARY]\` 和 \`[TOOL_SUMMARY]\` 只能作为低权重补充证据，不能单独支撑高置信实体。
 
 2. **知识化表达**：不要把函数名、文件路径、命令本身当作实体；如果它们承载了可复用做法，提炼成 \`technique\` 或 \`how_to\`。
 
@@ -99,7 +99,11 @@ const HEADER = `# 会话上下文本体提取任务
 
 5. **关系概念化**：关系体现知识之间的包含、因果、支撑、递进、修正等逻辑联系。边应连接知识实体，而不是技术工件。
 
-6. **config.maxTurn** 设为会话实际最大轮次编号。\`config.keepTypes\` 使用当前 6 种知识类型。
+6. **证据驱动**：每个实体和关系应有 evidence。只有 \`user\` 或 \`reply\` 明确支持时才能高置信；只有 \`reasoning_summary\` 支撑时，置信度不得高于 0.55。
+
+7. **证据 source 枚举严格限定**：evidence[].source 只能填写 \`user\`、\`reply\`、\`reasoning_summary\`、\`tool_summary\` 四个值。不要输出 \`assistant\`、\`model\`、\`human\`、\`thinking\`、\`tool\`、\`tool_result\`、\`user_message\`、\`assistant_final_reply\` 等别名；看到 \`[REPLY]\` 一律写 \`reply\`，看到 \`[REASONING_SUMMARY]\` 一律写 \`reasoning_summary\`，看到 \`[TOOL_SUMMARY]\` 一律写 \`tool_summary\`。
+
+8. **config.maxTurn** 设为会话实际最大轮次编号。\`config.keepTypes\` 使用当前 6 种知识类型。
 
 ---
 

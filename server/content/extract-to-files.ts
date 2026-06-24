@@ -1,7 +1,7 @@
 /**
  * extract-to-files.ts
  *
- * 从 JSONL 会话转录中提取自然语言内容，按轮次分组后写入持久化文件树。
+ * 从 JSONL 会话转录中提取自然语言内容，按轮次与字符预算分组后写入持久化文件树。
  *
  * 文件树结构：
  *   data/extractions/<session_id>/
@@ -10,7 +10,7 @@
  *     ├── shard_001_turns_31-60.md
  *     └── ...
  *
- * 每个 .md 文件包含完整的用户消息和助手消息（THINK + REPLY），
+ * 每个 .md 文件包含用户消息、助手回复、推理摘要和工具摘要，
  * 与 extractContentWithTurns 的输出格式一致。
  */
 
@@ -62,6 +62,7 @@ export interface ExtractionManifest {
 // ── 默认配置 ────────────────────────────────────────────────────────────────
 
 const DEFAULT_SHARD_SIZE = 30;
+const DEFAULT_MAX_SHARD_CHARS = 45_000;
 const DEFAULT_BASE_DIR = resolve(join(__dirname, '..', '..', 'data', 'extractions'));
 
 // ── 辅助函数 ────────────────────────────────────────────────────────────────
@@ -86,6 +87,61 @@ function getManifestPath(sessionId: string, baseDir: string): string {
  */
 function shardFilename(index: number, startTurn: number, endTurn: number): string {
   return `shard_${String(index).padStart(3, '0')}_turns_${startTurn}-${endTurn}.md`;
+}
+
+function groupTurnsIntoShards(
+  turns: TurnContent[],
+  maxTurns: number,
+  maxChars: number,
+  startIndex = 0,
+): TurnContent[][] {
+  const groups: TurnContent[][] = [];
+  let current: TurnContent[] = [];
+  let currentChars = 0;
+
+  for (let i = startIndex; i < turns.length; i++) {
+    const turn = turns[i]!;
+    const nextChars = currentChars + turn.content.length;
+    const shouldSplit =
+      current.length > 0
+      && (current.length >= maxTurns || nextChars > maxChars);
+
+    if (shouldSplit) {
+      groups.push(current);
+      current = [];
+      currentChars = 0;
+    }
+
+    current.push(turn);
+    currentChars += turn.content.length;
+  }
+
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
+function writeShardGroup(
+  outputDir: string,
+  index: number,
+  group: TurnContent[],
+): ShardFile {
+  const startTurn = group[0]!.turnNum;
+  const endTurn = group[group.length - 1]!.turnNum;
+  const filename = shardFilename(index, startTurn, endTurn);
+  const filePath = join(outputDir, filename);
+  const content = group.map((t) => t.content).join('\n');
+
+  writeFileSync(filePath, content, 'utf-8');
+
+  return {
+    index,
+    path: filePath,
+    filename,
+    turnRange: `${startTurn}-${endTurn}`,
+    turnCount: group.length,
+    startTurn,
+    endTurn,
+  };
 }
 
 // ── 导出函数 ────────────────────────────────────────────────────────────────
@@ -134,6 +190,8 @@ export function extractToFiles(
   options?: {
     /** 每分片轮次数，默认 30 */
     shardSize?: number;
+    /** 每分片最大字符数，默认 45000 */
+    maxShardChars?: number;
     /** 输出根目录，默认 data/extractions */
     baseDir?: string;
     /** 是否强制覆盖已有文件，默认 false */
@@ -141,6 +199,7 @@ export function extractToFiles(
   },
 ): ExtractionManifest {
   const shardSize = options?.shardSize ?? DEFAULT_SHARD_SIZE;
+  const maxShardChars = options?.maxShardChars ?? DEFAULT_MAX_SHARD_CHARS;
   const baseDir = options?.baseDir ?? DEFAULT_BASE_DIR;
   const force = options?.force ?? false;
 
@@ -168,34 +227,12 @@ export function extractToFiles(
 
   mkdirSync(outputDir, { recursive: true });
 
-  // ── 按 shardSize 轮一组顺序切分 ──
-  const numShards = Math.ceil(totalTurns / shardSize);
+  // ── 按 shardSize + maxShardChars 混合预算顺序切分 ──
   const shards: ShardFile[] = [];
+  const groups = groupTurnsIntoShards(turns, shardSize, maxShardChars);
 
-  for (let i = 0; i < numShards; i++) {
-    const startIdx = i * shardSize;
-    const endIdx = Math.min(startIdx + shardSize, totalTurns);
-    const group = turns.slice(startIdx, endIdx);
-
-    const startTurn = group[0]!.turnNum;
-    const endTurn = group[group.length - 1]!.turnNum;
-    const filename = shardFilename(i, startTurn, endTurn);
-    const filePath = join(outputDir, filename);
-
-    // 拼接该组所有轮次内容
-    const content = group.map((t) => t.content).join('\n');
-
-    writeFileSync(filePath, content, 'utf-8');
-
-    shards.push({
-      index: i,
-      path: filePath,
-      filename,
-      turnRange: `${startTurn}-${endTurn}`,
-      turnCount: group.length,
-      startTurn,
-      endTurn,
-    });
+  for (let i = 0; i < groups.length; i++) {
+    shards.push(writeShardGroup(outputDir, i, groups[i]!));
   }
 
   // ── 写入 manifest.json ──
@@ -243,9 +280,10 @@ export interface IncrementalResult {
 export function extractIncremental(
   rawJsonl: string,
   sessionId: string,
-  options?: { shardSize?: number; baseDir?: string },
+  options?: { shardSize?: number; maxShardChars?: number; baseDir?: string },
 ): IncrementalResult {
   const shardSize = options?.shardSize ?? DEFAULT_SHARD_SIZE;
+  const maxShardChars = options?.maxShardChars ?? DEFAULT_MAX_SHARD_CHARS;
   const baseDir = options?.baseDir ?? DEFAULT_BASE_DIR;
 
   // 解析当前 JSONL
@@ -261,7 +299,7 @@ export function extractIncremental(
 
   // 无已有 manifest → 全量提取
   if (!existingManifest) {
-    const manifest = extractToFiles(rawJsonl, sessionId, { shardSize, baseDir, force: true });
+    const manifest = extractToFiles(rawJsonl, sessionId, { shardSize, maxShardChars, baseDir, force: true });
     const allIndices = manifest.shards.map((_, i) => i);
     return { manifest, newShardIndices: allIndices, hasNewTurns: true };
   }
@@ -271,42 +309,15 @@ export function extractIncremental(
     return { manifest: existingManifest, newShardIndices: [], hasNewTurns: false };
   }
 
-  // 计算新增轮次范围
   const oldTotalTurns = existingManifest.totalTurns;
   const oldShardCount = existingManifest.shardCount;
 
-  // 新增轮次从 oldTotalTurns + 1 开始（轮次是 1-based）
-  const newTurnStart = oldTotalTurns + 1;
-
-  // 新增轮次的分片索引
-  const newStartShardIdx = Math.floor(oldTotalTurns / shardSize); // 首个可能受影响的分片
-  const newEndShardIdx = Math.floor((currentTotalTurns - 1) / shardSize); // 最后一个分片
-
   const outputDir = getOutputDir(sessionId, baseDir);
   const newShards: ShardFile[] = [];
+  const groups = groupTurnsIntoShards(turns, shardSize, maxShardChars, oldTotalTurns);
 
-  for (let i = newStartShardIdx; i <= newEndShardIdx; i++) {
-    const startIdx = i * shardSize;
-    const endIdx = Math.min(startIdx + shardSize, currentTotalTurns);
-    const group = turns.slice(startIdx, endIdx);
-
-    const startTurn = group[0]!.turnNum;
-    const endTurn = group[group.length - 1]!.turnNum;
-    const filename = shardFilename(i, startTurn, endTurn);
-    const filePath = join(outputDir, filename);
-
-    const content = group.map((t) => t.content).join('\n');
-    writeFileSync(filePath, content, 'utf-8');
-
-    newShards.push({
-      index: i,
-      path: filePath,
-      filename,
-      turnRange: `${startTurn}-${endTurn}`,
-      turnCount: group.length,
-      startTurn,
-      endTurn,
-    });
+  for (let i = 0; i < groups.length; i++) {
+    newShards.push(writeShardGroup(outputDir, oldShardCount + i, groups[i]!));
   }
 
   // 合并 shards：已有分片中不包含的保留，新增或更新的替换

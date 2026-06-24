@@ -10,24 +10,30 @@ import OntologyDetailPanel from './OntologyDetailPanel';
 
 export default function OntologyPage() {
   // Local state
-  const [turn, setTurn] = useState(31);
+  const [turn, setTurn] = useState(1);
   const [activeTypes, setActiveTypes] = useState<Record<string, boolean>>({});
   const [playing, setPlaying] = useState(false);
   const [recenterKey, setRecenterKey] = useState(0);
+  const [turnTouched, setTurnTouched] = useState(false);
 
   // Stores
   const selectedOntologyNode = useUIStore((s) => s.selectedOntologyNode);
   const setSelectedOntologyNode = useUIStore((s) => s.setSelectedOntologyNode);
   const setPage = useUIStore((s) => s.setPage);
   const ontologyData = useSessionStore((s) => s.ontologyData);
+  const ontologyMaxTurn = useSessionStore((s) => s.ontologyMaxTurn);
   const ontologyLoading = useSessionStore((s) => s.ontologyLoading);
   const ontologyError = useSessionStore((s) => s.ontologyError);
   const ontologyFetched = useSessionStore((s) => s.ontologyFetched);
   const fetchOntology = useSessionStore((s) => s.fetchOntology);
   const buildOntology = useSessionStore((s) => s.buildOntology);
   const extractOntology = useSessionStore((s) => s.extractOntology);
+  const fetchExtractStatus = useSessionStore((s) => s.fetchExtractStatus);
   const extractPhase = useSessionStore((s) => s.extractPhase);
   const extractProgress = useSessionStore((s) => s.extractProgress);
+  const extractDepth = useSessionStore((s) => s.extractDepth);
+  const extractShardSize = useSessionStore((s) => s.extractShardSize);
+  const extractMaxShardChars = useSessionStore((s) => s.extractMaxShardChars);
   const extractRootDir = useSessionStore((s) => s.extractRootDir);
   const extractError = useSessionStore((s) => s.extractError);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
@@ -40,19 +46,34 @@ export default function OntologyPage() {
 
   // Auto-extract state
   const [shardSize, setShardSize] = useState(30);
+  const [maxShardChars, setMaxShardChars] = useState(45000);
   const [forceExtract, setForceExtract] = useState(false);
   const [showExtractModal, setShowExtractModal] = useState(false);
   const [extractMode, setExtractMode] = useState<'full' | 'incremental'>('full');
+  const [extractionDepth, setExtractionDepth] = useState<'refined' | 'deep'>('refined');
 
   const handleStartExtract = useCallback(async (mode: 'full' | 'incremental') => {
     setExtractMode(mode);
     // full=强制重建提取文件, incremental=复用已有文件（如存在）
     await extractOntology({
       shardSize,
+      maxShardChars,
       force: mode === 'full' ? forceExtract : false,
       incremental: mode === 'incremental',
+      extractionDepth,
     });
-  }, [extractOntology, shardSize, forceExtract]);
+  }, [extractOntology, shardSize, maxShardChars, forceExtract, extractionDepth]);
+
+  const handleRetryFailedShards = useCallback(async () => {
+    await extractOntology({
+      shardSize: extractShardSize,
+      maxShardChars: extractMaxShardChars,
+      force: false,
+      incremental: false,
+      retryFailedOnly: true,
+      extractionDepth: extractDepth,
+    });
+  }, [extractOntology, extractShardSize, extractMaxShardChars, extractDepth]);
 
   const openExtractModal = useCallback((mode: 'full' | 'incremental') => {
     setExtractMode(mode);
@@ -71,6 +92,28 @@ export default function OntologyPage() {
     }
   }, [currentSessionId, ontologyData, ontologyLoading, ontologyFetched, fetchOntology]);
 
+  useEffect(() => {
+    if (currentSessionId) {
+      setTurnTouched(false);
+      fetchExtractStatus();
+    }
+  }, [currentSessionId, fetchExtractStatus]);
+
+  useEffect(() => {
+    if (extractPhase === 'idle') return;
+    const timer = window.setInterval(() => {
+      fetchExtractStatus();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [extractPhase, fetchExtractStatus]);
+
+  useEffect(() => {
+    if (extractPhase !== 'idle') return;
+    setExtractionDepth(extractDepth);
+    setShardSize(extractShardSize);
+    setMaxShardChars(extractMaxShardChars);
+  }, [extractPhase, extractDepth, extractShardSize, extractMaxShardChars]);
+
   // Reset error when session changes so we retry for a new session
   // (handled by selectSession clearing ontologyFetched)
 
@@ -81,11 +124,10 @@ export default function OntologyPage() {
       ontologyData.types.forEach((t) => (at[t.key] = true));
       setActiveTypes((prev) => (Object.keys(prev).length === 0 ? at : prev));
 
-      // Set turn to max
-      const maxT = Math.max(...ontologyData.nodes.map((n) => n.firstTurn), 1);
-      setTurn((prev) => (prev === 31 ? maxT : prev));
+      const maxT = ontologyMaxTurn || Math.max(...ontologyData.nodes.map((n) => n.firstTurn), 1);
+      setTurn((prev) => (turnTouched ? Math.min(Math.max(prev, 1), maxT) : maxT));
     }
-  }, [ontologyData]);
+  }, [ontologyData, ontologyMaxTurn, turnTouched]);
 
   // Auto-clear selection when node becomes invisible
   useEffect(() => {
@@ -106,9 +148,10 @@ export default function OntologyPage() {
   // ─── Computed ──────────────────────────────────────────────────────────
 
   const maxTurn = useMemo(() => {
-    if (!ontologyData) return 31;
+    if (ontologyMaxTurn > 0) return ontologyMaxTurn;
+    if (!ontologyData) return 1;
     return Math.max(...ontologyData.nodes.map((n) => n.firstTurn), 1);
-  }, [ontologyData]);
+  }, [ontologyData, ontologyMaxTurn]);
 
   const degree = useMemo(() => {
     const d: Record<string, number> = {};
@@ -133,13 +176,21 @@ export default function OntologyPage() {
     return { nodes: vn.length, edges: ve.length };
   }, [ontologyData, activeTypes, turn]);
 
+  const failedShardCount = useMemo(
+    () => extractProgress.shardDetails.filter((s) => s.status === 'error').length,
+    [extractProgress.shardDetails],
+  );
+
   // ─── Callbacks ─────────────────────────────────────────────────────────
 
   const onToggleType = useCallback((key: string) => {
     setActiveTypes((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
-  const onSetTurn = useCallback((t: number) => setTurn(t), []);
+  const onSetTurn = useCallback((t: number) => {
+    setTurnTouched(true);
+    setTurn(t);
+  }, []);
 
   const onTogglePlay = useCallback(() => {
     if (playing) {
@@ -148,6 +199,7 @@ export default function OntologyPage() {
       return;
     }
     setPlaying(true);
+    setTurnTouched(true);
     const maxT = maxTurn;
     playRef.current = setInterval(() => {
       setTurn((prev) => {
@@ -166,7 +218,10 @@ export default function OntologyPage() {
     setRecenterKey(recenterRef.current);
   }, []);
 
-  const onJumpToTurn = useCallback((t: number) => setTurn(t), []);
+  const onJumpToTurn = useCallback((t: number) => {
+    setTurnTouched(true);
+    setTurn(t);
+  }, []);
 
   // ─── Render: always show page shell with header/nav ─────────────────────
 
@@ -222,6 +277,7 @@ export default function OntologyPage() {
         </div>
       );
     }
+    const missingShards = ontologyData.missingShards || [];
     // Main graph view
     return (
       <>
@@ -232,7 +288,30 @@ export default function OntologyPage() {
           onUpdate={() => openExtractModal('incremental')}
           onRebuild={() => openExtractModal('full')}
         />
-        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 350px', gap: 16, marginTop: 16, minHeight: 0 }}>
+        {ontologyData.incomplete && missingShards.length > 0 && (
+          <div style={{
+            flexShrink: 0,
+            marginTop: 10,
+            padding: '9px 13px',
+            borderRadius: 10,
+            border: '1px solid oklch(0.78 0.13 65 / 0.38)',
+            background: 'oklch(0.78 0.13 65 / 0.10)',
+            color: 'oklch(0.84 0.11 70)',
+            fontSize: 12,
+            lineHeight: 1.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            flexWrap: 'wrap',
+          }}>
+            <strong style={{ fontWeight: 600 }}>部分结果</strong>
+            <span style={{ color: 'oklch(0.72 0.08 70)' }}>
+              缺失 {missingShards.length} 个分片：
+              {missingShards.map((s) => `#${s.index + 1} 第 ${s.turnRange} 轮`).join('、')}
+            </span>
+          </div>
+        )}
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(430px, 28vw)', gap: 16, marginTop: 16, minHeight: 0 }}>
           <div style={{ position: 'relative', border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 16, background: 'oklch(0.17 0.008 265 / 0.6)', overflow: 'hidden' }}>
             <OntologyGraph data={ontologyData} selectedNodeId={selectedOntologyNode} turn={turn} activeTypes={activeTypes} onSelectNode={setSelectedOntologyNode} recenterKey={recenterKey} />
             <div style={{ position: 'absolute', left: 14, bottom: 12, fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: 'oklch(0.46 0.012 265)', pointerEvents: 'none', lineHeight: 1.5 }}>
@@ -247,6 +326,7 @@ export default function OntologyPage() {
             data={ontologyData} selectedNodeId={selectedOntologyNode} turn={turn}
             activeTypes={activeTypes} degree={degree} onSelectNode={setSelectedOntologyNode}
             onClearSelection={() => setSelectedOntologyNode(null)} onJumpToTurn={onJumpToTurn}
+            sessionId={currentSessionId}
           />
         </div>
       </>
@@ -270,14 +350,52 @@ export default function OntologyPage() {
           <p style={{ margin: '0 0 12px', fontSize: 12.5, color: 'oklch(0.60 0.03 165)', lineHeight: 1.6 }}>
             {inModal && extractMode === 'incremental'
               ? '对比原始 JSONL 与已有提取文件树，仅为新增轮次创建分片并执行 LLM 抽取。新结果自动合并到已有本体数据。'
-              : '从会话内容中自动抽取实体和关系。系统将对话按轮次分片存入文件树，并行调用 LLM 并实时返回进度。'}
+              : '从会话内容中自动抽取实体和关系。系统按最大轮数和字符预算混合分片，存入文件树后并行调用 LLM。'}
           </p>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: SEMANTIC.textSecondary }}>抽取模式</span>
+            {([
+              ['refined', '精炼'],
+              ['deep', '深挖'],
+            ] as const).map(([value, label]) => {
+              const active = extractionDepth === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={extractPhase !== 'idle'}
+                  onClick={() => setExtractionDepth(value)}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: 7,
+                    border: active ? '1px solid oklch(0.45 0.09 165)' : `1px solid ${SEMANTIC.borderColor}`,
+                    background: active ? 'oklch(0.74 0.12 165 / 0.14)' : SEMANTIC.innerCardBg,
+                    color: active ? 'oklch(0.84 0.10 165)' : SEMANTIC.textMuted,
+                    cursor: extractPhase === 'idle' ? 'pointer' : 'default',
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 11.5,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+            <span style={{ fontSize: 11, color: SEMANTIC.textMuted }}>
+              {extractionDepth === 'deep' ? '每片约 24-40 实体' : '每片约 8-16 实体'}
+            </span>
+          </div>
           <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary }}>
-              分片大小（轮）
+              最大轮数/片
               <input type="number" value={shardSize} min={10} max={200} disabled={extractPhase !== 'idle'}
                 onChange={(e) => setShardSize(Number(e.target.value) || 30)}
                 style={{ width: 58, padding: '4px 6px', borderRadius: 6, border: `1px solid ${SEMANTIC.borderColor}`, background: SEMANTIC.innerCardBg, color: SEMANTIC.textPrimary, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: 'center' }} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary }}>
+              字符预算/片
+              <input type="number" value={maxShardChars} min={10000} max={120000} step={5000} disabled={extractPhase !== 'idle'}
+                onChange={(e) => setMaxShardChars(Number(e.target.value) || 45000)}
+                style={{ width: 78, padding: '4px 6px', borderRadius: 6, border: `1px solid ${SEMANTIC.borderColor}`, background: SEMANTIC.innerCardBg, color: SEMANTIC.textPrimary, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: 'center' }} />
             </label>
             {extractMode === 'full' && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary, cursor: 'pointer' }}>
@@ -290,7 +408,7 @@ export default function OntologyPage() {
           </div>
           {extractMode === 'incremental' && (
             <p style={{ margin: '0 0 12px', fontSize: 11, color: 'oklch(0.52 0.04 165)', lineHeight: 1.5 }}>
-              增量模式将对比原始 JSONL 与已有文件树，仅提取新增轮次中的实体和关系，并合并到已有本体数据。
+              增量模式将对比原始 JSONL 与已有文件树，仅提取新增轮次中的实体和关系，并按当前分片预算追加新分片。
             </p>
           )}
           <button onClick={() => handleStartExtract(inModal ? extractMode : 'full')}
@@ -298,7 +416,7 @@ export default function OntologyPage() {
             style={{ padding: '9px 20px', borderRadius: 8, cursor: extractPhase === 'idle' ? 'pointer' : 'default', border: '1px solid oklch(0.45 0.09 165)', fontFamily: "'IBM Plex Mono', monospace", background: 'oklch(0.74 0.12 165 / 0.16)', color: 'oklch(0.84 0.10 165)', fontSize: 12.5, opacity: extractPhase === 'idle' ? 1 : 0.5 }}>
             {extractPhase === 'idle' ? '▶ 开始自动提取' : extractPhase === 'extracting' ? '提取中...' : extractPhase === 'merging' ? '合并中...' : '构建中...'}
           </button>
-          {extractPhase !== 'idle' && (
+          {(extractPhase !== 'idle' || extractError) && (
             <div style={{ marginTop: 14 }}>
               {extractRootDir && (
                 <div style={{ fontSize: 10.5, color: 'oklch(0.52 0.04 165)', marginBottom: 8, fontFamily: "'IBM Plex Mono', monospace", wordBreak: 'break-all', lineHeight: 1.4 }}>
@@ -306,7 +424,9 @@ export default function OntologyPage() {
                 </div>
               )}
               <div style={{ fontSize: 12, color: 'oklch(0.70 0.06 165)', marginBottom: 8, fontFamily: "'IBM Plex Mono', monospace" }}>
-                {extractPhase === 'extracting'
+                {extractPhase === 'idle'
+                  ? '提取未完成'
+                  : extractPhase === 'extracting'
                   ? `正在提取实体 (${extractProgress.shardsCompleted}/${extractProgress.shardsTotal} 分片)`
                   : extractPhase === 'merging' ? '正在合并分片结果...' : '正在构建知识图谱...'}
               </div>
@@ -333,6 +453,11 @@ export default function OntologyPage() {
                 <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'oklch(0.66 0.17 25 / 0.12)', border: '1px solid oklch(0.66 0.17 25 / 0.3)', fontSize: 12, color: 'oklch(0.76 0.13 45)', lineHeight: 1.5 }}>
                   ❌ {extractError}
                   <button onClick={() => handleStartExtract(extractMode)} style={{ marginLeft: 10, padding: '3px 10px', borderRadius: 6, border: '1px solid oklch(0.76 0.13 45 / 0.5)', background: 'transparent', color: 'oklch(0.76 0.13 45)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>重试</button>
+                  {failedShardCount > 0 && extractPhase === 'idle' && (
+                    <button onClick={handleRetryFailedShards} style={{ marginLeft: 8, padding: '3px 10px', borderRadius: 6, border: '1px solid oklch(0.78 0.13 65 / 0.55)', background: 'oklch(0.78 0.13 65 / 0.10)', color: 'oklch(0.84 0.11 70)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>
+                      只重跑失败分片（{failedShardCount}）
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -374,6 +499,8 @@ export default function OntologyPage() {
           <span style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.91 0.01 265)' }}>
             {extractPhase !== 'idle'
               ? `${extractMode === 'incremental' ? '🔄 增量更新中' : '🆕 重建中'} (${extractProgress.shardsCompleted}/${extractProgress.shardsTotal})`
+              : extractError
+                ? `⚠ 提取未完成 (${extractProgress.shardsCompleted}/${extractProgress.shardsTotal})`
               : extractMode === 'incremental' ? '🔄 增量更新本体' : '🆕 重建本体'}
           </span>
           <button onClick={() => setShowExtractModal(false)}
@@ -498,7 +625,7 @@ export default function OntologyPage() {
       </header>
 
       {/* 提取进度条（modal 关闭后缩至顶部） */}
-      {extractPhase !== 'idle' && !showExtractModal && (
+      {(extractPhase !== 'idle' || extractError) && !showExtractModal && (
         <div
           onClick={() => setShowExtractModal(true)}
           style={{
@@ -517,7 +644,9 @@ export default function OntologyPage() {
           <span style={{ fontSize: 13, flexShrink: 0 }}>🤖</span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12, color: 'oklch(0.84 0.10 165)', fontFamily: "'IBM Plex Mono', monospace", marginBottom: 4 }}>
-              {extractPhase === 'extracting'
+              {extractPhase === 'idle' && extractError
+                ? `提取未完成 ${extractProgress.shardsCompleted}/${extractProgress.shardsTotal}`
+                : extractPhase === 'extracting'
                 ? `提取中 ${extractProgress.shardsCompleted}/${extractProgress.shardsTotal}`
                 : extractPhase === 'merging' ? '合并分片结果...' : '构建知识图谱...'}
             </div>
@@ -526,7 +655,7 @@ export default function OntologyPage() {
                 height: '100%', borderRadius: 2,
                 width: extractPhase === 'extracting' && extractProgress.shardsTotal > 0
                   ? `${Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)}%`
-                  : extractPhase === 'extracting' ? '0%' : '100%',
+                  : extractPhase === 'extracting' ? '0%' : extractProgress.shardsTotal > 0 ? `${Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)}%` : '100%',
                 background: 'oklch(0.74 0.12 165)',
                 transition: 'width .3s ease',
               }} />

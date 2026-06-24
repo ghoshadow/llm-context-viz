@@ -9,7 +9,11 @@ export interface SSEHandlers {
   onExtracted?: (data: {
     totalTurns: number;
     shardCount: number;
+    activeShards?: number;
     rootDir: string;
+    extractionDepth?: 'refined' | 'deep';
+    shardSize?: number;
+    maxShardChars?: number;
     shards: Array<{
       index: number;
       filename: string;
@@ -201,7 +205,11 @@ function dispatchEvent(
       handlers.onExtracted?.({
         totalTurns: d.totalTurns as number,
         shardCount: d.shardCount as number,
+        activeShards: d.activeShards as number | undefined,
         rootDir: d.rootDir as string,
+        extractionDepth: d.extractionDepth as 'refined' | 'deep' | undefined,
+        shardSize: d.shardSize as number | undefined,
+        maxShardChars: d.maxShardChars as number | undefined,
         shards: d.shards as Array<{
           index: number;
           filename: string;

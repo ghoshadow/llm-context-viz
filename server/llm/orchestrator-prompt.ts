@@ -7,6 +7,8 @@
 
 import type { ExtractionManifest } from '../content/extract-to-files.js';
 
+export type ExtractionDepth = 'refined' | 'deep';
+
 // ── 实体类型定义（子 Agent 共享）─────────────────────────────────────────
 
 const ENTITY_TYPE_DEFS = `## 知识类型定义
@@ -28,11 +30,14 @@ const EXTRACTION_RULES = `## 提取规则
 
 ### 通用规则
 
-1. **来源限定**：只从用户输入（### 用户输入）和模型内容（### 模型 中的 [THINK]、[REPLY]）中抽取语义。
+1. **来源限定**：只从用户输入（### 用户输入）和模型内容中抽取语义。优先使用 [REPLY]；[REASONING_SUMMARY] 和 [TOOL_SUMMARY] 只能作为低权重补充证据，不能单独支撑高置信实体。
 2. **粒度适中**：每条知识应是一个可独立理解和复用的单元。不要过于宽泛（如"整个项目"）或过于琐碎（如"某行代码"）。
 3. **通用性优先**：尽量剥离领域特定细节，提炼出可跨项目复用的知识。如果知识有明确适用场景，在 note 中注明。
 4. **消歧标注**：同一知识点多种表述→合并为一个实体，aliases 列出别名。后续轮次推翻之前结论→在 note 中说明演变过程。
 5. **关系概念化**：关系体现知识之间的因果、支撑、递进等逻辑联系。禁止纯技术依赖（如文件引用）关系。
+6. **证据驱动**：每个实体和关系必须填写 evidence。优先引用用户输入和 [REPLY]。如果只有 [REASONING_SUMMARY] 支撑，status 必须是 needs_confirmation，conf 不得高于 0.55。
+7. **过滤执行噪音**：不要把临时执行计划、文件路径、函数名、命令、报错文本本身当实体；只有它们被提炼成可复用知识时才保留。
+8. **证据 source 枚举严格限定**：evidence[].source 只能填写 user、reply、reasoning_summary、tool_summary 四个值。不要输出 assistant、model、human、thinking、tool、tool_result、user_message、assistant_final_reply 等别名；看到 [REPLY] 一律写 reply，看到 [REASONING_SUMMARY] 一律写 reasoning_summary，看到 [TOOL_SUMMARY] 一律写 tool_summary。
 
 ### 各类型区分规则
 
@@ -47,6 +52,29 @@ const EXTRACTION_RULES = `## 提取规则
 **heuristic（经验法则）**：经过多轮验证或反复出现的判断准则。特征是"遇到 X 类情况时，优先考虑 Y，因为 Z"。适合：决策原则、优先级排序、取舍理由。不适合：具体操作步骤（那是 how_to）、单次事件。
 
 **technique（工具/技巧）**：必须涉及具体工具、命令、配置或 API。特征是"用工具 X 的 Y 功能，参数 Z，达到 W"。适合：命令用法、配置技巧、API 使用。不适合：不涉具体工具的方法论（那是 how_to）。`;
+
+const DEPTH_RULES: Record<ExtractionDepth, string> = {
+  refined: `## 抽取密度：精炼模式
+
+- 目标是高信号复盘卡片，而不是穷尽索引。
+- 每个分片建议输出 8-16 个实体、10-25 条关系。
+- 优先保留明确、可复用、可迁移的知识点；相近表述合并为一个实体。
+- 允许舍弃一次性执行细节、过窄代码点、重复确认和低价值中间过程。`,
+
+  deep: `## 抽取密度：深挖模式
+
+- 目标是充分沉淀知识内容，不只保留最高层摘要。
+- 每个分片目标输出 24-40 个实体、35-80 条关系；如果分片内容非常稀疏，可以低于目标，但不能因为概括而主动压缩到十几个。
+- 类型覆盖建议：topic 恰好 1 个；why 3-6 个；how_to 5-9 个；pitfall 3-7 个；heuristic 3-7 个；technique 4-10 个。
+- 保留中等重要但可复用的知识点，例如调试判断、验证方法、失败原因、交互取舍、命令/API 使用方式、前后假设修正。
+- 将复合知识拆成多个实体：原因、做法、坑、经验法则、工具技巧应分别建模，再用关系连接。
+- 关系要足够密集：除 topic 连接到各知识点外，还应补充因果、修正、依赖、验证、规避、包含、前置条件、适用场景等语义边。
+- 不要把每条日志或每个文件路径当实体；但当它们承载可复用技巧或教训时，应抽象成 technique/pitfall/how_to。`,
+};
+
+function depthLabel(depth: ExtractionDepth): string {
+  return depth === 'deep' ? '深挖模式' : '精炼模式';
+}
 
 const OUTPUT_FORMAT = `## 输出格式
 
@@ -64,7 +92,13 @@ const OUTPUT_FORMAT = `## 输出格式
       "firstTurn": 1,
       "turns": [1, 5, 12, 15, 28],
       "aliases": [],
+      "claim": "上下文拼装可视化需要同时呈现组成结构和 token 估算校准逻辑",
       "snippet": "搭建上下文拼装可视化结构，并校准 token 估计算法的基础常量",
+      "evidence": [
+        { "turn": 1, "source": "user", "text": "用户要求搭建上下文拼装可视化结构", "weight": 1.0 },
+        { "turn": 12, "source": "reply", "text": "模型回复确认已加入 token 估算校准", "weight": 0.9 }
+      ],
+      "status": "confirmed",
       "note": ""
     },
     {
@@ -75,7 +109,12 @@ const OUTPUT_FORMAT = `## 输出格式
       "firstTurn": 12,
       "turns": [12, 15, 28],
       "aliases": ["proxy capture", "API 拦截"],
+      "claim": "通过代理拦截可以获得真实请求体，从而校准 system prompt 和 tools 的 token 常量",
       "snippet": "使用透明代理拦截 API 请求，直接从请求体中提取 system prompt 和 tools 的真实 token 数",
+      "evidence": [
+        { "turn": 12, "source": "reply", "text": "使用透明代理拦截 API 请求，直接从请求体中提取真实 token 数", "weight": 0.9 }
+      ],
+      "status": "confirmed",
       "note": ""
     }
   ],
@@ -85,7 +124,10 @@ const OUTPUT_FORMAT = `## 输出格式
       "t": "proxy_intercept_calibration",
       "label": "包含",
       "firstTurn": 12,
-      "conf": 0.95
+      "conf": 0.95,
+      "evidence": [
+        { "turn": 12, "source": "reply", "text": "上下文拼装校准包含代理拦截获取真实常量", "weight": 0.9 }
+      ]
     }
   ],
   "config": {
@@ -96,7 +138,8 @@ const OUTPUT_FORMAT = `## 输出格式
 
 // ── 子 Agent prompt ──────────────────────────────────────────────────────
 
-const ENTITY_EXTRACTOR_PROMPT = `你是会话实体提取器。从给定的会话分片内容中提取实体和语义关系。
+function buildEntityExtractorPrompt(depth: ExtractionDepth): string {
+  return `你是会话实体提取器。从给定的会话分片内容中提取实体和语义关系。
 
 ## 工作流程
 
@@ -115,7 +158,10 @@ ${ENTITY_TYPE_DEFS}
 - **firstTurn**: 首次出现轮次（1-based）
 - **turns**: 所有出现轮次的数组
 - **aliases**: 同义别名列表（可选）
+- **claim**: 一句话说明这个实体沉淀的可复用知识主张
 - **snippet**: 原文摘录，一到两句话
+- **evidence**: 支撑该实体的证据数组。source 只能是 user/reply/reasoning_summary/tool_summary，禁止使用任何别名
+- **status**: confirmed/inferred/needs_confirmation。只有用户或 reply 明确支持时才能 confirmed
 - **note**: 消歧说明（可选）
 
 ## 关系字段
@@ -125,8 +171,11 @@ ${ENTITY_TYPE_DEFS}
 - **label**: 关系描述，简短中文
 - **firstTurn**: 关系首次出现轮次
 - **conf**: 置信度
+- **evidence**: 支撑该关系的证据数组
 
 ${EXTRACTION_RULES}
+
+${DEPTH_RULES[depth]}
 
 ${OUTPUT_FORMAT}
 
@@ -143,12 +192,13 @@ ${OUTPUT_FORMAT}
 如果你提取的实体可能在前面分片中也出现过，请尽量使用一致的 id 命名。
 若不确定是否同一实体，在 note 中标注"可能与分片 X 中的实体 Y 重复，待合并"。
 id 命名规范：优先使用英文技术术语的小写下划线形式（如 pipeline_audit），中文概念使用拼音（如 shangxiawen_yasuo）。`;
+}
 
 // ── 主 Agent 编排 prompt ─────────────────────────────────────────────────
 
 import type { ShardFile } from '../content/extract-to-files.js';
 
-export function buildOrchestratorPrompt(manifest: ExtractionManifest, activeShards?: ShardFile[]): string {
+export function buildOrchestratorPrompt(manifest: ExtractionManifest, activeShards?: ShardFile[], depth: ExtractionDepth = 'refined'): string {
   const shards = activeShards ?? manifest.shards;
   const shardList = shards
     .map((s) => `- 分片 ${s.index}: ${s.filename} (轮次 ${s.turnRange}, ${s.turnCount} 轮)`)
@@ -157,7 +207,7 @@ export function buildOrchestratorPrompt(manifest: ExtractionManifest, activeShar
   const taskDescriptions = shards
     .map(
       (s) =>
-        `   - 分片 ${s.index}: 描述 "提取分片 ${s.index} 的实体和关系，文件路径 ${s.path}，shardIndex=${s.index}，轮次范围 ${s.turnRange}"`,
+        `   - 分片 ${s.index}: 描述 "以${depthLabel(depth)}提取分片 ${s.index} 的实体和关系，文件路径 ${s.path}，shardIndex=${s.index}，轮次范围 ${s.turnRange}"`,
     )
     .join('\n');
 
@@ -168,6 +218,7 @@ export function buildOrchestratorPrompt(manifest: ExtractionManifest, activeShar
 - 会话 ID: ${manifest.sessionId}
 - 总轮次: ${manifest.totalTurns}
 - 分片数: ${shards.length}
+- 抽取密度: ${depthLabel(depth)}
 
 ## 分片列表
 
@@ -197,8 +248,12 @@ ${taskDescriptions}
 
 import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk';
 
-export const entityExtractorDef: AgentDefinition = {
-  description: '处理一个分片的会话转录内容，提取实体和关系，返回 JSON 格式的提取结果',
-  tools: ['Read'],
-  prompt: ENTITY_EXTRACTOR_PROMPT,
-};
+export function buildEntityExtractorDef(depth: ExtractionDepth): AgentDefinition {
+  return {
+    description: `处理一个分片的会话转录内容，以${depthLabel(depth)}提取实体和关系，返回 JSON 格式的提取结果`,
+    tools: ['Read'],
+    prompt: buildEntityExtractorPrompt(depth),
+  };
+}
+
+export const entityExtractorDef: AgentDefinition = buildEntityExtractorDef('refined');

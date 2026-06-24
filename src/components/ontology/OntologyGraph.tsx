@@ -335,6 +335,9 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({
   recenterKey,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const didInitialFocusRef = useRef(false);
+  const didMountRecenterRef = useRef(false);
+  const didMountSelectedRef = useRef(false);
 
   const layout = useMemo(
     () => buildLayout(data, turn, activeTypes, selectedNodeId),
@@ -364,7 +367,34 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({
     });
   };
 
+  const focusFirstAggregate = (behavior: ScrollBehavior = 'auto') => {
+    const container = containerRef.current;
+    const first = layout.aggregates[0];
+    if (!container || !first) return;
+    container.scrollTo({
+      left: Math.max(0, first.x - 10),
+      top: Math.max(0, first.y - 10),
+      behavior,
+    });
+  };
+
   useEffect(() => {
+    didInitialFocusRef.current = false;
+    didMountSelectedRef.current = false;
+  }, [data]);
+
+  useEffect(() => {
+    if (didInitialFocusRef.current || layout.aggregates.length === 0) return;
+    didInitialFocusRef.current = true;
+    window.requestAnimationFrame(() => focusFirstAggregate('auto'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout.aggregates]);
+
+  useEffect(() => {
+    if (!didMountSelectedRef.current) {
+      didMountSelectedRef.current = true;
+      return;
+    }
     if (selectedNodeId) {
       window.requestAnimationFrame(() => focusNode(selectedNodeId));
     }
@@ -372,6 +402,10 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({
   }, [selectedNodeId]);
 
   useEffect(() => {
+    if (!didMountRecenterRef.current) {
+      didMountRecenterRef.current = true;
+      return;
+    }
     window.requestAnimationFrame(() => focusNode(selectedNodeId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recenterKey]);

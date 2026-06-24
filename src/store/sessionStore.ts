@@ -48,15 +48,20 @@ export interface SessionStore {
   deleteSession: (id: string) => Promise<void>;
   fetchOntology: () => Promise<void>;
   buildOntology: (body: { candidates: unknown[]; relations: unknown[]; config?: Record<string, unknown> }) => Promise<boolean>;
-  extractOntology: (options?: { shardSize?: number; force?: boolean; incremental?: boolean }) => Promise<boolean>;
+  extractOntology: (options?: { shardSize?: number; maxShardChars?: number; force?: boolean; incremental?: boolean; retryFailedOnly?: boolean; extractionDepth?: 'refined' | 'deep' }) => Promise<boolean>;
+  fetchExtractStatus: () => Promise<void>;
 
   // Ontology state
   ontologyData: OntologyData | null;
+  ontologyMaxTurn: number;
   ontologyLoading: boolean;
   ontologyError: string | null;
   ontologyFetched: boolean;
   extractPhase: 'idle' | 'extracting' | 'merging' | 'building';
   extractProgress: { shardsTotal: number; shardsCompleted: number; shardDetails: Array<{ index: number; status: 'pending' | 'running' | 'done' | 'error'; candidates?: number; relations?: number; error?: string }> };
+  extractDepth: 'refined' | 'deep';
+  extractShardSize: number;
+  extractMaxShardChars: number;
   extractRootDir: string | null;
   extractError: string | null;
 }
@@ -84,12 +89,16 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   uploadError: null,
 
   ontologyData: null,
+  ontologyMaxTurn: 0,
   ontologyLoading: false,
   ontologyError: null,
   ontologyFetched: false,
 
   extractPhase: 'idle' as const,
   extractProgress: { shardsTotal: 0, shardsCompleted: 0, shardDetails: [] },
+  extractDepth: 'refined',
+  extractShardSize: 30,
+  extractMaxShardChars: 45000,
   extractRootDir: null,
   extractError: null,
 
@@ -180,12 +189,12 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       const result = await get<{ sessionId: string; maxTurn: number; data: OntologyData }>(
         '/sessions/' + currentSessionId + '/ontology',
       );
-      set({ ontologyData: result.data, ontologyLoading: false, ontologyFetched: true });
+      set({ ontologyData: result.data, ontologyMaxTurn: result.maxTurn, ontologyLoading: false, ontologyFetched: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       // 404 is expected — no ontology data yet, not an error
       if (msg.includes('404')) {
-        set({ ontologyData: null, ontologyLoading: false, ontologyError: null, ontologyFetched: true });
+        set({ ontologyData: null, ontologyMaxTurn: 0, ontologyLoading: false, ontologyError: null, ontologyFetched: true });
       } else {
         set({ ontologyLoading: false, ontologyError: msg || 'Failed to load ontology', ontologyFetched: true });
       }
@@ -234,7 +243,14 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
     const { currentSessionId } = getState();
     if (!currentSessionId) return false;
 
-    set({ extractPhase: 'extracting', extractError: null });
+    const requestedDepth = options?.extractionDepth ?? 'refined';
+    set({
+      extractPhase: 'extracting',
+      extractError: null,
+      extractDepth: requestedDepth,
+      extractShardSize: options?.shardSize ?? 30,
+      extractMaxShardChars: options?.maxShardChars ?? 45000,
+    });
     let succeeded = false;
 
     try {
@@ -242,8 +258,11 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         '/api/sessions/' + currentSessionId + '/ontology/extract',
         {
           shardSize: options?.shardSize,
+          maxShardChars: options?.maxShardChars,
           force: options?.force ?? false,
           incremental: options?.incremental ?? false,
+          retryFailedOnly: options?.retryFailedOnly ?? false,
+          extractionDepth: options?.extractionDepth ?? 'refined',
         },
         {
           onExtracted: (data) => {
@@ -253,25 +272,27 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
             }));
             set({
               extractRootDir: data.rootDir,
+              extractDepth: data.extractionDepth ?? requestedDepth,
+              extractShardSize: data.shardSize ?? options?.shardSize ?? 30,
+              extractMaxShardChars: data.maxShardChars ?? options?.maxShardChars ?? 45000,
               extractProgress: {
-                shardsTotal: data.shardCount,
+                shardsTotal: data.activeShards ?? data.shardCount,
                 shardsCompleted: 0,
                 shardDetails,
               },
             });
           },
           onStart: (data) => {
-            const shardDetails = Array.from({ length: data.shards }, (_, i) => ({
-              index: i,
-              status: 'pending' as const,
-            }));
-            set({
+            set((state) => ({
               extractProgress: {
+                ...state.extractProgress,
                 shardsTotal: data.shards,
                 shardsCompleted: 0,
-                shardDetails,
+                shardDetails: state.extractProgress.shardDetails.length > 0
+                  ? state.extractProgress.shardDetails
+                  : Array.from({ length: data.shards }, (_, i) => ({ index: i, status: 'pending' as const })),
               },
-            });
+            }));
           },
           onShardStart: (data) => {
             set((state) => {
@@ -283,11 +304,13 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
           },
           onShardDone: (data) => {
             set((state) => {
+              const wasDone = state.extractProgress.shardDetails.some((s) => s.index === data.shardIndex && s.status === 'done');
               const details = state.extractProgress.shardDetails.map((s) =>
                 s.index === data.shardIndex
                   ? {
                       ...s,
                       status: 'done' as const,
+                      error: undefined,
                       candidates: Array.isArray(data.candidates) ? data.candidates.length : undefined,
                       relations: Array.isArray(data.relations) ? data.relations.length : undefined,
                     }
@@ -296,10 +319,22 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
               return {
                 extractProgress: {
                   ...state.extractProgress,
-                  shardsCompleted: state.extractProgress.shardsCompleted + 1,
+                  shardsCompleted: wasDone
+                    ? state.extractProgress.shardsCompleted
+                    : state.extractProgress.shardsCompleted + 1,
                   shardDetails: details,
                 },
               };
+            });
+          },
+          onShardRetry: (data) => {
+            set((state) => {
+              const details = state.extractProgress.shardDetails.map((s) =>
+                s.index === data.shardIndex
+                  ? { ...s, status: 'running' as const, error: `第 ${data.attempt} 次尝试` }
+                  : s,
+              );
+              return { extractProgress: { ...state.extractProgress, shardDetails: details } };
             });
           },
           onShardError: (data) => {
@@ -323,10 +358,16 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
           onBuild: () => {
             set({ extractPhase: 'building' });
           },
-          onComplete: () => {
+          onComplete: (data) => {
             succeeded = true;
             getState().fetchOntology();
-            set({ extractPhase: 'idle' });
+            const failed = getState().extractProgress.shardDetails.filter((s) => s.status === 'error').length;
+            set({
+              extractPhase: 'idle',
+              extractError: failed > 0
+                ? `已保存部分结果，仍有 ${failed} 个分片未完成`
+                : null,
+            });
           },
           onError: (data) => {
             set({
@@ -344,6 +385,47 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         extractError: err instanceof Error ? err.message : 'Extraction failed',
       });
       return false;
+    }
+  },
+
+  fetchExtractStatus: async () => {
+    const { currentSessionId } = getState();
+    if (!currentSessionId) return;
+
+    try {
+      const status = await get<{
+        active: boolean;
+        phase: 'idle' | 'extracting' | 'merging' | 'building' | 'complete' | 'error';
+        rootDir?: string | null;
+        shardCount?: number;
+        shardsCompleted?: number;
+        shardDetails?: Array<{ index: number; status: 'pending' | 'running' | 'done' | 'error'; candidates?: number; relations?: number; error?: string }>;
+        error?: string | null;
+        extractionDepth?: 'refined' | 'deep';
+        shardSize?: number | null;
+        maxShardChars?: number | null;
+      }>(`/sessions/${currentSessionId}/ontology/extract/status`);
+
+      const activePhase = status.phase === 'complete' || status.phase === 'error' ? 'idle' : status.phase;
+      set({
+        extractPhase: activePhase,
+        extractRootDir: status.rootDir || null,
+        extractError: status.phase === 'error' ? status.error || 'Extraction failed' : null,
+        extractDepth: status.extractionDepth ?? getState().extractDepth,
+        extractShardSize: status.shardSize ?? getState().extractShardSize,
+        extractMaxShardChars: status.maxShardChars ?? getState().extractMaxShardChars,
+        extractProgress: {
+          shardsTotal: status.shardCount || 0,
+          shardsCompleted: status.shardsCompleted || 0,
+          shardDetails: status.shardDetails || [],
+        },
+      });
+
+      if (status.phase === 'complete') {
+        await getState().fetchOntology();
+      }
+    } catch {
+      // 状态恢复失败不影响正常页面使用
     }
   },
 }));

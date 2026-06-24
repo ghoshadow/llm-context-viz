@@ -13,21 +13,32 @@
  */
 
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { extractToFiles, extractIncremental, type ExtractionManifest } from '../content/extract-to-files.js';
+import { extractToFiles, extractIncremental, type ExtractionManifest, type ShardFile } from '../content/extract-to-files.js';
 import { buildOntology, type OntologyBuildOutput } from '../../src/pipeline/build-ontology.js';
 import type { CandidateEntity, SemanticRelation, OntologyBuildConfig } from '../../src/pipeline/build-ontology.js';
-import { buildOrchestratorPrompt, entityExtractorDef } from './orchestrator-prompt.js';
+import { buildEntityExtractorDef, buildOrchestratorPrompt, type ExtractionDepth } from './orchestrator-prompt.js';
 import { SubmitExtractionSchema } from './schema.js';
 
 // ── 类型 ──────────────────────────────────────────────────────────────────
 
-interface ShardResult {
+export interface ShardResult {
   shardIndex: number;
   phaseTheme?: string;
   candidates: CandidateEntity[];
   relations: SemanticRelation[];
   config?: OntologyBuildConfig;
 }
+
+interface MissingShard {
+  index: number;
+  turnRange: string;
+  startTurn: number;
+  endTurn: number;
+  reason: string;
+}
+
+const LLM_EXTRACTION_BATCH_SIZE = 8;
+const LLM_EXTRACTION_MAX_ATTEMPTS = 3;
 
 export interface ExtractSuccess {
   success: true;
@@ -75,6 +86,161 @@ function formatValidationError(err: unknown): string {
       .join('; ');
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+function collectParsedItems(parsed: unknown): unknown[] {
+  if (!parsed || typeof parsed !== 'object') return [];
+  const single = parsed as Record<string, unknown>;
+  return Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(single.results)
+      ? single.results
+      : [parsed];
+}
+
+function textFromToolResultContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return (content as Array<{ type: string; text?: string }>)
+      .filter((c) => c.type === 'text' && c.text)
+      .map((c) => c.text!)
+      .join('\n');
+  }
+  if (content && typeof content === 'object') return JSON.stringify(content);
+  return '';
+}
+
+async function collectShardTextResults(params: {
+  manifest: ExtractionManifest;
+  shards: ShardFile[];
+  model: string;
+  apiKey: string;
+  baseUrl: string;
+  depth: ExtractionDepth;
+  onEvent: (event: string, data: Record<string, unknown>) => void;
+  attempt: number;
+}): Promise<Map<number, string>> {
+  const { manifest, shards, model, apiKey, baseUrl, depth, onEvent, attempt } = params;
+  const shardTextResults: Map<number, string> = new Map();
+  if (shards.length === 0) return shardTextResults;
+
+  const abort = new AbortController();
+  const expectedShards = shards.length;
+
+  if (attempt === 1) {
+    for (const shard of shards) onEvent('shard-start', { shardIndex: shard.index });
+  } else {
+    for (const shard of shards) onEvent('shard-retry', { shardIndex: shard.index, attempt });
+  }
+
+  try {
+    const q = query({
+      prompt: '请开始提取。',
+      options: {
+        abortController: abort,
+        systemPrompt: buildOrchestratorPrompt(manifest, shards, depth),
+        model,
+        agents: { 'entity-extractor': buildEntityExtractorDef(depth) },
+        allowedTools: ['Read', 'Task'],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        maxTurns: Math.max(shards.length + 5, 5),
+        thinking: { type: 'disabled' as const },
+        cwd: manifest.rootDir.replace(/\/data\/extractions\/.*$/, ''),
+        env: { ...process.env, ANTHROPIC_API_KEY: apiKey, ANTHROPIC_BASE_URL: baseUrl } as Record<string, string>,
+      },
+    });
+
+    for await (const msg of q) {
+      const mtype = (msg as Record<string, unknown>).type as string;
+      const msubtype = (msg as Record<string, unknown>).subtype as string || '';
+      console.error('[msg]', mtype, msubtype);
+
+      if (msg.type === 'system' && msubtype === 'init') {
+        onEvent('agent-start', { sessionId: (msg as SDKMessage & { session_id: string }).session_id });
+      }
+
+      if (msg.type === 'assistant') {
+        const am = msg as SDKMessage & { type: 'assistant'; message?: { content?: unknown[] } };
+        if (am.message?.content) {
+          for (const block of am.message.content as Array<{ type: string; text?: string; name?: string }>) {
+            if (block.type === 'text') console.error('  [asst text]', (block.text || '').substring(0, 120));
+            if (block.type === 'tool_use') console.error('  [asst tool]', block.name);
+          }
+        }
+      }
+
+      if (msg.type === 'user') {
+        const um = msg as SDKMessage & { type: 'user'; message?: { role: string; content?: unknown[] } };
+        const blocks = (um.message?.content && Array.isArray(um.message.content))
+          ? um.message.content
+          : (um.message?.content ? [um.message.content] : []);
+
+        for (const block of blocks as Array<{ type: string; tool_use_id?: string; content?: unknown; text?: string; name?: string }>) {
+          if (block.type !== 'tool_result') continue;
+
+          const text = textFromToolResultContent(block.content);
+          if (!text) continue;
+
+          console.error('  [tool_result]', text.substring(0, 200));
+          const parsed = parseJsonFromText(text);
+          for (const item of collectParsedItems(parsed)) {
+            const validation = SubmitExtractionSchema.safeParse(item);
+            if (validation.success) {
+              const r = validation.data;
+              shardTextResults.set(r.shardIndex, JSON.stringify(r));
+              console.error('  [parsed shard]', r.shardIndex, 'theme:', r.phaseTheme);
+              const shard = manifest.shards.find((s) => s.index === r.shardIndex);
+              onEvent('shard-done', {
+                shardIndex: r.shardIndex,
+                phaseTheme: r.phaseTheme,
+                candidates: r.candidates,
+                relations: r.relations,
+                config: r.config,
+                turnRange: shard?.turnRange,
+                startTurn: shard?.startTurn,
+                endTurn: shard?.endTurn,
+                extractionDepth: depth,
+              });
+            } else {
+              const candidate = item as Record<string, unknown>;
+              const shardIndex = typeof candidate?.shardIndex === 'number' ? candidate.shardIndex : -1;
+              const error = formatValidationError(validation.error);
+              console.error('  [validation error]', shardIndex, error);
+              const shard = manifest.shards.find((s) => s.index === shardIndex);
+              onEvent('shard-error', {
+                shardIndex,
+                error,
+                turnRange: shard?.turnRange,
+                startTurn: shard?.startTurn,
+                endTurn: shard?.endTurn,
+                extractionDepth: depth,
+              });
+            }
+          }
+        }
+      }
+
+      if (shardTextResults.size >= expectedShards) {
+        console.error('[extract-ontology] All', expectedShards, 'shards collected, aborting Agent SDK...');
+        abort.abort();
+        break;
+      }
+
+      if (msg.type === 'result') {
+        console.error('  [result]', JSON.stringify(msg).substring(0, 400));
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.error('[extract-ontology] Agent SDK aborted (expected)');
+    } else {
+      console.error('[extract-ontology] Agent SDK error:', err);
+      onEvent('agent-error', { message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return shardTextResults;
 }
 
 // ── 聚合生成 ────────────────────────────────────────────────────────────
@@ -154,6 +320,7 @@ function mergeResults(results: ShardResult[], maxTurn: number): {
           ...c,
           turns: [...new Set([...(existing?.turns || []), ...c.turns])].sort((a, b) => a - b),
           aliases: [...new Set([...(existing?.aliases || []), ...(c.aliases || [])])],
+          evidence: [...(existing?.evidence || []), ...(c.evidence || [])],
           firstTurn: existing ? Math.min(existing.firstTurn, c.firstTurn) : c.firstTurn,
         });
       } else {
@@ -161,6 +328,7 @@ function mergeResults(results: ShardResult[], maxTurn: number): {
           ...existing,
           turns: [...new Set([...existing.turns, ...c.turns])].sort((a, b) => a - b),
           aliases: [...new Set([...(existing.aliases || []), ...(c.aliases || [])])],
+          evidence: [...(existing.evidence || []), ...(c.evidence || [])],
         });
       }
     }
@@ -173,9 +341,17 @@ function mergeResults(results: ShardResult[], maxTurn: number): {
       const key = [r.s, r.t, r.label].join('::');
       const existing = relationMap.get(key);
       if (!existing || r.conf > existing.conf) {
-        relationMap.set(key, { ...r, firstTurn: existing ? Math.min(existing.firstTurn, r.firstTurn) : r.firstTurn });
+        relationMap.set(key, {
+          ...r,
+          firstTurn: existing ? Math.min(existing.firstTurn, r.firstTurn) : r.firstTurn,
+          evidence: [...(existing?.evidence || []), ...(r.evidence || [])],
+        });
       } else {
-        relationMap.set(key, { ...existing, firstTurn: Math.min(existing.firstTurn, r.firstTurn) });
+        relationMap.set(key, {
+          ...existing,
+          firstTurn: Math.min(existing.firstTurn, r.firstTurn),
+          evidence: [...(existing.evidence || []), ...(r.evidence || [])],
+        });
       }
     }
   }
@@ -195,14 +371,113 @@ function mergeResults(results: ShardResult[], maxTurn: number): {
 
 // ── 质量改进 ──────────────────────────────────────────────────────────────
 
+const EVIDENCE_WEIGHT_CAP = {
+  user: 1.0,
+  reply: 0.9,
+  tool_summary: 0.6,
+  reasoning_summary: 0.45,
+} as const;
+
+function evidenceWeight(source: string, weight: number): number {
+  const cap = EVIDENCE_WEIGHT_CAP[source as keyof typeof EVIDENCE_WEIGHT_CAP] ?? 0.45;
+  const value = Number.isFinite(weight) ? weight : cap;
+  return Math.max(0, Math.min(cap, value));
+}
+
+function evidenceScore(node: CandidateEntity): {
+  score: number;
+  hasPrimary: boolean;
+  hasReasoningOnly: boolean;
+  hasToolOnly: boolean;
+  hasEvidence: boolean;
+} {
+  const evidence = node.evidence || [];
+  if (evidence.length === 0) {
+    return { score: 0.35, hasPrimary: false, hasReasoningOnly: false, hasToolOnly: false, hasEvidence: false };
+  }
+  const normalized = evidence.map((e) => evidenceWeight(e.source, e.weight));
+  const top = Math.max(...normalized);
+  const diversity = new Set(evidence.map((e) => e.source)).size;
+  const repeatBonus = Math.min(0.16, Math.log1p(Math.max(0, evidence.length - 1)) * 0.06);
+  const diversityBonus = Math.min(0.10, (diversity - 1) * 0.04);
+  const score = Math.min(1, top + repeatBonus + diversityBonus);
+  const hasPrimary = evidence.some((e) => e.source === 'user' || e.source === 'reply');
+  const hasReasoningOnly = !hasPrimary && evidence.length > 0 && evidence.every((e) => e.source === 'reasoning_summary');
+  const hasToolOnly = !hasPrimary && evidence.length > 0 && evidence.every((e) => e.source === 'tool_summary');
+  return { score, hasPrimary, hasReasoningOnly, hasToolOnly, hasEvidence: true };
+}
+
+function inferStatus(node: CandidateEntity): 'confirmed' | 'inferred' | 'needs_confirmation' {
+  const ev = evidenceScore(node);
+  if (ev.hasReasoningOnly) return 'needs_confirmation';
+  if (ev.hasPrimary) return node.status === 'needs_confirmation' ? 'needs_confirmation' : 'confirmed';
+  return 'inferred';
+}
+
+function normalizeEvidence(node: CandidateEntity): void {
+  const seen = new Set<string>();
+  node.evidence = (node.evidence || [])
+    .map((e) => ({
+      ...e,
+      text: e.text.length > 220 ? e.text.slice(0, 217) + '...' : e.text,
+      weight: evidenceWeight(e.source, e.weight),
+    }))
+    .filter((e) => {
+      const key = `${e.turn}:${e.source}:${e.text}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.turn - b.turn || b.weight - a.weight || a.source.localeCompare(b.source))
+    .slice(0, 8);
+}
+
+function nodeShardCount(node: CandidateEntity, shards: ShardFile[]): number {
+  const turns = new Set([
+    node.firstTurn,
+    ...(node.turns || []),
+    ...(node.evidence || []).map((e) => e.turn),
+  ].filter((turn) => Number.isFinite(turn)));
+  const shardIds = new Set<number>();
+  for (const turn of turns) {
+    const shard = shards.find((s) => turn >= s.startTurn && turn <= s.endTurn);
+    if (shard) shardIds.add(shard.index);
+  }
+  return Math.max(1, shardIds.size);
+}
+
+function snippetSupportsLabel(node: CandidateEntity): boolean {
+  const snippet = (node.snippet || '').toLocaleLowerCase();
+  if (!snippet) return false;
+  const label = node.label.toLocaleLowerCase();
+  const terms = [
+    label,
+    label.slice(0, 2),
+    ...(node.aliases || []).map((alias) => alias.toLocaleLowerCase()),
+  ].filter((term) => term.length >= 2);
+  return terms.some((term) => snippet.includes(term));
+}
+
 /** 计算客观置信度 */
-function computeConf(node: { turns: number[]; snippet: string; label: string }, maxTurn: number, shardCount: number): number {
-  const turnRatio = node.turns.length / Math.max(maxTurn, 1);
-  const base = turnRatio * 0.5 + 0.3;
-  const crossShardBonus = 1 + 0.15 * Math.min(shardCount - 1, 3);
-  const hasKeyword = node.snippet.includes(node.label.substring(0, 2));
-  const snippetMult = hasKeyword ? 1.0 : 0.8;
-  return Math.min(0.95, Math.max(0.3, base * crossShardBonus * snippetMult));
+function computeConf(node: CandidateEntity, shards: ShardFile[]): number {
+  const ev = evidenceScore(node);
+  const turnCount = new Set(node.turns || []).size;
+  const turnSupport = Math.min(0.18, Math.log1p(Math.max(1, turnCount)) * 0.075);
+  const rawConf = Math.max(0, Math.min(1, node.rawConf ?? node.conf ?? 0.5));
+  const base = ev.score * 0.62 + turnSupport + rawConf * 0.12;
+  const crossShardBonus = 1 + 0.06 * Math.min(nodeShardCount(node, shards) - 1, 3);
+  const snippetMult = snippetSupportsLabel(node) ? 1.0 : 0.9;
+  let conf = base * crossShardBonus * snippetMult;
+
+  if (ev.hasReasoningOnly) {
+    conf = Math.min(conf, 0.55);
+  } else if (!ev.hasPrimary && ev.hasToolOnly) {
+    conf = Math.min(conf, 0.65);
+  } else if (!ev.hasPrimary) {
+    conf = Math.min(conf, ev.hasEvidence ? 0.60 : 0.50);
+  }
+
+  return Math.min(0.95, Math.max(0.25, conf));
 }
 
 /** 跨分片语义去重：label Jaccard 相似度 > 0.7 的实体对合并 */
@@ -221,6 +496,7 @@ function dedupByLabel(nodes: CandidateEntity[]): CandidateEntity[] {
           ...merged,
           turns: [...new Set([...merged.turns, ...nodes[j]!.turns])].sort((a, b) => a - b),
           aliases: [...new Set([...(merged.aliases || []), ...(nodes[j]!.aliases || [])])],
+          evidence: [...(merged.evidence || []), ...(nodes[j]!.evidence || [])],
           firstTurn: Math.min(merged.firstTurn, nodes[j]!.firstTurn),
           conf: Math.max(merged.conf, nodes[j]!.conf),
           note: (merged.note || '') + ` 与「${nodes[j]!.label}」语义合并`,
@@ -255,11 +531,23 @@ export async function extractAndBuild(
   rawJsonl: string,
   sessionId: string,
   onEvent: (event: string, data: Record<string, unknown>) => void,
-  options?: { shardSize?: number; force?: boolean; incremental?: boolean },
+  options?: {
+    shardSize?: number;
+    maxShardChars?: number;
+    force?: boolean;
+    incremental?: boolean;
+    retryFailedOnly?: boolean;
+    extractionDepth?: ExtractionDepth;
+    previousShardResults?: ShardResult[];
+    failedShardIndices?: number[];
+  },
 ): Promise<ExtractResult> {
   const shardSize = options?.shardSize ?? 30;
+  const maxShardChars = options?.maxShardChars ?? 45_000;
   const force = options?.force ?? false;
   const incremental = options?.incremental ?? false;
+  const retryFailedOnly = options?.retryFailedOnly ?? false;
+  const extractionDepth: ExtractionDepth = options?.extractionDepth === 'deep' ? 'deep' : 'refined';
 
   // Step 1: Extract to file tree
   let manifest: ExtractionManifest;
@@ -267,19 +555,26 @@ export async function extractAndBuild(
 
   try {
     if (incremental) {
-      const incResult = extractIncremental(rawJsonl, sessionId, { shardSize });
+      const incResult = extractIncremental(rawJsonl, sessionId, { shardSize, maxShardChars });
       manifest = incResult.manifest;
       if (!incResult.hasNewTurns) {
         onEvent('extracted', {
           totalTurns: manifest.totalTurns, shardCount: manifest.shardCount, rootDir: manifest.rootDir,
-          shards: manifest.shards.map((s) => ({ index: s.index, filename: s.filename, turnRange: s.turnRange, turnCount: s.turnCount })),
+          shards: manifest.shards.map((s) => ({
+            index: s.index,
+            filename: s.filename,
+            turnRange: s.turnRange,
+            turnCount: s.turnCount,
+            startTurn: s.startTurn,
+            endTurn: s.endTurn,
+          })),
           incremental: true, newTurns: false,
         });
         return { success: true, buildOutput: null, shardStats: { total: 0, succeeded: 0, failed: 0 } };
       }
       processShardIndices = incResult.newShardIndices;
     } else {
-      manifest = extractToFiles(rawJsonl, sessionId, { shardSize, force });
+      manifest = extractToFiles(rawJsonl, sessionId, { shardSize, maxShardChars, force });
     }
   } catch (err) {
     return { success: false, stage: 'content', message: '内容提取失败: ' + (err instanceof Error ? err.message : String(err)) };
@@ -289,15 +584,50 @@ export async function extractAndBuild(
     return { success: false, stage: 'content', message: '未从 JSONL 中提取到任何用户 turn 内容' };
   }
 
-  const activeShards = processShardIndices
+  let activeShards = processShardIndices
     ? manifest.shards.filter((s) => processShardIndices!.includes(s.index))
     : manifest.shards;
+
+  if (retryFailedOnly) {
+    const failedSet = new Set(options?.failedShardIndices || []);
+    activeShards = manifest.shards.filter((s) => failedSet.has(s.index));
+  }
+
+  if (activeShards.length === 0) {
+    onEvent('extracted', {
+      totalTurns: manifest.totalTurns,
+      shardCount: manifest.shardCount,
+      activeShards: 0,
+      incremental: incremental && processShardIndices != null,
+      retryFailedOnly,
+      extractionDepth,
+      rootDir: manifest.rootDir,
+      shards: activeShards.map((s) => ({
+        index: s.index,
+        filename: s.filename,
+        turnRange: s.turnRange,
+        turnCount: s.turnCount,
+        startTurn: s.startTurn,
+        endTurn: s.endTurn,
+      })),
+    });
+    return { success: true, buildOutput: null, shardStats: { total: 0, succeeded: 0, failed: 0 } };
+  }
 
   onEvent('extracted', {
     totalTurns: manifest.totalTurns, shardCount: manifest.shardCount,
     activeShards: activeShards.length, incremental: incremental && processShardIndices != null,
+    retryFailedOnly,
+    extractionDepth,
     rootDir: manifest.rootDir,
-    shards: manifest.shards.map((s) => ({ index: s.index, filename: s.filename, turnRange: s.turnRange, turnCount: s.turnCount })),
+    shards: activeShards.map((s) => ({
+      index: s.index,
+      filename: s.filename,
+      turnRange: s.turnRange,
+      turnCount: s.turnCount,
+      startTurn: s.startTurn,
+      endTurn: s.endTurn,
+    })),
   });
 
   // Step 2: Agent SDK orchestration
@@ -309,130 +639,67 @@ export async function extractAndBuild(
     return { success: false, stage: 'llm', message: '未设置 LLM_API_KEY 环境变量' };
   }
 
-  onEvent('start', { shards: activeShards.length, totalTurns: manifest.totalTurns });
+  onEvent('start', { shards: activeShards.length, totalTurns: manifest.totalTurns, extractionDepth });
 
-  // 收集子 Agent 返回的 JSON 文本
   const shardTextResults: Map<number, string> = new Map();
+  const activeShardIndexSet = new Set(activeShards.map((s) => s.index));
+  let pendingShards = activeShards;
 
-  const abort = new AbortController();
-  const expectedShards = activeShards.length;
+  for (let attempt = 1; attempt <= LLM_EXTRACTION_MAX_ATTEMPTS && pendingShards.length > 0; attempt++) {
+    const retryLabel = attempt === 1 ? 'initial' : `retry ${attempt - 1}`;
+    console.error('[extract-ontology] Starting', retryLabel, 'for shards:', pendingShards.map((s) => s.index).join(','));
 
-  try {
-    const q = query({
-      prompt: '请开始提取。',
-      options: {
-        abortController: abort,
-        systemPrompt: buildOrchestratorPrompt(manifest, activeShards),
+    for (let i = 0; i < pendingShards.length; i += LLM_EXTRACTION_BATCH_SIZE) {
+      const batch = pendingShards.slice(i, i + LLM_EXTRACTION_BATCH_SIZE);
+      const batchResults = await collectShardTextResults({
+        manifest,
+        shards: batch,
         model,
-        agents: { 'entity-extractor': entityExtractorDef },
-        allowedTools: ['Read', 'Task'],
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        maxTurns: Math.max(activeShards.length + 5, 5),
-        thinking: { type: 'disabled' as const },
-        cwd: manifest.rootDir.replace(/\/data\/extractions\/.*$/, ''),
-        env: { ...process.env, ANTHROPIC_API_KEY: apiKey, ANTHROPIC_BASE_URL: baseUrl } as Record<string, string>,
-      },
+        apiKey,
+        baseUrl,
+        depth: extractionDepth,
+        onEvent,
+        attempt,
+      });
+
+      for (const [shardIndex, text] of batchResults) {
+        if (activeShardIndexSet.has(shardIndex)) {
+          shardTextResults.set(shardIndex, text);
+        }
+      }
+    }
+
+    pendingShards = activeShards.filter((s) => !shardTextResults.has(s.index));
+  }
+
+  const missingShards: MissingShard[] = pendingShards.map((shard) => ({
+    index: shard.index,
+    turnRange: shard.turnRange,
+    startTurn: shard.startTurn,
+    endTurn: shard.endTurn,
+    reason: '多次重试后未返回有效抽取结果',
+  }));
+
+  for (const shard of missingShards) {
+    onEvent('shard-error', {
+      shardIndex: shard.index,
+      error: shard.reason,
+      turnRange: shard.turnRange,
+      startTurn: shard.startTurn,
+      endTurn: shard.endTurn,
+      extractionDepth,
     });
-
-    for await (const msg of q) {
-      const mtype = (msg as Record<string, unknown>).type as string;
-      const msubtype = (msg as Record<string, unknown>).subtype as string || '';
-      console.error('[msg]', mtype, msubtype);
-
-      if (msg.type === 'system' && msubtype === 'init') {
-        onEvent('agent-start', { sessionId: (msg as SDKMessage & { session_id: string }).session_id });
-      }
-
-      // 记录 assistant 内容
-      if (msg.type === 'assistant') {
-        const am = msg as SDKMessage & { type: 'assistant'; message?: { content?: unknown[] } };
-        if (am.message?.content) {
-          for (const block of am.message.content as Array<{ type: string; text?: string; name?: string }>) {
-            if (block.type === 'text') console.error('  [asst text]', (block.text || '').substring(0, 120));
-            if (block.type === 'tool_use') console.error('  [asst tool]', block.name);
-          }
-        }
-      }
-
-      // 检测 tool_result 中的子 Agent JSON 输出
-      if (msg.type === 'user') {
-        const um = msg as SDKMessage & { type: 'user'; message?: { role: string; content?: unknown[] } };
-        const blocks = (um.message?.content && Array.isArray(um.message.content))
-          ? um.message.content
-          : (um.message?.content ? [um.message.content] : []);
-        for (const block of blocks as Array<{ type: string; tool_use_id?: string; content?: unknown; text?: string; name?: string }>) {
-          // 只处理 Agent 工具的 tool_result（子 Agent 完成），跳过 Read 等工具的 tool_result
-          if (block.type === 'tool_result') {
-            // 提取文本：content 可能是 string 或 [{type:'text', text:'...'}, ...]
-            let text = '';
-            if (typeof block.content === 'string') {
-              text = block.content;
-            } else if (Array.isArray(block.content)) {
-              text = (block.content as Array<{ type: string; text?: string }>)
-                .filter((c) => c.type === 'text' && c.text)
-                .map((c) => c.text!)
-                .join('\n');
-            } else if (block.content && typeof block.content === 'object') {
-              text = JSON.stringify(block.content);
-            }
-            if (!text) continue;
-
-            console.error('  [tool_result]', text.substring(0, 200));
-            const parsed = parseJsonFromText(text);
-            if (parsed && typeof parsed === 'object') {
-              const single = parsed as Record<string, unknown>;
-              const parsedItems = Array.isArray(parsed)
-                ? parsed
-                : Array.isArray(single.results)
-                  ? single.results
-                  : [parsed];
-
-              for (const item of parsedItems) {
-                const validation = SubmitExtractionSchema.safeParse(item);
-                if (validation.success) {
-                  const r = validation.data;
-                  shardTextResults.set(r.shardIndex, JSON.stringify(r));
-                  console.error('  [parsed shard]', r.shardIndex, 'theme:', r.phaseTheme);
-                  onEvent('shard-done', { shardIndex: r.shardIndex, phaseTheme: r.phaseTheme, candidates: r.candidates, relations: r.relations });
-                } else {
-                  const candidate = item as Record<string, unknown>;
-                  const shardIndex = typeof candidate?.shardIndex === 'number' ? candidate.shardIndex : -1;
-                  const error = formatValidationError(validation.error);
-                  console.error('  [validation error]', shardIndex, error);
-                  onEvent('shard-error', { shardIndex, error });
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // 收齐所有分片后主动中断 Agent SDK
-      if (shardTextResults.size >= expectedShards) {
-        console.error('[extract-ontology] All', expectedShards, 'shards collected, aborting Agent SDK...');
-        abort.abort();
-        break;
-      }
-
-      // 记录最终结果
-      if (msg.type === 'result') {
-        console.error('  [result]', JSON.stringify(msg).substring(0, 400));
-      }
-    }
-  } catch (err) {
-    // AbortError 是预期的，不算错误
-    if (err instanceof Error && err.name === 'AbortError') {
-      console.error('[extract-ontology] Agent SDK aborted (expected)');
-    } else {
-      console.error('[extract-ontology] Agent SDK error:', err);
-    }
-    onEvent('agent-error', { message: err instanceof Error ? err.message : String(err) });
   }
 
   // Step 3: Parse collected results
-  const shardResults: ShardResult[] = [];
+  const shardResults: ShardResult[] = [...(options?.previousShardResults || [])];
   const phaseThemes: Array<{ shardIndex: number; startTurn: number; theme: string }> = [];
+  for (const previous of options?.previousShardResults || []) {
+    const shard = manifest.shards.find((s) => s.index === previous.shardIndex);
+    if (previous.phaseTheme && shard) {
+      phaseThemes.push({ shardIndex: previous.shardIndex, startTurn: shard.startTurn, theme: previous.phaseTheme });
+    }
+  }
   for (const [, text] of shardTextResults) {
     const parsed = parseJsonFromText(text);
     const validation = SubmitExtractionSchema.safeParse(parsed);
@@ -448,7 +715,9 @@ export async function extractAndBuild(
         ...c,
         turns: c.turns.filter((t) => t >= shardStart && t <= shardEnd),
       }));
-      shardResults.push({
+      const withoutPrevious = shardResults.filter((x) => x.shardIndex !== shardIdx);
+      shardResults.length = 0;
+      shardResults.push(...withoutPrevious, {
         shardIndex: shardIdx,
         phaseTheme: theme,
         candidates: validatedCandidates,
@@ -467,6 +736,7 @@ export async function extractAndBuild(
 
   // Step 4: Merge + 质量改进
   const merged = mergeResults(shardResults, manifest.totalTurns);
+  merged.config.maxTurn = manifest.totalTurns;
 
   // 语义去重
   merged.candidates = dedupByLabel(merged.candidates);
@@ -478,8 +748,10 @@ export async function extractAndBuild(
   const aggTopicId = new Map<string, string>(); // 每个聚合只保留一个 topic
   const mergedTopicIds = new Set<string>();
   for (const c of merged.candidates) {
+    normalizeEvidence(c);
+    c.status = inferStatus(c);
     c.rawConf = c.conf;
-    c.conf = computeConf(c, manifest.totalTurns, shardResults.length);
+    c.conf = computeConf(c, manifest.shards);
     c.snippetQuality = checkSnippetQuality(c.snippet, c.label);
     const agg = aggregates.find((a) => c.firstTurn >= a.startTurn && c.firstTurn <= a.endTurn);
     if (agg) {
@@ -490,6 +762,9 @@ export async function extractAndBuild(
           if (prev) {
             prev.turns = [...new Set([...prev.turns, ...c.turns])].sort((a, b) => a - b);
             prev.aliases = [...new Set([...(prev.aliases || []), ...(c.aliases || [])])];
+            prev.evidence = [...(prev.evidence || []), ...(c.evidence || [])];
+            normalizeEvidence(prev);
+            prev.status = inferStatus(prev);
             prev.conf = Math.max(prev.conf, c.conf);
             prev.firstTurn = Math.min(prev.firstTurn, c.firstTurn);
           }
@@ -510,7 +785,11 @@ export async function extractAndBuild(
   onEvent('build', {});
   let buildOutput: OntologyBuildOutput;
   try {
-    buildOutput = buildOntology({ candidates: merged.candidates, relations: merged.relations, config: { ...merged.config, pruneOrphans: false } });
+    buildOutput = buildOntology({
+      candidates: merged.candidates,
+      relations: merged.relations,
+      config: { ...merged.config, maxTurn: manifest.totalTurns, pruneOrphans: false },
+    });
   } catch (err) {
     return { success: false, stage: 'build', message: '本体构建失败: ' + (err instanceof Error ? err.message : String(err)) };
   }
@@ -519,10 +798,18 @@ export async function extractAndBuild(
   if (phaseThemes.length > 0) {
     buildOutput.phaseThemes = phaseThemes;
   }
+  if (missingShards.length > 0) {
+    buildOutput.data.incomplete = true;
+    buildOutput.data.missingShards = missingShards;
+  }
 
   return {
     success: true,
     buildOutput,
-    shardStats: { total: manifest.shardCount, succeeded: shardResults.length, failed: manifest.shardCount - shardResults.length },
+    shardStats: {
+      total: activeShards.length,
+      succeeded: shardResults.length,
+      failed: missingShards.length,
+    },
   };
 }
