@@ -1,6 +1,7 @@
 import React from 'react';
 import { SEMANTIC } from '../../styles/theme';
 import type { OntologyData, OntologyNode, OntologyEdge } from '../../types/ontology';
+import { sortOntologyTypes } from './typeOrder';
 
 interface OntologyDetailPanelProps {
   data: OntologyData;
@@ -51,7 +52,7 @@ function EmptyState({
         图例 · 实体类型
       </h2>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-        {data.types.map((t) => (
+        {sortOntologyTypes(data.types).map((t) => (
           <div key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5 }}>
             <span
               style={{ width: 11, height: 11, borderRadius: '50%', background: t.color, flexShrink: 0 }}
@@ -271,7 +272,12 @@ function SelectedEntity({
 
       {/* Source snippet */}
       <div style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 11.5, color: SEMANTIC.textDesc3, marginBottom: 6 }}>原文片段</div>
+        <div style={{ fontSize: 11.5, color: SEMANTIC.textDesc3, marginBottom: 6 }}>
+          原文片段
+          {node.snippetQuality === 'low' && (
+            <span style={{ marginLeft: 8, fontSize: 10, color: 'oklch(0.76 0.13 45)' }}>⚠ 可能与实体无关</span>
+          )}
+        </div>
         <div
           style={{
             fontSize: 12.5,
@@ -280,6 +286,7 @@ function SelectedEntity({
             borderLeft: `2px solid ${typeColor}`,
             padding: '2px 0 2px 11px',
             fontStyle: 'italic',
+            opacity: node.snippetQuality === 'low' ? 0.6 : 1,
           }}
         >
           「{node.snippet}」
@@ -325,11 +332,11 @@ function SelectedEntity({
               onClick={() => onSelectNode(r.id)}
               style={{
                 display: 'flex',
-                alignItems: 'center',
-                gap: 9,
+                flexDirection: 'column',
+                gap: 3,
                 border: '1px solid oklch(0.26 0.012 265)',
                 borderRadius: 9,
-                padding: '7px 10px',
+                padding: '8px 10px',
                 background: SEMANTIC.innerCardBg,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
@@ -338,12 +345,14 @@ function SelectedEntity({
                 color: 'inherit',
               }}
             >
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: SEMANTIC.textMuted2, flexShrink: 0 }}>
-                {r.dir}
-              </span>
-              <span style={{ fontSize: 11, color: SEMANTIC.textDesc, flexShrink: 0 }}>{r.rel}</span>
-              <span style={{ flex: 1, textAlign: 'right', fontSize: 12, color: SEMANTIC.textPrimary6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: SEMANTIC.textMuted2, flexShrink: 0 }}>
+                  {r.dir}
+                </span>
+                <span style={{ fontSize: 11, color: SEMANTIC.textDesc }}>{r.rel}</span>
+              </div>
+              <span style={{ fontSize: 12, color: SEMANTIC.textPrimary6, paddingLeft: 14, lineHeight: 1.35 }}>
                 {r.label}
               </span>
             </button>

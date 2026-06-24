@@ -7,8 +7,8 @@
 // Stages:
 //   1. Source Selection     — only natural-language text sources
 //   2. Candidate Extraction — external (manual / LLM); passed in as input
-//   3. Type Policy Filter   — keep only semantic types, drop technical artifacts
-//   4. Disambiguation       — reclassify phenomena → concepts, track conflations
+//   3. Type Policy Filter   — keep only configured knowledge types
+//   4. Disambiguation       — reclassify or merge ambiguous entities
 //   5. Assembly & Validation — dedup edges, prune orphans, validate connectivity
 //
 // Usage:
@@ -26,11 +26,14 @@ export interface CandidateEntity {
   label: string;
   type: string;
   conf: number;
+  rawConf?: number;
   firstTurn: number;
   turns: number[];
   aliases?: string[];
   snippet: string;
+  snippetQuality?: 'ok' | 'low';
   note?: string;
+  aggregateId?: string;
 }
 
 /** Raw semantic relation (between two entity IDs). */
@@ -42,15 +45,14 @@ export interface SemanticRelation {
   conf: number;
 }
 
-/** All 7 entity type definitions (including filtered types). */
+/** All 6 knowledge type definitions. */
 export const TYPE_DEFS: Record<string, { label: string; color: string }> = {
-  mechanism: { label: '机制·概念', color: 'oklch(0.74 0.12 165)' },
-  agent:     { label: 'Agent',     color: 'oklch(0.78 0.13 60)' },
-  system:    { label: '系统',      color: 'oklch(0.70 0.13 245)' },
-  error:     { label: '错误·现象', color: 'oklch(0.66 0.17 25)' },
-  func:      { label: '函数·API',  color: 'oklch(0.74 0.11 210)' },
-  code:      { label: '代码·文件', color: 'oklch(0.68 0.14 295)' },
-  command:   { label: '命令',      color: 'oklch(0.70 0.03 260)' },
+  topic:     { label: '问题/主题', color: 'oklch(0.80 0.12 0)' },
+  how_to:    { label: '怎么做',   color: 'oklch(0.74 0.12 165)' },
+  why:       { label: '为什么',   color: 'oklch(0.70 0.13 245)' },
+  pitfall:   { label: '坑/教训',  color: 'oklch(0.66 0.17 25)' },
+  heuristic: { label: '经验法则', color: 'oklch(0.78 0.13 60)' },
+  technique: { label: '工具/技巧',color: 'oklch(0.74 0.11 210)' },
 };
 
 // ─── Pipeline configuration ─────────────────────────────────────────────────
@@ -58,11 +60,11 @@ export const TYPE_DEFS: Record<string, { label: string; color: string }> = {
 export interface OntologyBuildConfig {
   /** Text sources used for extraction (metadata only). */
   sources?: string[];
-  /** Which entity types to keep in the final graph. Default: mechanism, agent, system. */
+  /** Which entity types to keep in the final graph. Default: all 6 knowledge types. */
   keepTypes?: string[];
-  /** Reclassify entities: map entity ID → new type (e.g. error → mechanism). */
+  /** Reclassify entities: map entity ID → new type. */
   reclassify?: Record<string, string>;
-  /** Whether to remove nodes with zero edges. Default: true. */
+  /** Whether to remove nodes with zero edges. Default: false. */
   pruneOrphans?: boolean;
   /** Max turn index for metadata. */
   maxTurn?: number;
@@ -94,11 +96,13 @@ export interface OntologyBuildOutput {
     countByType: Record<string, number>;
   };
   data: OntologyData;
+  aggregates?: Array<{ id: string; label: string; startTurn: number; endTurn: number; shardIndices: number[]; nodeIds: string[] }>;
+  phaseThemes?: Array<{ shardIndex: number; startTurn: number; theme: string }>;
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
-const DEFAULT_KEEP_TYPES = ['mechanism', 'agent', 'system'];
+const DEFAULT_KEEP_TYPES = ['topic', 'why', 'how_to', 'pitfall', 'heuristic', 'technique'];
 
 const DEFAULT_SOURCES = ['user_message', 'assistant_final_reply', 'assistant_thinking'];
 
@@ -109,7 +113,7 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
   const keepTypes = cfg.keepTypes || DEFAULT_KEEP_TYPES;
   const sources = cfg.sources || DEFAULT_SOURCES;
   const reclassify = cfg.reclassify || {};
-  const pruneOrphans = cfg.pruneOrphans !== false; // default true
+  const pruneOrphans = cfg.pruneOrphans === true; // default false — 不剪枝
 
   // ── Stage 3+4: Reclassify → Filter by keepTypes ──────────────────────
   const reclassified = input.candidates.map((e) => ({
@@ -124,7 +128,7 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
   const edges: SemanticRelation[] = [];
   for (const r of input.relations) {
     if (!keptIds.has(r.s) || !keptIds.has(r.t)) continue;
-    const key = [r.s, r.t].sort().join('::');
+    const key = [r.s, r.t, r.label].join('::');
     if (seen.has(key)) continue;
     seen.add(key);
     edges.push({ ...r });
@@ -167,12 +171,15 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
     id: n.id,
     label: n.label,
     type: n.type,
+    rawConf: n.rawConf ?? n.conf,
     conf: n.conf,
     firstTurn: n.firstTurn,
     turns: n.turns,
     aliases: n.aliases || [],
     snippet: n.snippet,
+    snippetQuality: n.snippetQuality || 'ok',
     note: n.note,
+    aggregateId: n.aggregateId,
   }));
 
   const outputEdges: OntologyEdge[] = edges.map((e) => ({
@@ -216,6 +223,7 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
     },
     data: {
       types,
+      aggregates: [],
       nodes: outputNodes,
       edges: outputEdges,
     },

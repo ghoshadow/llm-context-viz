@@ -1,8 +1,10 @@
 node_modules
 dist
 data/*.db
-.DS_Store
 data/*.db-*
+data/extractions/
+.DS_Store
 .claude-trace/
 src/pipeline/system-constants.json
 .env
+tsconfig.tsbuildinfo

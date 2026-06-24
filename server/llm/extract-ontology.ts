@@ -3,418 +3,526 @@
  *
  * 主编排器：从 JSONL 会话转录中自动提取上下文本体。
  *
- * 6 步流水线：
- *   1. Extract  — 调用 extractContentWithTurns 提取自然语言内容
- *   2. Shard    — 按配置将 turn 切分为重叠分片
- *   3. LLM      — 并行调用 LLM 对每个分片提取实体和关系
- *   4. Merge    — 合并多个分片的结果（去重、择优）
- *   5. Build    — 调用 buildOntology 构建最终图谱
- *   6. Return   — 返回成功结果或失败信息
+ * 流水线：
+ *   1. Extract      — extractToFiles() 写入持久化文件树
+ *   2. Orchestrate  — Agent SDK query() 派发子 Agent 并行提取
+ *   3. Collect      — 从子 Agent tool_result 中解析 JSON 结果
+ *   4. Merge        — 合并多个分片的结果（去重、择优）
+ *   5. Build        — buildOntology() 构建最终图谱
+ *   6. Return       — 返回成功结果或失败信息
  */
 
-import { extractContentWithTurns, type TurnContent } from '../content/extract-session.js';
+import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { extractToFiles, extractIncremental, type ExtractionManifest } from '../content/extract-to-files.js';
 import { buildOntology, type OntologyBuildOutput } from '../../src/pipeline/build-ontology.js';
 import type { CandidateEntity, SemanticRelation, OntologyBuildConfig } from '../../src/pipeline/build-ontology.js';
-import { buildFullPrompt, buildCompactPrompt, type Meta } from './prompt.js';
+import { buildOrchestratorPrompt, entityExtractorDef } from './orchestrator-prompt.js';
+import { SubmitExtractionSchema } from './schema.js';
 
-// ── 动态导入 provider（避免 provider.ts 尚未创建时启动失败）─────────────────
+// ── 类型 ──────────────────────────────────────────────────────────────────
 
-interface ChatResult {
-  text: string;
-  usage: { input: number; output: number };
-}
-
-type ChatFn = (
-  system: string,
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  overrides?: { baseUrl?: string; apiKey?: string; model?: string },
-) => Promise<ChatResult>;
-
-let _chat: ChatFn | null = null;
-
-async function getChat(): Promise<ChatFn> {
-  if (_chat) return _chat;
-  const mod = await import('./provider.js');
-  _chat = mod.chat as ChatFn;
-  return _chat;
-}
-
-// ── 类型定义 ────────────────────────────────────────────────────────────────
-
-/** LLM 提取的原始结果（单个分片返回的 JSON） */
 interface ShardResult {
+  shardIndex: number;
+  phaseTheme?: string;
   candidates: CandidateEntity[];
   relations: SemanticRelation[];
-  config: OntologyBuildConfig;
+  config?: OntologyBuildConfig;
 }
 
-/** 成功返回 */
 export interface ExtractSuccess {
   success: true;
-  buildOutput: OntologyBuildOutput;
+  buildOutput: OntologyBuildOutput | null; // 增量无变化时为 null
   shardStats: { total: number; succeeded: number; failed: number };
 }
 
-/** 失败返回 */
 export interface ExtractFailure {
   success: false;
-  stage: 'content' | 'llm' | 'parse' | 'build' | 'store';
+  stage: 'content' | 'llm' | 'build' | 'store';
   message: string;
   detail?: string;
 }
 
 export type ExtractResult = ExtractSuccess | ExtractFailure;
 
-// ── JSON 解析辅助（带三次回退）─────────────────────────────────────────────
+// ── JSON 解析 ────────────────────────────────────────────────────────────
 
-function parseJsonFromResponse(text: string): ShardResult | null {
+function parseJsonFromText(text: string): unknown | null {
   // 1. 直接解析
-  try {
-    return JSON.parse(text) as ShardResult;
-  } catch {
-    // continue
-  }
+  try { return JSON.parse(text); } catch {}
 
-  // 2. 去掉 ```json ... ``` 包裹
-  const jsonBlock = text.match(/```json\s*([\s\S]*?)```/);
-  if (jsonBlock?.[1]) {
-    try {
-      return JSON.parse(jsonBlock[1]) as ShardResult;
-    } catch {
-      // continue
-    }
-  }
+  // 2. ```json ... ``` 包裹
+  const m = text.match(/```json\s*([\s\S]*?)```/);
+  if (m?.[1]) try { return JSON.parse(m[1]); } catch {}
 
-  // 3. 去掉任意 ``` 包裹
-  const anyBlock = text.match(/```\s*([\s\S]*?)```/);
-  if (anyBlock?.[1]) {
-    try {
-      return JSON.parse(anyBlock[1]) as ShardResult;
-    } catch {
-      // continue
-    }
-  }
+  // 3. ``` ... ``` 包裹
+  const m2 = text.match(/```\s*([\s\S]*?)```/);
+  if (m2?.[1]) try { return JSON.parse(m2[1]); } catch {}
+
+  // 4. 第一个 { 到最后一个 }
+  const a = text.indexOf('{');
+  const b = text.lastIndexOf('}');
+  if (a !== -1 && b > a) try { return JSON.parse(text.slice(a, b + 1)); } catch {}
 
   return null;
 }
 
-// ── 合并逻辑 ────────────────────────────────────────────────────────────────
+function formatValidationError(err: unknown): string {
+  if (err && typeof err === 'object' && 'issues' in err) {
+    const issues = (err as { issues?: Array<{ path?: Array<string | number>; message: string }> }).issues || [];
+    return issues
+      .slice(0, 3)
+      .map((i) => `${i.path?.join('.') || '<root>'}: ${i.message}`)
+      .join('; ');
+  }
+  return err instanceof Error ? err.message : String(err);
+}
 
-function mergeResults(results: ShardResult[]): ShardResult {
-  // ── 合并 candidates：按 id 去重，保留最高 conf ──
+// ── 聚合生成 ────────────────────────────────────────────────────────────
+
+interface Aggregate {
+  id: string;
+  label: string;
+  startTurn: number;
+  endTurn: number;
+  shardIndices: number[];
+  nodeIds: string[];
+}
+
+function buildAggregates(
+  themes: Array<{ shardIndex: number; startTurn: number; theme: string }>,
+  manifest: ExtractionManifest,
+): Aggregate[] {
+  if (themes.length === 0) return [];
+  const sorted = [...themes].sort((a, b) => a.shardIndex - b.shardIndex);
+  const aggregates: Aggregate[] = [];
+  let current: Aggregate | null = null;
+
+  for (const t of sorted) {
+    if (current && current.label === t.theme) {
+      // 相同主题：扩展当前聚合
+      current.endTurn = manifest.shards.find((s) => s.index === t.shardIndex)?.endTurn ?? t.startTurn;
+      current.shardIndices.push(t.shardIndex);
+    } else {
+      if (current) aggregates.push(current);
+      current = {
+        id: `agg_${String(aggregates.length).padStart(3, '0')}`,
+        label: t.theme,
+        startTurn: t.startTurn,
+        endTurn: manifest.shards.find((s) => s.index === t.shardIndex)?.endTurn ?? t.startTurn,
+        shardIndices: [t.shardIndex],
+        nodeIds: [],
+      };
+    }
+  }
+  if (current) aggregates.push(current);
+
+  // 合并相似标签的相邻聚合
+  return mergeSimilarAggregates(aggregates);
+}
+
+function mergeSimilarAggregates(aggs: Aggregate[]): Aggregate[] {
+  if (aggs.length <= 1) return aggs;
+  const result: Aggregate[] = [aggs[0]!];
+  for (let i = 1; i < aggs.length; i++) {
+    const prev = result[result.length - 1]!;
+    const curr = aggs[i]!;
+    if (jaccardSimilarity(prev.label, curr.label) > 0.5) {
+      prev.label = prev.label.length <= curr.label.length ? prev.label : curr.label;
+      prev.endTurn = curr.endTurn;
+      prev.shardIndices = [...new Set([...prev.shardIndices, ...curr.shardIndices])];
+      prev.nodeIds = [...new Set([...prev.nodeIds, ...curr.nodeIds])];
+    } else {
+      result.push(curr);
+    }
+  }
+  return result;
+}
+
+// ── 合并 ──────────────────────────────────────────────────────────────────
+
+function mergeResults(results: ShardResult[], maxTurn: number): {
+  candidates: CandidateEntity[];
+  relations: SemanticRelation[];
+  config: OntologyBuildConfig;
+} {
   const candidateMap = new Map<string, CandidateEntity>();
-
   for (const shard of results) {
     for (const c of shard.candidates) {
       const existing = candidateMap.get(c.id);
       if (!existing || c.conf > existing.conf) {
-        // 保留最高 conf 条目，合并 turns 和 aliases
-        if (existing) {
-          candidateMap.set(c.id, {
-            ...c,
-            turns: [...new Set([...existing.turns, ...c.turns])].sort((a, b) => a - b),
-            aliases: [...new Set([...(existing.aliases || []), ...(c.aliases || [])])],
-            firstTurn: Math.min(existing.firstTurn, c.firstTurn),
-          });
-        } else {
-          candidateMap.set(c.id, {
-            ...c,
-            turns: [...c.turns].sort((a, b) => a - b),
-            aliases: [...(c.aliases || [])],
-          });
-        }
+        candidateMap.set(c.id, {
+          ...c,
+          turns: [...new Set([...(existing?.turns || []), ...c.turns])].sort((a, b) => a - b),
+          aliases: [...new Set([...(existing?.aliases || []), ...(c.aliases || [])])],
+          firstTurn: existing ? Math.min(existing.firstTurn, c.firstTurn) : c.firstTurn,
+        });
       } else {
-        // 保留最高 conf 的 snippet
-        const mergeC = {
+        candidateMap.set(c.id, {
           ...existing,
           turns: [...new Set([...existing.turns, ...c.turns])].sort((a, b) => a - b),
           aliases: [...new Set([...(existing.aliases || []), ...(c.aliases || [])])],
-          firstTurn: Math.min(existing.firstTurn, c.firstTurn),
-        };
-        candidateMap.set(c.id, mergeC);
+        });
       }
     }
   }
 
-  // ── 合并 relations：按 [s,t,label].sort().join('::') 去重，保留最高 conf ──
+  // 边方向保留：不排序 s,t
   const relationMap = new Map<string, SemanticRelation>();
-
   for (const shard of results) {
     for (const r of shard.relations) {
-      const key = [r.s, r.t, r.label].sort().join('::');
+      const key = [r.s, r.t, r.label].join('::');
       const existing = relationMap.get(key);
       if (!existing || r.conf > existing.conf) {
-        relationMap.set(key, {
-          ...r,
-          firstTurn: existing ? Math.min(existing.firstTurn, r.firstTurn) : r.firstTurn,
-        });
+        relationMap.set(key, { ...r, firstTurn: existing ? Math.min(existing.firstTurn, r.firstTurn) : r.firstTurn });
       } else {
-        relationMap.set(key, {
-          ...existing,
-          firstTurn: Math.min(existing.firstTurn, r.firstTurn),
-        });
+        relationMap.set(key, { ...existing, firstTurn: Math.min(existing.firstTurn, r.firstTurn) });
       }
     }
   }
 
-  // ── 合并 config：浅合并，冲突时后面的赢 ──
   const mergedConfig: OntologyBuildConfig = {};
   for (const shard of results) {
     if (shard.config) {
       Object.assign(mergedConfig, shard.config);
-      // reclassify 特殊处理：浅合并各分片
       if (shard.config.reclassify) {
-        mergedConfig.reclassify = {
-          ...(mergedConfig.reclassify || {}),
-          ...shard.config.reclassify,
+        mergedConfig.reclassify = { ...(mergedConfig.reclassify || {}), ...shard.config.reclassify };
+      }
+    }
+  }
+
+  return { candidates: Array.from(candidateMap.values()), relations: Array.from(relationMap.values()), config: mergedConfig };
+}
+
+// ── 质量改进 ──────────────────────────────────────────────────────────────
+
+/** 计算客观置信度 */
+function computeConf(node: { turns: number[]; snippet: string; label: string }, maxTurn: number, shardCount: number): number {
+  const turnRatio = node.turns.length / Math.max(maxTurn, 1);
+  const base = turnRatio * 0.5 + 0.3;
+  const crossShardBonus = 1 + 0.15 * Math.min(shardCount - 1, 3);
+  const hasKeyword = node.snippet.includes(node.label.substring(0, 2));
+  const snippetMult = hasKeyword ? 1.0 : 0.8;
+  return Math.min(0.95, Math.max(0.3, base * crossShardBonus * snippetMult));
+}
+
+/** 跨分片语义去重：label Jaccard 相似度 > 0.7 的实体对合并 */
+function dedupByLabel(nodes: CandidateEntity[]): CandidateEntity[] {
+  const result: CandidateEntity[] = [];
+  const used = new Set<number>();
+
+  for (let i = 0; i < nodes.length; i++) {
+    if (used.has(i)) continue;
+    let merged = { ...nodes[i]! };
+    for (let j = i + 1; j < nodes.length; j++) {
+      if (used.has(j)) continue;
+      const sim = jaccardSimilarity(merged.label, nodes[j]!.label);
+      if (sim > 0.7) {
+        merged = {
+          ...merged,
+          turns: [...new Set([...merged.turns, ...nodes[j]!.turns])].sort((a, b) => a - b),
+          aliases: [...new Set([...(merged.aliases || []), ...(nodes[j]!.aliases || [])])],
+          firstTurn: Math.min(merged.firstTurn, nodes[j]!.firstTurn),
+          conf: Math.max(merged.conf, nodes[j]!.conf),
+          note: (merged.note || '') + ` 与「${nodes[j]!.label}」语义合并`,
         };
+        used.add(j);
       }
     }
+    result.push(merged);
   }
-
-  return {
-    candidates: Array.from(candidateMap.values()),
-    relations: Array.from(relationMap.values()),
-    config: mergedConfig,
-  };
+  return result;
 }
 
-// ── 分片构建 ────────────────────────────────────────────────────────────────
-
-interface Shard {
-  index: number;
-  content: string;
-  turnRange: string;
-  turnCount: number;
+function jaccardSimilarity(a: string, b: string): number {
+  const setA = new Set(a);
+  const setB = new Set(b);
+  const intersection = new Set([...setA].filter((x) => setB.has(x)));
+  const union = new Set([...setA, ...setB]);
+  return union.size === 0 ? 0 : intersection.size / union.size;
 }
 
-function buildShards(
-  turns: TurnContent[],
-  totalTurns: number,
-  shardSize: number,
-  overlap: number,
-  maxShards: number,
-): Shard[] {
-  const effectiveSize = shardSize - overlap;
-  const numShards = Math.min(maxShards, Math.max(1, Math.ceil((totalTurns - overlap) / effectiveSize)));
-
-  const shards: Shard[] = [];
-
-  for (let i = 0; i < numShards; i++) {
-    const startTurn = i * effectiveSize + 1;
-    const endTurn = Math.min(startTurn + shardSize - 1, totalTurns);
-
-    const selected = turns.filter((t) => t.turnNum >= startTurn && t.turnNum <= endTurn);
-    const content = selected.map((t) => t.content).join('');
-
-    shards.push({
-      index: i,
-      content,
-      turnRange: `${startTurn}-${endTurn}`,
-      turnCount: selected.length,
-    });
+/** snippet 质量检测 */
+function checkSnippetQuality(snippet: string, label: string): 'ok' | 'low' {
+  for (let i = 0; i <= label.length - 2; i++) {
+    if (snippet.includes(label.substring(i, i + 2))) return 'ok';
   }
-
-  return shards;
+  return 'low';
 }
 
-// ── 单个分片的 LLM 提取 ────────────────────────────────────────────────────
+// ── 主入口 ────────────────────────────────────────────────────────────────
 
-interface ShardLLMResult {
-  shardIndex: number;
-  result: ShardResult | null;
-  error?: string;
-}
-
-async function processShard(
-  shard: Shard,
-  numShards: number,
-  sessionId: string,
-  chat: ChatFn,
-): Promise<ShardLLMResult> {
-  const meta: Meta = {
-    sessionId,
-    partN: shard.index + 1,
-    totalParts: numShards,
-    turnRange: shard.turnRange,
-    turnCount: shard.turnCount,
-  };
-
-  const systemPrompt = '你是一个精确的会话分析工具。请严格按照要求输出 JSON，不添加任何解释或包装。';
-  const userPrompt =
-    shard.index === 0
-      ? buildFullPrompt(shard.content, meta)
-      : buildCompactPrompt(shard.content, meta);
-
-  let lastError: string | undefined;
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
-        { role: 'user', content: userPrompt },
-      ];
-
-      // 重试时追加纠正提示
-      if (attempt > 0) {
-        messages.splice(0, 0, { role: 'assistant', content: lastError! });
-        messages.push({
-          role: 'user',
-          content:
-            '上次返回格式不正确。Please output pure JSON without markdown wrapping. 请直接输出 JSON 对象，不要用 ``` 包裹。',
-        });
-      }
-
-      const response = await chat(systemPrompt, messages);
-      const parsed = parseJsonFromResponse(response.text);
-
-      if (parsed) {
-        return { shardIndex: shard.index, result: parsed };
-      }
-
-      lastError = response.text.substring(0, 500);
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  return {
-    shardIndex: shard.index,
-    result: null,
-    error: `分片 ${shard.index} 在 3 次尝试后仍无法解析: ${lastError?.substring(0, 200)}`,
-  };
-}
-
-// ── 主入口 ──────────────────────────────────────────────────────────────────
-
-/**
- * 从 JSONL 会话转录中自动提取上下文本体。
- *
- * @param rawJsonl  — 原始 JSONL 内容字符串
- * @param sessionId — 会话 ID（用于元信息）
- * @param onEvent   — SSE 事件回调 (event, data)
- * @param options   — 分片配置（可选）
- * @returns 成功返回 ExtractSuccess，失败返回 ExtractFailure
- */
 export async function extractAndBuild(
   rawJsonl: string,
   sessionId: string,
   onEvent: (event: string, data: Record<string, unknown>) => void,
-  options?: { shardSize?: number; overlap?: number; maxShards?: number },
+  options?: { shardSize?: number; force?: boolean; incremental?: boolean },
 ): Promise<ExtractResult> {
-  const shardSize = options?.shardSize ?? 50;
-  const overlap = options?.overlap ?? 5;
-  const maxShards = options?.maxShards ?? 20;
+  const shardSize = options?.shardSize ?? 30;
+  const force = options?.force ?? false;
+  const incremental = options?.incremental ?? false;
 
-  // ── Step 1: Extract ──────────────────────────────────────────────────────
-  const turns = extractContentWithTurns(rawJsonl);
-  const totalTurns = turns.length;
+  // Step 1: Extract to file tree
+  let manifest: ExtractionManifest;
+  let processShardIndices: number[] | undefined; // 仅增量模式：需要 LLM 处理的分片
 
-  if (totalTurns === 0) {
-    return {
-      success: false,
-      stage: 'content',
-      message: '未从 JSONL 中提取到任何用户 turn 内容',
-    };
-  }
-
-  // ── Step 2: Shard ────────────────────────────────────────────────────────
-  const shards = buildShards(turns, totalTurns, shardSize, overlap, maxShards);
-  const numShards = shards.length;
-
-  onEvent('start', { shards: numShards, totalTurns });
-
-  // ── Step 3: Parallel LLM ─────────────────────────────────────────────────
-  let chat: ChatFn;
   try {
-    chat = await getChat();
+    if (incremental) {
+      const incResult = extractIncremental(rawJsonl, sessionId, { shardSize });
+      manifest = incResult.manifest;
+      if (!incResult.hasNewTurns) {
+        onEvent('extracted', {
+          totalTurns: manifest.totalTurns, shardCount: manifest.shardCount, rootDir: manifest.rootDir,
+          shards: manifest.shards.map((s) => ({ index: s.index, filename: s.filename, turnRange: s.turnRange, turnCount: s.turnCount })),
+          incremental: true, newTurns: false,
+        });
+        return { success: true, buildOutput: null, shardStats: { total: 0, succeeded: 0, failed: 0 } };
+      }
+      processShardIndices = incResult.newShardIndices;
+    } else {
+      manifest = extractToFiles(rawJsonl, sessionId, { shardSize, force });
+    }
   } catch (err) {
-    return {
-      success: false,
-      stage: 'llm',
-      message: '无法加载 LLM provider: ' + (err instanceof Error ? err.message : String(err)),
-    };
+    return { success: false, stage: 'content', message: '内容提取失败: ' + (err instanceof Error ? err.message : String(err)) };
   }
 
-  const shardPromises = shards.map((shard) => processShard(shard, numShards, sessionId, chat));
-  const shardResults = await Promise.all(shardPromises);
+  if (manifest.totalTurns === 0) {
+    return { success: false, stage: 'content', message: '未从 JSONL 中提取到任何用户 turn 内容' };
+  }
 
-  let succeeded = 0;
-  let failed = 0;
+  const activeShards = processShardIndices
+    ? manifest.shards.filter((s) => processShardIndices!.includes(s.index))
+    : manifest.shards;
 
-  for (const sr of shardResults) {
-    if (sr.result) {
-      succeeded++;
-      onEvent('shard-done', {
-        shardIndex: sr.shardIndex,
-        candidates: sr.result.candidates,
-        relations: sr.result.relations,
-      });
+  onEvent('extracted', {
+    totalTurns: manifest.totalTurns, shardCount: manifest.shardCount,
+    activeShards: activeShards.length, incremental: incremental && processShardIndices != null,
+    rootDir: manifest.rootDir,
+    shards: manifest.shards.map((s) => ({ index: s.index, filename: s.filename, turnRange: s.turnRange, turnCount: s.turnCount })),
+  });
+
+  // Step 2: Agent SDK orchestration
+  const model = process.env.LLM_MODEL || 'deepseek-v4-pro';
+  const apiKey = process.env.LLM_API_KEY;
+  const baseUrl = process.env.LLM_BASE_URL || 'https://api.deepseek.com/anthropic';
+
+  if (!apiKey) {
+    return { success: false, stage: 'llm', message: '未设置 LLM_API_KEY 环境变量' };
+  }
+
+  onEvent('start', { shards: activeShards.length, totalTurns: manifest.totalTurns });
+
+  // 收集子 Agent 返回的 JSON 文本
+  const shardTextResults: Map<number, string> = new Map();
+
+  const abort = new AbortController();
+  const expectedShards = activeShards.length;
+
+  try {
+    const q = query({
+      prompt: '请开始提取。',
+      options: {
+        abortController: abort,
+        systemPrompt: buildOrchestratorPrompt(manifest, activeShards),
+        model,
+        agents: { 'entity-extractor': entityExtractorDef },
+        allowedTools: ['Read', 'Task'],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        maxTurns: Math.max(activeShards.length + 5, 5),
+        thinking: { type: 'disabled' as const },
+        cwd: manifest.rootDir.replace(/\/data\/extractions\/.*$/, ''),
+        env: { ...process.env, ANTHROPIC_API_KEY: apiKey, ANTHROPIC_BASE_URL: baseUrl } as Record<string, string>,
+      },
+    });
+
+    for await (const msg of q) {
+      const mtype = (msg as Record<string, unknown>).type as string;
+      const msubtype = (msg as Record<string, unknown>).subtype as string || '';
+      console.error('[msg]', mtype, msubtype);
+
+      if (msg.type === 'system' && msubtype === 'init') {
+        onEvent('agent-start', { sessionId: (msg as SDKMessage & { session_id: string }).session_id });
+      }
+
+      // 记录 assistant 内容
+      if (msg.type === 'assistant') {
+        const am = msg as SDKMessage & { type: 'assistant'; message?: { content?: unknown[] } };
+        if (am.message?.content) {
+          for (const block of am.message.content as Array<{ type: string; text?: string; name?: string }>) {
+            if (block.type === 'text') console.error('  [asst text]', (block.text || '').substring(0, 120));
+            if (block.type === 'tool_use') console.error('  [asst tool]', block.name);
+          }
+        }
+      }
+
+      // 检测 tool_result 中的子 Agent JSON 输出
+      if (msg.type === 'user') {
+        const um = msg as SDKMessage & { type: 'user'; message?: { role: string; content?: unknown[] } };
+        const blocks = (um.message?.content && Array.isArray(um.message.content))
+          ? um.message.content
+          : (um.message?.content ? [um.message.content] : []);
+        for (const block of blocks as Array<{ type: string; tool_use_id?: string; content?: unknown; text?: string; name?: string }>) {
+          // 只处理 Agent 工具的 tool_result（子 Agent 完成），跳过 Read 等工具的 tool_result
+          if (block.type === 'tool_result') {
+            // 提取文本：content 可能是 string 或 [{type:'text', text:'...'}, ...]
+            let text = '';
+            if (typeof block.content === 'string') {
+              text = block.content;
+            } else if (Array.isArray(block.content)) {
+              text = (block.content as Array<{ type: string; text?: string }>)
+                .filter((c) => c.type === 'text' && c.text)
+                .map((c) => c.text!)
+                .join('\n');
+            } else if (block.content && typeof block.content === 'object') {
+              text = JSON.stringify(block.content);
+            }
+            if (!text) continue;
+
+            console.error('  [tool_result]', text.substring(0, 200));
+            const parsed = parseJsonFromText(text);
+            if (parsed && typeof parsed === 'object') {
+              const single = parsed as Record<string, unknown>;
+              const parsedItems = Array.isArray(parsed)
+                ? parsed
+                : Array.isArray(single.results)
+                  ? single.results
+                  : [parsed];
+
+              for (const item of parsedItems) {
+                const validation = SubmitExtractionSchema.safeParse(item);
+                if (validation.success) {
+                  const r = validation.data;
+                  shardTextResults.set(r.shardIndex, JSON.stringify(r));
+                  console.error('  [parsed shard]', r.shardIndex, 'theme:', r.phaseTheme);
+                  onEvent('shard-done', { shardIndex: r.shardIndex, phaseTheme: r.phaseTheme, candidates: r.candidates, relations: r.relations });
+                } else {
+                  const candidate = item as Record<string, unknown>;
+                  const shardIndex = typeof candidate?.shardIndex === 'number' ? candidate.shardIndex : -1;
+                  const error = formatValidationError(validation.error);
+                  console.error('  [validation error]', shardIndex, error);
+                  onEvent('shard-error', { shardIndex, error });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 收齐所有分片后主动中断 Agent SDK
+      if (shardTextResults.size >= expectedShards) {
+        console.error('[extract-ontology] All', expectedShards, 'shards collected, aborting Agent SDK...');
+        abort.abort();
+        break;
+      }
+
+      // 记录最终结果
+      if (msg.type === 'result') {
+        console.error('  [result]', JSON.stringify(msg).substring(0, 400));
+      }
+    }
+  } catch (err) {
+    // AbortError 是预期的，不算错误
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.error('[extract-ontology] Agent SDK aborted (expected)');
     } else {
-      failed++;
-      onEvent('shard-error', {
-        shardIndex: sr.shardIndex,
-        error: sr.error,
+      console.error('[extract-ontology] Agent SDK error:', err);
+    }
+    onEvent('agent-error', { message: err instanceof Error ? err.message : String(err) });
+  }
+
+  // Step 3: Parse collected results
+  const shardResults: ShardResult[] = [];
+  const phaseThemes: Array<{ shardIndex: number; startTurn: number; theme: string }> = [];
+  for (const [, text] of shardTextResults) {
+    const parsed = parseJsonFromText(text);
+    const validation = SubmitExtractionSchema.safeParse(parsed);
+    if (validation.success) {
+      const r = validation.data;
+      const shardIdx = r.shardIndex;
+      const theme = r.phaseTheme;
+      // turns 校验：过滤掉不在当前分片轮次范围内的值
+      const shard = manifest.shards.find((s) => s.index === shardIdx);
+      const shardStart = shard?.startTurn ?? 1;
+      const shardEnd = shard?.endTurn ?? manifest.totalTurns;
+      const validatedCandidates = r.candidates.map((c) => ({
+        ...c,
+        turns: c.turns.filter((t) => t >= shardStart && t <= shardEnd),
+      }));
+      shardResults.push({
+        shardIndex: shardIdx,
+        phaseTheme: theme,
+        candidates: validatedCandidates,
+        relations: r.relations,
+        config: r.config,
       });
+      phaseThemes.push({ shardIndex: shardIdx, startTurn: shardStart, theme });
+    } else {
+      onEvent('shard-error', { shardIndex: -1, error: formatValidationError(validation.error) });
     }
   }
 
-  // 全部分片 LLM 调用失败
-  if (succeeded === 0) {
-    return {
-      success: false,
-      stage: 'llm',
-      message: `所有 ${numShards} 个分片的 LLM 调用均失败`,
-      detail: shardResults.map((s) => s.error).join('; '),
-    };
+  if (shardResults.length === 0) {
+    return { success: false, stage: 'llm', message: '未能从子 Agent 输出中解析出任何结果' };
   }
 
-  // 全部分片解析失败
-  if (succeeded === 0 && failed > 0) {
-    return {
-      success: false,
-      stage: 'parse',
-      message: `所有 ${numShards} 个分片的 JSON 解析均失败`,
-    };
+  // Step 4: Merge + 质量改进
+  const merged = mergeResults(shardResults, manifest.totalTurns);
+
+  // 语义去重
+  merged.candidates = dedupByLabel(merged.candidates);
+
+  // 生成聚合
+  const aggregates = buildAggregates(phaseThemes, manifest);
+
+  // 为每个 entity 计算客观 conf、snippet 质量、聚合归属
+  const aggTopicId = new Map<string, string>(); // 每个聚合只保留一个 topic
+  const mergedTopicIds = new Set<string>();
+  for (const c of merged.candidates) {
+    c.rawConf = c.conf;
+    c.conf = computeConf(c, manifest.totalTurns, shardResults.length);
+    c.snippetQuality = checkSnippetQuality(c.snippet, c.label);
+    const agg = aggregates.find((a) => c.firstTurn >= a.startTurn && c.firstTurn <= a.endTurn);
+    if (agg) {
+      if (c.type === 'topic') {
+        const existingId = aggTopicId.get(agg.id);
+        if (existingId) {
+          const prev = merged.candidates.find((x) => x.id === existingId);
+          if (prev) {
+            prev.turns = [...new Set([...prev.turns, ...c.turns])].sort((a, b) => a - b);
+            prev.aliases = [...new Set([...(prev.aliases || []), ...(c.aliases || [])])];
+            prev.conf = Math.max(prev.conf, c.conf);
+            prev.firstTurn = Math.min(prev.firstTurn, c.firstTurn);
+          }
+          mergedTopicIds.add(c.id);
+          continue;
+        }
+        aggTopicId.set(agg.id, c.id);
+      }
+      c.aggregateId = agg.id;
+      agg.nodeIds.push(c.id);
+    }
   }
+  merged.candidates = merged.candidates.filter((c) => !mergedTopicIds.has(c.id));
 
-  // ── Step 4: Merge ────────────────────────────────────────────────────────
-  const successfulResults = shardResults
-    .filter((s): s is ShardLLMResult & { result: ShardResult } => s.result !== null)
-    .map((s) => s.result);
+  onEvent('merge', { candidates: merged.candidates, relations: merged.relations, aggregates });
 
-  const merged = mergeResults(successfulResults);
-
-  onEvent('merge', {
-    candidates: merged.candidates,
-    relations: merged.relations,
-  });
-
-  // ── Step 5: Build ────────────────────────────────────────────────────────
+  // Step 5: Build
   onEvent('build', {});
-
   let buildOutput: OntologyBuildOutput;
   try {
-    buildOutput = buildOntology({
-      candidates: merged.candidates,
-      relations: merged.relations,
-      config: merged.config,
-    });
+    buildOutput = buildOntology({ candidates: merged.candidates, relations: merged.relations, config: { ...merged.config, pruneOrphans: false } });
   } catch (err) {
-    return {
-      success: false,
-      stage: 'build',
-      message: '本体构建失败: ' + (err instanceof Error ? err.message : String(err)),
-    };
+    return { success: false, stage: 'build', message: '本体构建失败: ' + (err instanceof Error ? err.message : String(err)) };
   }
 
-  // ── Step 6: Return ───────────────────────────────────────────────────────
+  buildOutput.aggregates = aggregates;
+  if (phaseThemes.length > 0) {
+    buildOutput.phaseThemes = phaseThemes;
+  }
+
   return {
     success: true,
     buildOutput,
-    shardStats: {
-      total: numShards,
-      succeeded,
-      failed,
-    },
+    shardStats: { total: manifest.shardCount, succeeded: shardResults.length, failed: manifest.shardCount - shardResults.length },
   };
 }

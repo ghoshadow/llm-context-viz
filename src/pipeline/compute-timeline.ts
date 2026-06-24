@@ -838,8 +838,9 @@ export function computeTimeline(
     // Fill gaps: carry forward the last known state through subsequent segments
     let lastSnap: typeof cumTools | null = null;
     for (let si = 0; si < stepCumTools.length; si++) {
-      if (stepCumTools[si]) {
-        lastSnap = stepCumTools[si];
+      const snap = stepCumTools[si];
+      if (snap) {
+        lastSnap = snap;
       } else if (lastSnap) {
         stepCumTools[si] = { ...lastSnap };
       }

@@ -69,26 +69,16 @@ cat > "$PROMPT_FILE" << 'PROMPT_HEADER'
 
 阅读以下 LLM 会话转录内容，从中提取**实体**和**关系**，构建会话的知识图谱。输出格式为严格的 JSON。
 
-## 实体类型定义
-
-候选实体分为 7 种类型。**最终图谱中只保留前 3 种**（机制·概念 / Agent / 系统），后 4 种由管线自动过滤：
-
-### 保留类型（自然语义实体）
+## 知识类型定义
 
 | 类型 | key | 说明 |
 |------|-----|------|
-| 机制·概念 | `mechanism` | 对话中讨论的架构概念、算法、设计模式、问题现象、解决方案 |
-| Agent | `agent` | 对话中的 AI 参与者（主 Agent、子 Agent、编排器） |
-| 系统 | `system` | 工具、框架、服务器、数据库、文件格式等外部系统 |
-
-### 过滤类型（技术工件，管线自动丢弃，但标注有益于理解对话）
-
-| 类型 | key | 说明 |
-|------|-----|------|
-| 错误·现象 | `error` | 报错信息、异常表现。若该错误是对话讨论的**核心主题**，在 config.reclassify 中提升为 mechanism |
-| 函数·API | `func` | 代码中的函数名、方法名 |
-| 代码·文件 | `code` | 源代码文件路径 |
-| 命令 | `command` | 终端命令 |
+| 问题/主题 | `topic` | 当前阶段的核心问题或目标，作为聚合根 |
+| 怎么做 | `how_to` | 可操作的方法、步骤、流程 |
+| 为什么 | `why` | 对现象或结果的原因解释 |
+| 坑/教训 | `pitfall` | 错误做法、后果和规避方式 |
+| 经验法则 | `heuristic` | 可复用的判断准则或取舍原则 |
+| 工具/技巧 | `technique` | 具体工具、命令、配置或 API 的使用技巧 |
 
 ## 实体字段
 
@@ -126,7 +116,7 @@ cat > "$PROMPT_FILE" << 'PROMPT_HEADER'
     {
       "id": "context_assembly",
       "label": "上下文拼装",
-      "type": "mechanism",
+      "type": "topic",
       "conf": 0.95,
       "firstTurn": 1,
       "turns": [1, 12, 28, 87],
@@ -136,19 +126,16 @@ cat > "$PROMPT_FILE" << 'PROMPT_HEADER'
   ],
   "relations": [
     {
-      "s": "claude_code",
-      "t": "llm_context_viz",
-      "label": "构建",
+      "s": "context_assembly",
+      "t": "token_estimation_calibration",
+      "label": "包含",
       "firstTurn": 12,
       "conf": 0.95
     }
   ],
   "config": {
-    "keepTypes": ["mechanism", "agent", "system"],
-    "reclassify": {
-      "cumulative_jump": "mechanism"
-    },
-    "pruneOrphans": true,
+    "keepTypes": ["topic", "how_to", "why", "pitfall", "heuristic", "technique"],
+    "pruneOrphans": false,
     "maxTurn": 510
   }
 }
@@ -158,15 +145,15 @@ cat > "$PROMPT_FILE" << 'PROMPT_HEADER'
 
 1. **来源限定**：只从用户消息（`=== TURN N (USER) ===`）、模型文本回复（`[REPLY]`）、模型思考过程（`[THINK]`）中抽取语义。不从工具结果的结构化数据中提取。
 
-2. **技术工件大胆标注**：函数名、文件名、命令等标注为 `func`/`code`/`command`，**无需担心过多**——管线自动过滤。
+2. **知识化表达**：不要把函数名、文件路径、命令本身当作实体；如果它们承载了可复用做法，提炼成 `technique` 或 `how_to`。
 
-3. **错误→概念提升**：如果某个 "错误现象" 是对话讨论的核心主题（而非偶发报错），类型标为 `error`，然后在 `config.reclassify` 中映射为 `"mechanism"`。
+3. **类型边界清晰**：步骤流程归为 `how_to`，因果解释归为 `why`，踩坑复盘归为 `pitfall`，判断准则归为 `heuristic`，工具细节归为 `technique`。
 
 4. **消歧标注**：同一概念多种称谓→合并为一个实体，`aliases` 列出所有别名。对话中假设被推翻→在 `note` 中说明消歧过程。
 
-5. **关系概念化**：边两端必须是保留类型（或将被 reclassify 的类型）。禁止 `func→func` 或 `code→code` 的边——应重写为概念间关系。
+5. **关系概念化**：关系体现知识之间的包含、因果、支撑、递进、修正等逻辑联系。边应连接知识实体，而不是技术工件。
 
-6. **config.maxTurn** 设为会话实际最大轮次编号。`config.reclassify` 列出所有 `error→mechanism` 提升的实体 id。
+6. **config.maxTurn** 设为会话实际最大轮次编号。`config.keepTypes` 使用当前 6 种知识类型。
 
 ---
 

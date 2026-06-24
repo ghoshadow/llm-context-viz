@@ -1,5 +1,6 @@
 import React from 'react';
-import type { OntologyType, OntologyNode } from '../../types/ontology';
+import type { OntologyType, OntologyNode, PhaseTheme } from '../../types/ontology';
+import { sortOntologyTypes } from './typeOrder';
 
 interface OntologyToolbarProps {
   types: OntologyType[];
@@ -7,6 +8,7 @@ interface OntologyToolbarProps {
   activeTypes: Record<string, boolean>;
   turn: number;
   maxTurn: number;
+  phaseThemes?: PhaseTheme[];
   playing: boolean;
   onToggleType: (key: string) => void;
   onSetTurn: (turn: number) => void;
@@ -98,6 +100,7 @@ const OntologyToolbar: React.FC<OntologyToolbarProps> = ({
   activeTypes,
   turn,
   maxTurn,
+  phaseThemes,
   playing,
   onToggleType,
   onSetTurn,
@@ -106,12 +109,20 @@ const OntologyToolbar: React.FC<OntologyToolbarProps> = ({
   onUpdate,
   onRebuild,
 }) => {
+  // 根据当前 turn 找到对应的阶段主题
+  const currentTheme = phaseThemes
+    ?.slice()
+    .reverse()
+    .find((p) => turn >= p.startTurn);
+  const orderedTypes = sortOntologyTypes(types);
+
   return (
+    <>
     <div style={s.bar}>
       {/* Type filter chips */}
       <div style={s.typeGroup}>
         <span style={s.typeLabel}>类型</span>
-        {types.map((t) => {
+        {orderedTypes.map((t) => {
           const active = activeTypes[t.key] !== false;
           const count = nodes.filter((n) => n.type === t.key).length;
           return (
@@ -204,6 +215,19 @@ const OntologyToolbar: React.FC<OntologyToolbarProps> = ({
         </button>
       </div>
 
+      {/* Phase theme — separate line below toolbar */}
+      {currentTheme && (
+        <div style={{
+          fontSize: 12.5,
+          color: 'oklch(0.82 0.10 165)',
+          fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+          padding: '8px 14px 0',
+          flexShrink: 0,
+        }}>
+          📌 {currentTheme.theme}
+        </div>
+      )}
+
       {/* Slider CSS */}
       <style>{`
         input[type=range].og {
@@ -221,6 +245,7 @@ const OntologyToolbar: React.FC<OntologyToolbarProps> = ({
         }
       `}</style>
     </div>
+    </>
   );
 };
 

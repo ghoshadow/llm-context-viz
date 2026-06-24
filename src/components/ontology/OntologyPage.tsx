@@ -28,6 +28,7 @@ export default function OntologyPage() {
   const extractOntology = useSessionStore((s) => s.extractOntology);
   const extractPhase = useSessionStore((s) => s.extractPhase);
   const extractProgress = useSessionStore((s) => s.extractProgress);
+  const extractRootDir = useSessionStore((s) => s.extractRootDir);
   const extractError = useSessionStore((s) => s.extractError);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
 
@@ -38,18 +39,20 @@ export default function OntologyPage() {
   const [buildErr, setBuildErr] = useState<string | null>(null);
 
   // Auto-extract state
-  const [shardSize, setShardSize] = useState(50);
-  const [overlap, setOverlap] = useState(5);
+  const [shardSize, setShardSize] = useState(30);
+  const [forceExtract, setForceExtract] = useState(false);
   const [showExtractModal, setShowExtractModal] = useState(false);
   const [extractMode, setExtractMode] = useState<'full' | 'incremental'>('full');
 
   const handleStartExtract = useCallback(async (mode: 'full' | 'incremental') => {
-    const fromTurn = mode === 'incremental' && ontologyData
-      ? Math.max(...ontologyData.nodes.map(n => n.firstTurn), 0)
-      : 0;
     setExtractMode(mode);
-    await extractOntology({ shardSize, overlap, fromTurn });
-  }, [extractOntology, shardSize, overlap, ontologyData]);
+    // full=强制重建提取文件, incremental=复用已有文件（如存在）
+    await extractOntology({
+      shardSize,
+      force: mode === 'full' ? forceExtract : false,
+      incremental: mode === 'incremental',
+    });
+  }, [extractOntology, shardSize, forceExtract]);
 
   const openExtractModal = useCallback((mode: 'full' | 'incremental') => {
     setExtractMode(mode);
@@ -224,7 +227,7 @@ export default function OntologyPage() {
       <>
         <OntologyToolbar
           types={ontologyData.types} nodes={ontologyData.nodes} activeTypes={activeTypes}
-          turn={turn} maxTurn={maxTurn} playing={playing}
+          turn={turn} maxTurn={maxTurn} phaseThemes={ontologyData.phaseThemes} playing={playing}
           onToggleType={onToggleType} onSetTurn={onSetTurn} onTogglePlay={onTogglePlay} onRecenter={onRecenter}
           onUpdate={() => openExtractModal('incremental')}
           onRebuild={() => openExtractModal('full')}
@@ -233,7 +236,7 @@ export default function OntologyPage() {
           <div style={{ position: 'relative', border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 16, background: 'oklch(0.17 0.008 265 / 0.6)', overflow: 'hidden' }}>
             <OntologyGraph data={ontologyData} selectedNodeId={selectedOntologyNode} turn={turn} activeTypes={activeTypes} onSelectNode={setSelectedOntologyNode} recenterKey={recenterKey} />
             <div style={{ position: 'absolute', left: 14, bottom: 12, fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: 'oklch(0.46 0.012 265)', pointerEvents: 'none', lineHeight: 1.5 }}>
-              拖拽节点 · 滚轮缩放 · 拖拽空白平移 · 点击节点看详情
+              横向滚动浏览阶段 · 点击节点看详情 · 选中后高亮关系
             </div>
             <div style={{ position: 'absolute', right: 14, top: 12, display: 'flex', gap: 14, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: SEMANTIC.textMuted2, pointerEvents: 'none' }}>
               <span><span style={{ color: SEMANTIC.textPrimary6, fontWeight: 600 }}>{visibleCounts.nodes}</span> 实体</span>
@@ -266,23 +269,30 @@ export default function OntologyPage() {
           </div>
           <p style={{ margin: '0 0 12px', fontSize: 12.5, color: 'oklch(0.60 0.03 165)', lineHeight: 1.6 }}>
             {inModal && extractMode === 'incremental'
-              ? `仅提取第 ${ontologyData ? Math.max(...ontologyData.nodes.map(n => n.firstTurn), 0) : 0} 轮之后的新增内容，保留已有实体。`
-              : '从会话内容中自动抽取实体和关系。系统将对话按轮次分片，并行调用 LLM 并实时返回进度。'}
+              ? '对比原始 JSONL 与已有提取文件树，仅为新增轮次创建分片并执行 LLM 抽取。新结果自动合并到已有本体数据。'
+              : '从会话内容中自动抽取实体和关系。系统将对话按轮次分片存入文件树，并行调用 LLM 并实时返回进度。'}
           </p>
-          <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary }}>
-              分片大小
+              分片大小（轮）
               <input type="number" value={shardSize} min={10} max={200} disabled={extractPhase !== 'idle'}
-                onChange={(e) => setShardSize(Number(e.target.value) || 50)}
+                onChange={(e) => setShardSize(Number(e.target.value) || 30)}
                 style={{ width: 58, padding: '4px 6px', borderRadius: 6, border: `1px solid ${SEMANTIC.borderColor}`, background: SEMANTIC.innerCardBg, color: SEMANTIC.textPrimary, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: 'center' }} />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary }}>
-              重叠
-              <input type="number" value={overlap} min={0} max={50} disabled={extractPhase !== 'idle'}
-                onChange={(e) => setOverlap(Number(e.target.value) || 5)}
-                style={{ width: 58, padding: '4px 6px', borderRadius: 6, border: `1px solid ${SEMANTIC.borderColor}`, background: SEMANTIC.innerCardBg, color: SEMANTIC.textPrimary, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: 'center' }} />
-            </label>
+            {extractMode === 'full' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: SEMANTIC.textSecondary, cursor: 'pointer' }}>
+                <input type="checkbox" checked={forceExtract} disabled={extractPhase !== 'idle'}
+                  onChange={(e) => setForceExtract(e.target.checked)}
+                  style={{ accentColor: 'oklch(0.74 0.12 165)' }} />
+                强制重建提取文件
+              </label>
+            )}
           </div>
+          {extractMode === 'incremental' && (
+            <p style={{ margin: '0 0 12px', fontSize: 11, color: 'oklch(0.52 0.04 165)', lineHeight: 1.5 }}>
+              增量模式将对比原始 JSONL 与已有文件树，仅提取新增轮次中的实体和关系，并合并到已有本体数据。
+            </p>
+          )}
           <button onClick={() => handleStartExtract(inModal ? extractMode : 'full')}
             disabled={extractPhase !== 'idle' || ontologyLoading}
             style={{ padding: '9px 20px', borderRadius: 8, cursor: extractPhase === 'idle' ? 'pointer' : 'default', border: '1px solid oklch(0.45 0.09 165)', fontFamily: "'IBM Plex Mono', monospace", background: 'oklch(0.74 0.12 165 / 0.16)', color: 'oklch(0.84 0.10 165)', fontSize: 12.5, opacity: extractPhase === 'idle' ? 1 : 0.5 }}>
@@ -290,6 +300,11 @@ export default function OntologyPage() {
           </button>
           {extractPhase !== 'idle' && (
             <div style={{ marginTop: 14 }}>
+              {extractRootDir && (
+                <div style={{ fontSize: 10.5, color: 'oklch(0.52 0.04 165)', marginBottom: 8, fontFamily: "'IBM Plex Mono', monospace", wordBreak: 'break-all', lineHeight: 1.4 }}>
+                  提取文件树: {extractRootDir}
+                </div>
+              )}
               <div style={{ fontSize: 12, color: 'oklch(0.70 0.06 165)', marginBottom: 8, fontFamily: "'IBM Plex Mono', monospace" }}>
                 {extractPhase === 'extracting'
                   ? `正在提取实体 (${extractProgress.shardsCompleted}/${extractProgress.shardsTotal} 分片)`
@@ -352,14 +367,16 @@ export default function OntologyPage() {
 
   const renderExtractModal = () => (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'oklch(0.10 0.006 265 / 0.74)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 26 }}
-      onClick={() => { if (extractPhase === 'idle') setShowExtractModal(false); }}>
+      onClick={() => setShowExtractModal(false)}>
       <div style={{ width: 'min(700px, 96vw)', maxHeight: '90vh', overflow: 'auto', background: 'oklch(0.155 0.008 265)', border: '1px solid oklch(0.36 0.014 265)', borderRadius: 18, boxShadow: '0 34px 90px oklch(0 0 0 / 0.6)' }}
         onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 18px', borderBottom: '1px solid oklch(0.28 0.012 265)', background: 'oklch(0.185 0.009 265)' }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.91 0.01 265)' }}>
-            {extractMode === 'incremental' ? '🔄 增量更新本体' : '🆕 重建本体'}
+            {extractPhase !== 'idle'
+              ? `${extractMode === 'incremental' ? '🔄 增量更新中' : '🆕 重建中'} (${extractProgress.shardsCompleted}/${extractProgress.shardsTotal})`
+              : extractMode === 'incremental' ? '🔄 增量更新本体' : '🆕 重建本体'}
           </span>
-          <button onClick={() => setShowExtractModal(false)} disabled={extractPhase !== 'idle'}
+          <button onClick={() => setShowExtractModal(false)}
             style={{ border: '1px solid oklch(0.32 0.014 265)', borderRadius: 8, width: 30, height: 30, background: 'oklch(0.22 0.01 265)', color: 'oklch(0.82 0.01 265)', cursor: 'pointer', fontSize: 14 }}>✕</button>
         </div>
         <div style={{ padding: '20px 22px', color: SEMANTIC.textMuted, fontSize: 14, lineHeight: 1.8 }}>
@@ -440,7 +457,7 @@ export default function OntologyPage() {
           <p style={{ margin: '8px 0 0', fontSize: 13, lineHeight: 1.6, color: SEMANTIC.textDesc, maxWidth: 660 }}>
             仅从用户消息与模型回复的
             <strong style={{ color: 'oklch(0.84 0.01 265)', fontWeight: 600 }}>自然语义信息</strong>
-            中抽取实体与关系（聚焦机制概念、Agent 与系统，过滤错误/函数/代码等技术工件）；随对话推进持续演化，并对同义/冲突实体做消歧。
+            中抽取实体与关系（聚焦主题、做法、原因、教训、经验法则与工具技巧）；随对话推进持续演化，并对同义/冲突实体做消歧。
           </p>
         </div>
 
@@ -479,6 +496,50 @@ export default function OntologyPage() {
           </a>
         </div>
       </header>
+
+      {/* 提取进度条（modal 关闭后缩至顶部） */}
+      {extractPhase !== 'idle' && !showExtractModal && (
+        <div
+          onClick={() => setShowExtractModal(true)}
+          style={{
+            flexShrink: 0,
+            marginTop: 10,
+            padding: '10px 16px',
+            borderRadius: 10,
+            border: '1px solid oklch(0.45 0.09 165 / 0.45)',
+            background: 'oklch(0.74 0.12 165 / 0.08)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+          }}
+        >
+          <span style={{ fontSize: 13, flexShrink: 0 }}>🤖</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, color: 'oklch(0.84 0.10 165)', fontFamily: "'IBM Plex Mono', monospace", marginBottom: 4 }}>
+              {extractPhase === 'extracting'
+                ? `提取中 ${extractProgress.shardsCompleted}/${extractProgress.shardsTotal}`
+                : extractPhase === 'merging' ? '合并分片结果...' : '构建知识图谱...'}
+            </div>
+            <div style={{ height: 3, borderRadius: 2, background: 'oklch(0.24 0.012 265)', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 2,
+                width: extractPhase === 'extracting' && extractProgress.shardsTotal > 0
+                  ? `${Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)}%`
+                  : extractPhase === 'extracting' ? '0%' : '100%',
+                background: 'oklch(0.74 0.12 165)',
+                transition: 'width .3s ease',
+              }} />
+            </div>
+          </div>
+          {extractError && (
+            <span style={{ fontSize: 11, color: 'oklch(0.76 0.13 45)', flexShrink: 0, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {extractError}
+            </span>
+          )}
+          <span style={{ fontSize: 10, color: 'oklch(0.52 0.04 165)', flexShrink: 0 }}>点击展开 ▸</span>
+        </div>
+      )}
 
       {renderBody()}
 

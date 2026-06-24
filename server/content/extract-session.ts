@@ -11,7 +11,7 @@
 export interface TurnContent {
   /** turn 编号（从 1 开始） */
   turnNum: number;
-  /** 该 turn 的格式化文本：=== TURN N (USER) ===\n...\n[THINK] ...\n[REPLY] ... */
+  /** 该 turn 的格式化文本：## 第 N 轮\n### 用户输入\n...\n### 模型\n[THINK] ...\n[REPLY] ... */
   content: string;
 }
 
@@ -36,7 +36,7 @@ interface JsonlLine {
  *
  * 提取规则：
  * - 用户消息：跳过纯 tool_result 的 content；否则开启新 turn，提取 text block
- * - 助手消息：提取 thinking block（[THINK]）和 text block（[REPLY]）
+ * - 助手消息：统一归入 ### 模型，thinking block 标记 [THINK]，text block 标记 [REPLY]
  * - 无截断，全部提取
  */
 export function extractSessionContent(rawJsonl: string): string {
@@ -82,14 +82,20 @@ export function extractContentWithTurns(rawJsonl: string): TurnContent[] {
           }
           content = texts.join('\n');
         }
+        // 跳过 task-notification（与管线 identify-turns 对齐）
+        if (content.trim().startsWith('<task-notification>')) continue;
         if (content.trim()) {
           flushTurn();
           turnNum++;
-          currentTurnParts.push(`\n=== TURN ${turnNum} (USER) ===\n${content}`);
+          currentTurnParts.push(`## 第 ${turnNum} 轮\n\n### 用户输入\n${content}`);
         }
       } else if (type === 'assistant' && msg?.content) {
         const rawContent = msg.content;
         const blocks: JsonlBlock[] = Array.isArray(rawContent) ? rawContent : [{ type: 'text', text: rawContent }];
+        // 确保有「### 模型」小节头（每轮首次遇到 assistant 消息时）
+        if (!currentTurnParts.some((p) => p.startsWith('### 模型'))) {
+          currentTurnParts.push('### 模型');
+        }
         for (const block of blocks) {
           if (block.type === 'thinking' && block.thinking) {
             currentTurnParts.push(`[THINK] ${block.thinking}`);

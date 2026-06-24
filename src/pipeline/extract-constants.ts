@@ -73,7 +73,7 @@ export interface ExtractedConstants {
  */
 export function extractConstants(logPath: string): ExtractedConstants | null {
   const raw = readFileSync(logPath, 'utf-8');
-  const lines = raw.split('\n').filter(l => l.trim());
+  const lines = raw.split('\n').filter((l: string) => l.trim());
 
   for (const line of lines) {
     let entry: any;

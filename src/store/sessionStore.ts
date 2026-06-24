@@ -48,7 +48,7 @@ export interface SessionStore {
   deleteSession: (id: string) => Promise<void>;
   fetchOntology: () => Promise<void>;
   buildOntology: (body: { candidates: unknown[]; relations: unknown[]; config?: Record<string, unknown> }) => Promise<boolean>;
-  extractOntology: (options?: { shardSize?: number; overlap?: number; fromTurn?: number }) => Promise<boolean>;
+  extractOntology: (options?: { shardSize?: number; force?: boolean; incremental?: boolean }) => Promise<boolean>;
 
   // Ontology state
   ontologyData: OntologyData | null;
@@ -57,6 +57,7 @@ export interface SessionStore {
   ontologyFetched: boolean;
   extractPhase: 'idle' | 'extracting' | 'merging' | 'building';
   extractProgress: { shardsTotal: number; shardsCompleted: number; shardDetails: Array<{ index: number; status: 'pending' | 'running' | 'done' | 'error'; candidates?: number; relations?: number; error?: string }> };
+  extractRootDir: string | null;
   extractError: string | null;
 }
 
@@ -89,6 +90,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
 
   extractPhase: 'idle' as const,
   extractProgress: { shardsTotal: 0, shardsCompleted: 0, shardDetails: [] },
+  extractRootDir: null,
   extractError: null,
 
   fetchSessions: async () => {
@@ -240,10 +242,24 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         '/api/sessions/' + currentSessionId + '/ontology/extract',
         {
           shardSize: options?.shardSize,
-          overlap: options?.overlap,
-          fromTurn: options?.fromTurn ?? 0,
+          force: options?.force ?? false,
+          incremental: options?.incremental ?? false,
         },
         {
+          onExtracted: (data) => {
+            const shardDetails = data.shards.map((s) => ({
+              index: s.index,
+              status: 'pending' as const,
+            }));
+            set({
+              extractRootDir: data.rootDir,
+              extractProgress: {
+                shardsTotal: data.shardCount,
+                shardsCompleted: 0,
+                shardDetails,
+              },
+            });
+          },
           onStart: (data) => {
             const shardDetails = Array.from({ length: data.shards }, (_, i) => ({
               index: i,

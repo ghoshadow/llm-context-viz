@@ -6,6 +6,17 @@
  */
 
 export interface SSEHandlers {
+  onExtracted?: (data: {
+    totalTurns: number;
+    shardCount: number;
+    rootDir: string;
+    shards: Array<{
+      index: number;
+      filename: string;
+      turnRange: string;
+      turnCount: number;
+    }>;
+  }) => void;
   onStart?: (data: { shards: number; totalTurns: number }) => void;
   onShardStart?: (data: { shardIndex: number }) => void;
   onShardDone?: (data: {
@@ -186,6 +197,19 @@ function dispatchEvent(
   const d = parsed as Record<string, unknown>;
 
   switch (event) {
+    case 'extracted':
+      handlers.onExtracted?.({
+        totalTurns: d.totalTurns as number,
+        shardCount: d.shardCount as number,
+        rootDir: d.rootDir as string,
+        shards: d.shards as Array<{
+          index: number;
+          filename: string;
+          turnRange: string;
+          turnCount: number;
+        }>,
+      });
+      break;
     case 'start':
       handlers.onStart?.({
         shards: d.shards as number,
