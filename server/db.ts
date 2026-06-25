@@ -132,6 +132,32 @@ export function initDb(): void {
     CREATE INDEX IF NOT EXISTS idx_ontology_card_summaries_session
       ON ontology_card_summaries(session_id, status, updated_at);
 
+    CREATE TABLE IF NOT EXISTS obsidian_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      vault_path TEXT,
+      notes_dir TEXT NOT NULL DEFAULT 'LLM知识卡片',
+      filename_template TEXT NOT NULL DEFAULT '第{{startTurn}}-{{endTurn}}轮 - {{title}} - {{topicHash}}.md',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS ontology_obsidian_syncs (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      topic_id TEXT NOT NULL,
+      vault_path TEXT NOT NULL,
+      note_path TEXT NOT NULL,
+      content_hash TEXT,
+      status TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      last_synced_at TEXT,
+      PRIMARY KEY (session_id, topic_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ontology_obsidian_syncs_session
+      ON ontology_obsidian_syncs(session_id, status, updated_at);
+
     CREATE TABLE IF NOT EXISTS scanned_files (
       path TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -154,7 +180,10 @@ export function migrate(): void {
   const userVersion = conn.pragma('user_version', { simple: true }) as number;
 
   if (userVersion < 1) {
-    conn.exec(`ALTER TABLE turns ADD COLUMN compression_reset INTEGER DEFAULT 0`);
+    const columns = conn.prepare('PRAGMA table_info(turns)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'compression_reset')) {
+      conn.exec(`ALTER TABLE turns ADD COLUMN compression_reset INTEGER DEFAULT 0`);
+    }
     conn.pragma('user_version = 1');
   }
 }

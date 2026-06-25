@@ -34,7 +34,7 @@ const EXTRACTION_RULES = `## 提取规则
 2. **粒度适中**：每条知识应是一个可独立理解和复用的单元。不要过于宽泛（如"整个项目"）或过于琐碎（如"某行代码"）。
 3. **通用性优先**：尽量剥离领域特定细节，提炼出可跨项目复用的知识。如果知识有明确适用场景，在 note 中注明。
 4. **消歧标注**：同一知识点多种表述→合并为一个实体，aliases 列出别名。后续轮次推翻之前结论→在 note 中说明演变过程。
-5. **关系概念化**：关系体现知识之间的因果、支撑、递进等逻辑联系。禁止纯技术依赖（如文件引用）关系。
+5. **关系概念化**：关系体现知识之间的因果、支撑、递进、并列、对照、归属等逻辑联系。禁止纯技术依赖（如文件引用）关系。因果/依赖/修复/推导用 directed；相关/并列/同类/对照用 undirected；互相影响/互为补充用 bidirectional。
 6. **证据驱动**：每个实体和关系必须填写 evidence。优先引用用户输入和 [REPLY]。如果只有 [REASONING_SUMMARY] 支撑，status 必须是 needs_confirmation，conf 不得高于 0.55。
 7. **过滤执行噪音**：不要把临时执行计划、文件路径、函数名、命令、报错文本本身当实体；只有它们被提炼成可复用知识时才保留。
 8. **证据 source 枚举严格限定**：evidence[].source 只能填写 user、reply、reasoning_summary、tool_summary 四个值。不要输出 assistant、model、human、thinking、tool、tool_result、user_message、assistant_final_reply 等别名；看到 [REPLY] 一律写 reply，看到 [REASONING_SUMMARY] 一律写 reasoning_summary，看到 [TOOL_SUMMARY] 一律写 tool_summary。
@@ -123,6 +123,7 @@ const OUTPUT_FORMAT = `## 输出格式
       "s": "context_assembly_calibration",
       "t": "proxy_intercept_calibration",
       "label": "包含",
+      "direction": "directed",
       "firstTurn": 12,
       "conf": 0.95,
       "evidence": [
@@ -169,6 +170,7 @@ ${ENTITY_TYPE_DEFS}
 - **s**: 源实体 id
 - **t**: 目标实体 id
 - **label**: 关系描述，简短中文
+- **direction**: directed/undirected/bidirectional。因果、依赖、修复、推导、前置条件、支撑链路用 directed；相关、并列、对照、同类、属于同一主题用 undirected；互相影响、互为补充、互相制约用 bidirectional
 - **firstTurn**: 关系首次出现轮次
 - **conf**: 置信度
 - **evidence**: 支撑该关系的证据数组

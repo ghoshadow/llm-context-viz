@@ -23,6 +23,7 @@ import type {
   OntologyType,
   OntologyEvidence,
   OntologyEvidenceStatus,
+  OntologyEdgeDirection,
 } from '../types/ontology';
 
 // ─── Type definitions for pipeline input ─────────────────────────────────────
@@ -51,6 +52,7 @@ export interface SemanticRelation {
   s: string;
   t: string;
   label: string;
+  direction?: OntologyEdgeDirection;
   firstTurn: number;
   conf: number;
   evidence?: OntologyEvidence[];
@@ -139,10 +141,13 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
   const edges: SemanticRelation[] = [];
   for (const r of input.relations) {
     if (!keptIds.has(r.s) || !keptIds.has(r.t)) continue;
-    const key = [r.s, r.t, r.label].join('::');
+    const direction = r.direction || 'directed';
+    const key = direction === 'undirected'
+      ? [[r.s, r.t].sort().join('--'), r.label, direction].join('::')
+      : [r.s, r.t, r.label, direction].join('::');
     if (seen.has(key)) continue;
     seen.add(key);
-    edges.push({ ...r });
+    edges.push({ ...r, direction });
   }
 
   // ── Stage 5b: Compute degree ──────────────────────────────────────────
@@ -203,6 +208,7 @@ export function buildOntology(input: OntologyBuildInput): OntologyBuildOutput {
     s: e.s,
     t: e.t,
     label: e.label,
+    direction: e.direction || 'directed',
     firstTurn: e.firstTurn,
     conf: e.conf,
     evidence: sortEvidence(e.evidence),

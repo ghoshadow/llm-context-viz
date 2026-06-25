@@ -69,11 +69,14 @@ export interface OntologyNode {
   aggregateId?: string;
 }
 
-/** Relationship (edge) between two entities. Directed. */
+export type OntologyEdgeDirection = 'directed' | 'undirected' | 'bidirectional';
+
+/** Relationship (edge) between two entities. */
 export interface OntologyEdge {
   s: string;
   t: string;
   label: string;
+  direction?: OntologyEdgeDirection;
   firstTurn: number;
   conf: number;
   evidence?: OntologyEvidence[];

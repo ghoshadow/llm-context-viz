@@ -118,6 +118,7 @@ export const RelationSchema = z.object({
   s: z.string().describe('源实体 id'),
   t: z.string().describe('目标实体 id'),
   label: z.string().describe('关系描述，简短中文（"根因"、"依赖"、"修复"、"派发"）'),
+  direction: z.enum(['directed', 'undirected', 'bidirectional']).default('directed').describe('关系方向：因果/依赖/修复等用 directed；相关/并列/对照/同类用 undirected；互相影响/互为补充用 bidirectional'),
   firstTurn: z.number().int().describe('关系首次出现轮次'),
   conf: z.number().min(0).max(1).describe('置信度'),
   evidence: z.array(EvidenceSchema).default([]).describe('支撑该关系的证据列表'),

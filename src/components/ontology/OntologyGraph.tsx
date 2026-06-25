@@ -95,7 +95,7 @@ const NODE_GAP_Y = 10;
 const MIN_HEIGHT = 620;
 
 function edgeKey(e: OntologyEdge): string {
-  return `${e.s}->${e.t}:${e.label}`;
+  return `${e.s}->${e.t}:${e.label}:${e.direction || 'directed'}`;
 }
 
 function truncate(text: string, max: number): string {
@@ -437,14 +437,25 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({
         <defs>
           <marker
             id="ontology-arrow"
-            viewBox="0 -4 8 8"
-            refX="7"
+            viewBox="0 -3 6 6"
+            refX="5.4"
             refY="0"
-            markerWidth="7"
-            markerHeight="7"
+            markerWidth="5"
+            markerHeight="5"
             orient="auto"
           >
-            <path d="M0,-4L8,0L0,4" fill="context-stroke" />
+            <path d="M0,-3L6,0L0,3" fill="context-stroke" />
+          </marker>
+          <marker
+            id="ontology-arrow-start"
+            viewBox="0 -3 6 6"
+            refX="0.6"
+            refY="0"
+            markerWidth="5"
+            markerHeight="5"
+            orient="auto-start-reverse"
+          >
+            <path d="M6,-3L0,0L6,3" fill="context-stroke" />
           </marker>
         </defs>
 
@@ -530,6 +541,7 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({
         <g fill="none">
           {layout.edges.map((edge) => {
             const edgeSelected = selectedDirectEdges.has(edgeKey(edge.edge));
+            const direction = edge.edge.direction || 'directed';
             return (
               <path
                 key={edgeKey(edge.edge)}
@@ -538,7 +550,8 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({
                 strokeWidth={edgeSelected ? 2.4 : 1.2 + edge.edge.conf * 1.2}
                 strokeOpacity={shouldDimEdge(edge) ? 0.10 : edgeSelected ? 0.92 : 0.34}
                 strokeDasharray={edge.crossAggregate ? '5 5' : undefined}
-                markerEnd="url(#ontology-arrow)"
+                markerStart={direction === 'bidirectional' ? 'url(#ontology-arrow-start)' : undefined}
+                markerEnd={direction === 'directed' || direction === 'bidirectional' ? 'url(#ontology-arrow)' : undefined}
               />
             );
           })}

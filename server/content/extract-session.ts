@@ -35,8 +35,6 @@ interface JsonlLine {
   message?: JsonlMessage;
 }
 
-const MAX_USER_CHARS = 12_000;
-const MAX_REPLY_CHARS = 8_000;
 const MAX_REASONING_SUMMARY_CHARS = 1_600;
 const MAX_TOOL_SUMMARY_CHARS = 1_200;
 const MAX_LINES_PER_SOURCE = 10;
@@ -69,12 +67,16 @@ const KNOWLEDGE_MARKERS = [
   '约束',
 ];
 
-function compactText(text: string, maxChars: number): string {
-  const normalized = text
+function normalizeText(text: string): string {
+  return text
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function compactText(text: string, maxChars: number): string {
+  const normalized = normalizeText(text);
   if (normalized.length <= maxChars) return normalized;
 
   const head = normalized.slice(0, Math.floor(maxChars * 0.72)).trim();
@@ -253,7 +255,7 @@ export function extractContentWithTurns(rawJsonl: string): TurnContent[] {
         if (content.trim()) {
           flushTurn();
           turnNum++;
-          currentTurnParts.push(`## 第 ${turnNum} 轮\n\n### 用户输入\n${compactText(content, MAX_USER_CHARS)}`);
+          currentTurnParts.push(`## 第 ${turnNum} 轮\n\n### 用户输入\n${normalizeText(content)}`);
         }
       } else if (type === 'assistant' && msg?.content) {
         const rawContent = msg.content;
@@ -266,7 +268,7 @@ export function extractContentWithTurns(rawJsonl: string): TurnContent[] {
           if (block.type === 'thinking' && block.thinking) {
             currentReasoning.push(block.thinking);
           } else if (block.type === 'text' && block.text) {
-            currentTurnParts.push(`[REPLY] ${compactText(block.text, MAX_REPLY_CHARS)}`);
+            currentTurnParts.push(`[REPLY] ${normalizeText(block.text)}`);
           }
         }
       }

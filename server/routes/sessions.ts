@@ -6,9 +6,12 @@ import { getDb } from '../db';
 import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
 import { buildOntology } from '../../src/pipeline/build-ontology';
 import { enrichWithSubAgents } from './scanner';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { getKnowledgeCardContext, type ObsidianOntologyDataLike } from '../obsidian/card-context';
+import { rejectUntrustedLocalRequest } from '../obsidian/local-request';
+import { resolveObsidianNotePath, validateConfig, writeObsidianCard } from '../obsidian/sync';
 
 const router = Router();
 
@@ -44,6 +47,7 @@ interface OntologyEdgeLike {
   s: string;
   t: string;
   label: string;
+  direction?: 'directed' | 'undirected' | 'bidirectional';
   firstTurn: number;
   conf?: number;
 }
@@ -115,7 +119,10 @@ function buildKnowledgeCardSummaryPrompt(data: OntologyDataLike, topicId: string
   const edgesText = cardEdges.map((edge) => {
     const source = nodeById.get(edge.s);
     const target = nodeById.get(edge.t);
-    return `- ${source?.label || edge.s} --${edge.label}--> ${target?.label || edge.t}（第${edge.firstTurn}轮）`;
+    const dir = edge.direction === 'undirected' ? `--${edge.label}--`
+      : edge.direction === 'bidirectional' ? `<--${edge.label}-->`
+        : `--${edge.label}-->`;
+    return `- ${source?.label || edge.s} ${dir} ${target?.label || edge.t}（第${edge.firstTurn}轮）`;
   }).join('\n');
 
   return `你是一个负责把对话本体沉淀整理成知识卡片总结的中文知识工程助手。
@@ -227,6 +234,58 @@ function getCardSummaryStatus(sessionId: string, topicId: string): {
     startedAt: row.started_at,
     completedAt: row.completed_at,
   };
+}
+
+function getObsidianConfig(): { vaultPath: string | null; notesDir: string; filenameTemplate: string } {
+  const row = getDb().prepare(`
+    SELECT vault_path, notes_dir, filename_template
+    FROM obsidian_config
+    WHERE id = 1
+  `).get() as { vault_path: string | null; notes_dir: string; filename_template: string } | undefined;
+
+  return {
+    vaultPath: row?.vault_path || null,
+    notesDir: row?.notes_dir || 'LLM知识卡片',
+    filenameTemplate: row?.filename_template || '第{{startTurn}}-{{endTurn}}轮 - {{title}} - {{topicHash}}.md',
+  };
+}
+
+function getSavedCardSummary(sessionId: string, topicId: string): string | null {
+  const row = getDb().prepare(`
+    SELECT summary
+    FROM ontology_card_summaries
+    WHERE session_id = ? AND topic_id = ? AND status = 'done'
+  `).get(sessionId, topicId) as { summary: string | null } | undefined;
+
+  return row?.summary || null;
+}
+
+interface ObsidianSyncRecord {
+  topic_id: string;
+  vault_path: string;
+  note_path: string;
+  content_hash: string | null;
+  status: string;
+  error: string | null;
+  last_synced_at: string | null;
+  updated_at: string | null;
+}
+
+function getObsidianSyncRecord(sessionId: string, topicId: string): ObsidianSyncRecord | undefined {
+  return getDb().prepare(`
+    SELECT topic_id, vault_path, note_path, content_hash, status, error, last_synced_at, updated_at
+    FROM ontology_obsidian_syncs
+    WHERE session_id = ? AND topic_id = ?
+  `).get(sessionId, topicId) as ObsidianSyncRecord | undefined;
+}
+
+function syncRecordMatchesCurrentVault(row: ObsidianSyncRecord | undefined, config: ReturnType<typeof getObsidianConfig>): boolean {
+  if (!row || !config.vaultPath) return false;
+  try {
+    return realpathSync(row.vault_path) === realpathSync(config.vaultPath);
+  } catch {
+    return false;
+  }
 }
 
 const cardSummaryJobs = new Set<string>();
@@ -1193,6 +1252,126 @@ router.post('/:id/ontology/summarize-card', (req, res) => {
       return res.status(400).json({ error: message });
     }
     return res.status(500).json({ error: '生成知识总结时出错: ' + message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /:id/ontology/obsidian-card/:topicId — recover Obsidian sync status
+// ---------------------------------------------------------------------------
+
+router.get('/:id/ontology/obsidian-card/:topicId', (req, res) => {
+  try {
+    if (rejectUntrustedLocalRequest(req, res)) return;
+    const row = getObsidianSyncRecord(req.params.id, req.params.topicId);
+    const config = getObsidianConfig();
+    const validation = validateConfig(config);
+    let status = row?.status || 'not_synced';
+    let notePath = row?.note_path || null;
+    let error = row?.error || (validation.ok ? null : validation.error);
+
+    if (row && validation.ok) {
+      if (!syncRecordMatchesCurrentVault(row, config)) {
+        status = 'not_synced';
+        notePath = null;
+        error = '当前 Obsidian Vault 与上次同步记录不一致';
+      } else if (row.note_path) {
+        const resolved = resolveObsidianNotePath(config, row.note_path);
+        if (!resolved.ok || !existsSync(resolved.absolutePath)) {
+          status = 'not_synced';
+          notePath = row.note_path;
+          error = resolved.ok ? '上次同步的 Obsidian 笔记文件不存在' : resolved.error;
+        }
+      }
+    }
+
+    return res.json({
+      topicId: req.params.topicId,
+      configured: validation.ok,
+      status,
+      notePath,
+      error,
+      lastSyncedAt: row?.last_synced_at || null,
+      updatedAt: row?.updated_at || null,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('GET /:id/ontology/obsidian-card/:topicId error:', err);
+    return res.status(500).json({ error: '获取 Obsidian 同步状态失败: ' + message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/ontology/obsidian-card/:topicId — sync one topic card to Obsidian
+// ---------------------------------------------------------------------------
+
+router.post('/:id/ontology/obsidian-card/:topicId', (req, res) => {
+  const sessionId = req.params.id;
+  const topicId = req.params.topicId;
+
+  try {
+    if (rejectUntrustedLocalRequest(req, res)) return;
+    const row = getDb()
+      .prepare('SELECT ontology_json FROM ontology WHERE session_id = ?')
+      .get(sessionId) as { ontology_json: string } | undefined;
+    if (!row) return res.status(404).json({ error: '该会话尚无本体数据' });
+
+    const data = JSON.parse(row.ontology_json) as ObsidianOntologyDataLike;
+    const context = getKnowledgeCardContext(data, topicId);
+    const config = getObsidianConfig();
+    const summary = getSavedCardSummary(sessionId, topicId);
+    const previousSync = getObsidianSyncRecord(sessionId, topicId);
+    const previousRelativePath = syncRecordMatchesCurrentVault(previousSync, config)
+      ? previousSync?.note_path
+      : null;
+    const result = writeObsidianCard({ config, sessionId, topicId, context, summary, previousRelativePath });
+
+    getDb().prepare(`
+      INSERT INTO ontology_obsidian_syncs (
+        session_id, topic_id, vault_path, note_path, content_hash, status, error,
+        last_synced_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, 'synced', NULL, datetime('now'), datetime('now'))
+      ON CONFLICT(session_id, topic_id) DO UPDATE SET
+        vault_path = excluded.vault_path,
+        note_path = excluded.note_path,
+        content_hash = excluded.content_hash,
+        status = 'synced',
+        error = NULL,
+        last_synced_at = datetime('now'),
+        updated_at = datetime('now')
+    `).run(sessionId, topicId, config.vaultPath, result.relativePath, result.hash);
+
+    return res.json({
+      topicId,
+      configured: true,
+      status: 'synced',
+      notePath: result.relativePath,
+      skipped: result.skipped,
+      error: null,
+      lastSyncedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      const config = getObsidianConfig();
+      if (config.vaultPath) {
+        getDb().prepare(`
+          INSERT INTO ontology_obsidian_syncs (
+            session_id, topic_id, vault_path, note_path, status, error, updated_at
+          )
+          VALUES (?, ?, ?, '', 'error', ?, datetime('now'))
+          ON CONFLICT(session_id, topic_id) DO UPDATE SET
+            status = 'error',
+            error = excluded.error,
+            updated_at = datetime('now')
+        `).run(sessionId, topicId, config.vaultPath, message);
+      }
+    } catch {
+      // Preserve the original sync error for the response.
+    }
+
+    console.error('POST /:id/ontology/obsidian-card/:topicId error:', err);
+    return res.status(500).json({ error: '同步到 Obsidian 失败: ' + message });
   }
 });
 

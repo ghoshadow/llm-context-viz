@@ -49,6 +49,7 @@ const HEADER = `# 会话上下文本体提取任务
 | \`s\` | string | 源实体 id |
 | \`t\` | string | 目标实体 id |
 | \`label\` | string | 关系描述，简短中文（"根因"、"依赖"、"修复"、"派发"） |
+| \`direction\` | string | directed / undirected / bidirectional。因果、依赖、修复、推导用 directed；相关、并列、对照、同类用 undirected；互相影响、互为补充用 bidirectional |
 | \`firstTurn\` | number | 关系首次出现轮次 |
 | \`conf\` | number | 置信度 |
 
@@ -75,6 +76,7 @@ const HEADER = `# 会话上下文本体提取任务
       "s": "context_assembly",
       "t": "token_estimation_calibration",
       "label": "包含",
+      "direction": "directed",
       "firstTurn": 12,
       "conf": 0.95
     }
@@ -97,7 +99,7 @@ const HEADER = `# 会话上下文本体提取任务
 
 4. **消歧标注**：同一概念多种称谓→合并为一个实体，\`aliases\` 列出所有别名。对话中假设被推翻→在 \`note\` 中说明消歧过程。
 
-5. **关系概念化**：关系体现知识之间的包含、因果、支撑、递进、修正等逻辑联系。边应连接知识实体，而不是技术工件。
+5. **关系概念化**：关系体现知识之间的包含、因果、支撑、递进、修正、并列、对照等逻辑联系。边应连接知识实体，而不是技术工件。有明确因果/依赖/修复方向时用 directed；只是相关/并列/对照时用 undirected；互相影响或互为补充时用 bidirectional。
 
 6. **证据驱动**：每个实体和关系应有 evidence。只有 \`user\` 或 \`reply\` 明确支持时才能高置信；只有 \`reasoning_summary\` 支撑时，置信度不得高于 0.55。
 

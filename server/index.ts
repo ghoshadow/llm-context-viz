@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import sessionsRouter from './routes/sessions';
 import scannerRouter from './routes/scanner';
 import calibrateRouter from './routes/calibrate';
+import obsidianRouter from './routes/obsidian';
 import { initDb, migrate } from './db';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -34,6 +35,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/scanner', scannerRouter);
 app.use('/api/calibrate', calibrateRouter);
+app.use('/api/obsidian', obsidianRouter);
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 
