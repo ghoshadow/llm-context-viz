@@ -3,7 +3,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { getDb } from '../db';
-import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
+import { runPipelineOnContent, persistTurns } from '../services/pipeline-service';
 import { buildOntology } from '../../src/pipeline/build-ontology';
 import { enrichWithSubAgents } from './scanner';
 import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync } from 'fs';
@@ -679,12 +679,7 @@ router.post('/upload', upload.single('file'), (req, res) => {
     }
 
     // Run the full pipeline
-    loadCalibratedConstants();
-    try {
-      const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
-      if (existsSync(globalMd)) setMemoryChars(readFileSync(globalMd, 'utf-8').length);
-    } catch {}
-    const { summary, turns } = runPipeline(content, originalFilename);
+    const { summary, turns } = runPipelineOnContent(content, originalFilename);
 
     const sessionId = hash.substring(0, 16);
 
@@ -709,14 +704,6 @@ router.post('/upload', upload.single('file'), (req, res) => {
       )
     `);
 
-    const insertTurn = db.prepare(`
-      INSERT INTO turns (
-        id, session_id, turn_index, prompt, timestamp, asst_reqs,
-        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, cum_tools_json, compression_reset, dur_ms, model_ms, tool_ms, sub_ms,
-        step_count, comp_json, delta_json, tools_json, segs_json, longest_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
     const txn = db.transaction(() => {
       insertSession.run(
         sessionId, originalFilename, hash,
@@ -729,20 +716,7 @@ router.post('/upload', upload.single('file'), (req, res) => {
         JSON.stringify(summary.categories), JSON.stringify(summary.tools), JSON.stringify(summary.series),
         content,
       );
-
-      for (const turn of turns) {
-        const turnId = `${sessionId}-${turn.i}`;
-        insertTurn.run(
-          turnId, sessionId, turn.i, turn.prompt, turn.ts, turn.asstReqs,
-          turn.maxInput, turn.maxCacheHit ?? 0, turn.maxReqIdx ?? 0, turn.maxReqStep ?? 0,
-          turn.outTok, turn.cumTotal, (turn as any).cumCacheHit ?? 0,
-          JSON.stringify((turn as any).cumTools ?? {}),
-          (turn as any).compressionReset ? 1 : 0,
-          turn.durMs, turn.modelMs, turn.toolMs, turn.subMs, turn.stepCount,
-          JSON.stringify(turn.comp), JSON.stringify(turn.delta), JSON.stringify(turn.tools),
-          JSON.stringify(turn.segs), JSON.stringify(turn.longest),
-        );
-      }
+      persistTurns(sessionId, turns);
     });
 
     txn();
@@ -879,45 +853,16 @@ router.post('/:id/refresh', (req, res) => {
     const sids = req.params.id;
 
     // Re-run pipeline
-    loadCalibratedConstants();
-    let memChars = 0;
-    const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
-    if (existsSync(globalMd)) memChars += readFileSync(globalMd, 'utf-8').length;
-    try {
-      const firstLine = JSON.parse(content.split('\n')[0]!);
-      const cwd = firstLine.cwd;
-      if (cwd) { const pm = join(cwd, '.claude', 'CLAUDE.md'); if (existsSync(pm)) memChars += readFileSync(pm, 'utf-8').length; }
-    } catch {}
-    setMemoryChars(memChars);
-
-    const { summary, turns } = runPipeline(content, session.filename);
+    const { summary, turns } = runPipelineOnContent(content, session.filename);
     if (sessDir) enrichWithSubAgents(turns, sessDir);
 
     // Replace turns in a transaction
     const deleteTurns = db.prepare('DELETE FROM turns WHERE session_id = ?');
-    const insertTurn = db.prepare(`
-      INSERT INTO turns (
-        id, session_id, turn_index, prompt, timestamp, asst_reqs,
-        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, cum_tools_json, compression_reset, dur_ms, model_ms, tool_ms, sub_ms,
-        step_count, comp_json, delta_json, tools_json, segs_json, longest_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
     const updateSession = db.prepare('UPDATE sessions SET turn_count = ?, total_requests = ?, peak_tokens = ?, peak_cache_hit = ?, peak_turn_idx = ?, peak_step = ?, total_output = ?, context_limit = ?, categories_json = ?, tools_json = ?, series_json = ?, updated_at = datetime(\'now\') WHERE id = ?');
 
     db.transaction(() => {
       deleteTurns.run(sids);
-      for (const turn of turns) {
-        insertTurn.run(
-          `${sids}_${turn.i}`, sids, turn.i, turn.prompt, turn.ts, turn.asstReqs,
-          turn.maxInput, turn.maxCacheHit ?? 0, turn.maxReqIdx ?? 0, turn.maxReqStep ?? 0,
-          turn.outTok, turn.cumTotal, (turn as any).cumCacheHit ?? 0,
-          JSON.stringify((turn as any).cumTools ?? {}),
-          (turn as any).compressionReset ? 1 : 0,
-          turn.durMs, turn.modelMs, turn.toolMs, turn.subMs, turn.stepCount,
-          JSON.stringify(turn.comp), JSON.stringify(turn.delta), JSON.stringify(turn.tools),
-          JSON.stringify(turn.segs), JSON.stringify(turn.longest),
-        );
-      }
+      persistTurns(sids, turns);
       updateSession.run(
         turns.length, summary.session.requests, summary.session.peakTokens,
         summary.session.peakCacheHit, summary.session.peakTurnIdx, summary.session.peakStep,

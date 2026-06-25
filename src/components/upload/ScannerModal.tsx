@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUIStore } from '../../store/uiStore';
 import { SEMANTIC } from '../../styles/theme';
-import { fmtK } from '../../utils/format';
+import { fmtK, fmtDateShort } from '../../utils/format';
 
 interface FoundFile {
   path: string;
@@ -129,11 +129,6 @@ export default function ScannerModal() {
     }
   }, [fetchSessions, setPage, selectSession, files, status, setScanFiles]);
 
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-  };
-
   return (
     <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget) closeScanner(); }}>
       <div style={{ ...S.card, position: 'relative' } as React.CSSProperties}>
@@ -187,7 +182,7 @@ export default function ScannerModal() {
                   )}
                 </div>
                 <span style={S.meta}>{fmtK(f.size)}B</span>
-                <span style={S.meta}>{formatDate(f.modified)}</span>
+                <span style={S.meta}>{fmtDateShort(f.modified)}</span>
                 {f.imported ? (
                   <span style={S.importedTag}>已导入</span>
                 ) : (

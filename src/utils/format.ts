@@ -60,9 +60,7 @@ export function fmtPct(n: number, total: number): string {
 }
 
 /**
- * Format an ISO timestamp as "MM-DD HH:MM" (Chinese locale neutral).
- *
- * Uses `zh-CN` locale to ensure numeric month/day (no textual month names).
+ * Format an ISO timestamp as "MM-DD HH:MM".
  *
  * @example fmtDate("2026-06-15T14:30:00Z") => "06-15 14:30"
  */
@@ -73,4 +71,32 @@ export function fmtDate(iso: string): string {
   const HH = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${MM}-${DD} ${HH}:${mm}`;
+}
+
+/**
+ * Format an ISO timestamp as date only (zh-CN locale).
+ *
+ * @example fmtDateOnly("2026-06-15T14:30:00Z") => "2026/06/15"
+ */
+export function fmtDateOnly(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
+/**
+ * Compact "M/D HH:MM" format — used where space is tight.
+ *
+ * @example fmtDateShort("2026-06-15T14:30:00Z") => "6/15 14:30"
+ */
+export function fmtDateShort(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }

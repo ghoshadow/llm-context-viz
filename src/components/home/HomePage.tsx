@@ -3,27 +3,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useUIStore } from '../../store/uiStore';
 import type { SessionListItem } from '../../types/session';
 import { SEMANTIC } from '../../styles/theme';
-
-// ─── Helper: format peak tokens ─────────────────────────────────────────
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-  return String(n);
-}
-
-function fmtDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-  } catch {
-    return iso.slice(0, 10);
-  }
-}
+import { fmtK, fmtDateOnly } from '../../utils/format';
 
 // ─── Styles (inline objects) ────────────────────────────────────────────
 
@@ -281,7 +261,7 @@ function SessionCard({ session, onSelect, onDelete }: {
         <div style={cardS.statItem}>
           <span style={cardS.statLabel}>峰值 Tokens</span>
           <span style={{ ...cardS.statValue, ...cardS.peakValue }}>
-            {fmtTokens(session.peak_tokens)}
+            {fmtK(session.peak_tokens)}
           </span>
         </div>
         <div style={cardS.statItem}>
@@ -291,7 +271,7 @@ function SessionCard({ session, onSelect, onDelete }: {
       </div>
 
       {/* Created date */}
-      <div style={cardS.date}>{fmtDate(session.created_at)}</div>
+      <div style={cardS.date}>{fmtDateOnly(session.created_at)}</div>
     </div>
   );
 }

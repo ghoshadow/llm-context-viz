@@ -47,10 +47,6 @@ interface ObsidianSyncStatus {
   skipped?: boolean;
 }
 
-function fmt(n: number): string {
-  return Math.round(n).toLocaleString('en-US');
-}
-
 function confColor(c: number): string {
   if (c >= 0.85) return 'oklch(0.78 0.12 150)';
   if (c >= 0.7) return 'oklch(0.80 0.11 95)';

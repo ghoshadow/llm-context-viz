@@ -14,9 +14,9 @@ const router = Router();
 // Constants file path (next to compute-context.ts)
 const CONSTANTS_FILE = join(__dirname, '..', '..', 'src', 'pipeline', 'system-constants.json');
 
-// ── POST /calibrate — upload captured API log and extract constants ──
+// ── POST / — upload captured API log and extract constants ──
 
-router.post('/calibrate', upload.single('file'), (req, res) => {
+router.post('/', upload.single('file'), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: '缺少文件' });
@@ -33,9 +33,9 @@ router.post('/calibrate', upload.single('file'), (req, res) => {
   }
 });
 
-// ── PUT /calibrate/apply — save extracted constants to disk ──
+// ── PUT /apply — save extracted constants to disk ──
 
-router.put('/calibrate/apply', (req, res) => {
+router.put('/apply', (req, res) => {
   try {
     const body = req.body as { summary?: ExtractedConstants['summary']; ccVersion?: string; model?: string };
     if (!body.summary) {
@@ -56,9 +56,9 @@ router.put('/calibrate/apply', (req, res) => {
   }
 });
 
-// ── GET /calibrate/current — read current calibrated constants ──
+// ── GET /current — read current calibrated constants ──
 
-router.get('/calibrate/current', (_req, res) => {
+router.get('/current', (_req, res) => {
   try {
     if (existsSync(CONSTANTS_FILE)) {
       const data = JSON.parse(readFileSync(CONSTANTS_FILE, 'utf-8'));

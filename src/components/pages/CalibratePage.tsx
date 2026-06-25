@@ -113,7 +113,7 @@ export default function CalibratePage() {
 
   // Load current constants on mount
   useEffect(() => {
-    get<CurrentConstants>('/calibrate/calibrate/current').then(setCurrentConstants).catch(() => {});
+    get<CurrentConstants>('/calibrate/current').then(setCurrentConstants).catch(() => {});
   }, []);
 
   // Handle file drop
@@ -136,7 +136,7 @@ export default function CalibratePage() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const data = await post<ExtractedResult>('/calibrate/calibrate', formData);
+      const data = await post<ExtractedResult>('/calibrate', formData);
       setResult(data);
     } catch (err) {
       setError((err as Error).message);
@@ -150,7 +150,7 @@ export default function CalibratePage() {
     if (!result) return;
     setApplying(true);
     try {
-      await put('/calibrate/calibrate/apply', {
+      await put('/calibrate/apply', {
         summary: result.summary,
         ccVersion: result.ccVersion,
         model: result.model,

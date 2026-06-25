@@ -4,7 +4,7 @@ import { join, basename } from 'path';
 import { homedir } from 'os';
 import crypto from 'crypto';
 import { getDb } from '../db';
-import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
+import { runPipelineOnContent, persistTurns } from '../services/pipeline-service';
 
 const router = Router();
 
@@ -399,27 +399,7 @@ router.post('/import', (req, res) => {
 
     const filename = basename(filePath);
 
-    // Read actual CLAUDE.md files to calibrate MEMORY category
-    let memChars = 0;
-    try {
-      const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
-      if (existsSync(globalMd)) {
-        memChars += readFileSync(globalMd, 'utf-8').length;
-      }
-      // Extract cwd from first JSONL line for project-level CLAUDE.md
-      const firstLine = JSON.parse(content.split('\n')[0]!);
-      const cwd = firstLine.cwd;
-      if (cwd) {
-        const projMd = join(cwd, '.claude', 'CLAUDE.md');
-        if (existsSync(projMd)) {
-          memChars += readFileSync(projMd, 'utf-8').length;
-        }
-      }
-    } catch { /* keep default */ }
-    setMemoryChars(memChars);
-    loadCalibratedConstants(); // re-read system-constants.json (may have been updated via UI)
-
-    const { summary, turns } = runPipeline(content, filename);
+    const { summary, turns } = runPipelineOnContent(content, filename);
     const sessionId = hash.substring(0, 16);
 
     // Extract ai-title from raw JSONL
@@ -463,47 +443,7 @@ router.post('/import', (req, res) => {
     );
 
     // Insert turns
-    const insertTurn = db.prepare(`
-      INSERT INTO turns (
-        id, session_id, turn_index, prompt, timestamp, asst_reqs,
-        max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, cum_tools_json, compression_reset, dur_ms, model_ms, tool_ms, sub_ms,
-        step_count, comp_json, delta_json, tools_json, segs_json, longest_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertTurns = db.transaction(() => {
-      for (const turn of turns) {
-        insertTurn.run(
-          `${sessionId}_${turn.i}`,
-          sessionId,
-          turn.i,
-          turn.prompt,
-          turn.ts,
-          turn.asstReqs,
-          turn.maxInput,
-          turn.maxCacheHit ?? 0,
-          turn.maxReqIdx ?? 0,
-          turn.maxReqStep ?? 0,
-          turn.outTok,
-          turn.cumTotal,
-          (turn as any).cumCacheHit ?? 0,
-          JSON.stringify((turn as any).cumTools ?? {}),
-          (turn as any).compressionReset ? 1 : 0,
-          turn.durMs,
-          turn.modelMs,
-          turn.toolMs,
-          turn.subMs,
-          turn.stepCount,
-          JSON.stringify(turn.comp),
-          JSON.stringify(turn.delta),
-          JSON.stringify(turn.tools),
-          JSON.stringify(turn.segs),
-          JSON.stringify(turn.longest),
-        );
-      }
-    });
-
-    insertTurns();
+    db.transaction(() => persistTurns(sessionId, turns))();
 
     res.status(201).json({
       imported: true,
