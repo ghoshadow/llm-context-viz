@@ -12,11 +12,9 @@ import type { OntologyData } from '../types/ontology';
 export interface SessionStore {
   sessions: SessionListItem[];
   sessionsLoading: boolean;
-  sessionsError: string | null;
 
   currentSessionId: string | null;
   currentSession: SessionDetail | null;
-  currentSessionLoading: boolean;
 
   turns: TurnSummary[];
   turnsLoading: boolean;
@@ -69,11 +67,9 @@ export interface SessionStore {
 export const useSessionStore = create<SessionStore>((set, getState) => ({
   sessions: [],
   sessionsLoading: false,
-  sessionsError: null,
 
   currentSessionId: null,
   currentSession: null,
-  currentSessionLoading: false,
 
   turns: [],
   turnsLoading: false,
@@ -103,27 +99,24 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   extractError: null,
 
   fetchSessions: async () => {
-    set({ sessionsLoading: true, sessionsError: null });
+    set({ sessionsLoading: true });
     try {
       const sessions = await get<SessionListItem[]>('/sessions');
       set({ sessions, sessionsLoading: false });
     } catch (err) {
-      set({
-        sessionsLoading: false,
-        sessionsError: err instanceof Error ? err.message : 'Unknown error',
-      });
+      set({ sessionsLoading: false });
     }
   },
 
   selectSession: async (id: string) => {
-    set({ currentSessionId: id, currentSessionLoading: true, ontologyData: null, ontologyError: null, ontologyFetched: false });
+    set({ currentSessionId: id, ontologyData: null, ontologyError: null, ontologyFetched: false });
     try {
       const currentSession = await get<SessionDetail>(`/sessions/${id}`);
-      set({ currentSession, currentSessionLoading: false });
+      set({ currentSession });
       await getState().fetchTurns(id);
       await getState().fetchOntology();
     } catch {
-      set({ currentSessionLoading: false });
+      // silently ignore — the UI handles errors through currentSession null
     }
   },
 

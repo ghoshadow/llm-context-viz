@@ -69,7 +69,6 @@ export const SEMANTIC: Record<string, string> = {
   cardBg:       'oklch(0.185 0.009 265 / 0.7)',
   cardBgHover:  'oklch(0.20 0.01 265 / 0.6)',      // button / card hover tint
   innerCardBg:  'oklch(0.20 0.01 265 / 0.5)',      // nested stat card background
-  innerCardBg2: 'oklch(0.21 0.01 265 / 0.7)',       // section header bg in step detail
 
   // Selection
   selectionBg: 'oklch(0.74 0.13 60 / 0.30)',
@@ -82,22 +81,15 @@ export const SEMANTIC: Record<string, string> = {
   borderSubtle:   'oklch(0.26 0.012 265)',           // Thin separators (legend rows)
   borderSubtle2:  'oklch(0.26 0.012 265 / 0.6)',     // Slightly transparent variant
   borderSubtle3:  'oklch(0.26 0.012 265 / 0.55)',    // Legend row separator
-  borderSubtle4:  'oklch(0.26 0.012 265 / 0.5)',     // Section header border
   borderBarBg:    'oklch(0.32 0.014 265)',           // Hero/timeline bar border
   borderAccent:   'oklch(0.45 0.10 60)',             // Amber accent border
-  borderAccent2:  'oklch(0.55 0.10 60)',             // Selected list-item border
-  borderAccent3:  'oklch(0.50 0.10 60 / 0.5)',       // Overflow warning border
-  borderAccent4:  'oklch(0.45 0.08 60)',             // Selected step border
   borderOk:       'oklch(0.45 0.08 150 / 0.4)',      // Ok/check border
   borderInner:    'oklch(0.28 0.012 265)',           // Inner stat-card border
   borderTip:      'oklch(0.40 0.014 265)',           // Tooltip border
   borderInput:    'oklch(0.26 0.012 265)',           // Prompt input bg border
-  borderBtn:      'oklch(0.30 0.014 265)',           // Button border (nav)
 
   // Bar internals
   barBg:          'oklch(0.24 0.01 265)',            // Progress bar track
-  barBg2:         'oklch(0.26 0.01 265)',            // Legend mini-bar track
-  barBg3:         'oklch(0.22 0.01 265)',            // Model/tool split bar track
   barInsetBoxShadow: 'inset 0 1px 0 oklch(1 0 0 / 0.04)',
   barSeparator:   'oklch(0.16 0.008 265 / 0.5)',    // Segment divider
   barSeparator2:  'oklch(0.16 0.008 265 / 0.45)',   // Lighter segment divider
@@ -136,20 +128,6 @@ export const SEMANTIC: Record<string, string> = {
   textMiniLabel: 'oklch(0.58 0.012 265)',             // Mini label (model / requests / etc.)
 };
 
-// ─── Scrollbar ───────────────────────────────────────────────────────
-
-export const SCROLLBAR = {
-  thumb:  'oklch(0.34 0.014 265)',
-  track:  'transparent',
-} as const;
-
-// ─── Tooltip / Box Shadow ─────────────────────────────────────────────
-
-export const TOOLTIP = {
-  bg:          'oklch(0.26 0.012 265)',
-  boxShadow:   '0 8px 24px oklch(0 0 0 / 0.4)',
-};
-
 // ─── Overflow Warning Colors ─────────────────────────────────────────
 
 export const OVERFLOW = {
@@ -165,10 +143,6 @@ export const OK_STATE = {
   bg:      'oklch(0.70 0.12 150 / 0.08)',
   border:  'oklch(0.45 0.08 150 / 0.4)',
 } as const;
-
-// ─── Sub-agent Highlight ──────────────────────────────────────────────
-
-export const SUBAGENT_GLOW = '0 0 12px oklch(0.74 0.13 60 / 0.7)';
 
 // ─── Selected / Active List Item ──────────────────────────────────────
 
@@ -214,10 +188,6 @@ export const LABELS: Record<string, string> = {
   subagent:    '子 Agent（Task）',
   mcp:         'MCP 指令',
 };
-
-// ─── Estimated Categories ─────────────────────────────────────────────
-
-export const EST = new Set<string>(['sysPrompt', 'tools']);
 
 // ─── Delta Labels (subset used in Turn Inspector delta panel) ─────────
 

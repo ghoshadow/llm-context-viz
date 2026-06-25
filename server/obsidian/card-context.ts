@@ -38,19 +38,13 @@ export interface ObsidianOntologyDataLike {
   types?: Array<{ key: string; label: string; color?: string }>;
 }
 
-export interface ObsidianTypeLike {
-  key: string;
-  label: string;
-  color?: string;
-}
-
 export interface KnowledgeCardContext {
   topic: ObsidianNodeLike;
   aggregate: ObsidianAggregateLike | null;
   nodes: ObsidianNodeLike[];
   edges: ObsidianEdgeLike[];
   evidence: OntologyEvidence[];
-  types?: ObsidianTypeLike[];
+  types?: Array<{ key: string; label: string; color?: string }>;
   title: string;
   startTurn: number;
   endTurn: number;

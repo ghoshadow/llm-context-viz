@@ -257,5 +257,3 @@ export function buildEntityExtractorDef(depth: ExtractionDepth): AgentDefinition
     prompt: buildEntityExtractorPrompt(depth),
   };
 }
-
-export const entityExtractorDef: AgentDefinition = buildEntityExtractorDef('refined');

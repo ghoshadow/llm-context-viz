@@ -20,7 +20,7 @@ import type {
 // Derived data types for child components
 // ============================================================================
 
-export interface BarSegment {
+interface BarSegment {
   key: string;
   color: string;
   pct: number;
@@ -29,7 +29,7 @@ export interface BarSegment {
   title: string;
 }
 
-export interface TreeCell {
+interface TreeCell {
   key: string;
   label: string;
   color: string;
@@ -47,7 +47,7 @@ export interface TreeCell {
   onEnter: () => void;
 }
 
-export interface LegendRow {
+interface LegendRow {
   key: string;
   label: string;
   color: string;
@@ -58,13 +58,13 @@ export interface LegendRow {
   onEnter: () => void;
 }
 
-export interface GroupMember {
+interface GroupMember {
   label: string;
   color: string;
   pctFmt: string;
 }
 
-export interface GroupCard {
+interface GroupCard {
   key: string;
   label: string;
   desc: string;
@@ -75,7 +75,7 @@ export interface GroupCard {
   members: GroupMember[];
 }
 
-export interface ToolRow {
+interface ToolRow {
   name: string;
   calls: number;
   resultFmt: string;

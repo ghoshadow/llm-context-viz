@@ -4,7 +4,7 @@ import { join, basename } from 'path';
 import { homedir } from 'os';
 import crypto from 'crypto';
 import { getDb } from '../db';
-import { runPipelineOnContent, persistTurns } from '../services/pipeline-service';
+import { createSession } from '../services/pipeline-service';
 
 const router = Router();
 
@@ -398,52 +398,15 @@ router.post('/import', (req, res) => {
     }
 
     const filename = basename(filePath);
-
-    const { summary, turns } = runPipelineOnContent(content, filename);
-    const sessionId = hash.substring(0, 16);
-
-    // Extract ai-title from raw JSONL
     const aiTitle = extractSessionTitle(content);
+
+    const { sessionId, summary, turns } = createSession({
+      jsonlContent: content, filename, hash, aiTitle, rawJsonl: null,
+    });
 
     // Enrich turns with sub-agent summaries from the session directory
     const sessDir = filePath.replace(/\.jsonl$/, '');
     enrichWithSubAgents(turns, sessDir);
-
-    // Insert session
-    const insertSession = db.prepare(`
-      INSERT INTO sessions (
-        id, filename, file_hash, model, version, ai_title, cwd,
-        total_requests, peak_index, peak_tokens, peak_cache_hit, peak_turn_idx, peak_step, total_output, context_limit,
-        turn_count, raw_size, categories_json, tools_json, series_json, raw_jsonl
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    insertSession.run(
-      sessionId,
-      filename,
-      hash,
-      summary.session.model,
-      summary.session.version,
-      aiTitle,
-      summary.session.cwd,
-      summary.session.requests,
-      summary.session.peakIndex,
-      summary.session.peakTokens,
-      summary.session.peakCacheHit,
-      summary.session.peakTurnIdx,
-      summary.session.peakStep,
-      summary.session.totalOutput,
-      summary.session.contextLimit,
-      turns.length,
-      content.length,
-      JSON.stringify(summary.categories),
-      JSON.stringify(summary.tools),
-      JSON.stringify(summary.series),
-      null,  // raw_jsonl: skip to save space
-    );
-
-    // Insert turns
-    db.transaction(() => persistTurns(sessionId, turns))();
 
     res.status(201).json({
       imported: true,

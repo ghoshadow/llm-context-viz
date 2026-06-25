@@ -15,6 +15,7 @@ import type {
   TimelineResult,
 } from '../types/session';
 import type { TurnContextComposition } from './compute-context';
+import { BLOCK_WRAPPER_CHARS } from './constants';
 
 // ---------------------------------------------------------------------------
 // Token estimation (inline — consistent with other stages)
@@ -32,9 +33,6 @@ function estTokens(text: string): number {
 function roundTok(text: string): number {
   return Math.round(estTokens(text));
 }
-
-/** Per-block JSON wrapper overhead: {"type":"text","text":"..."} ≈ 23 chars. */
-const BLOCK_WRAPPER_CHARS = 23;
 
 /** Extract plain text from a tool_result content block, adding per-block wrapper cost. */
 function extractToolResultText(content: string | any[]): string {
@@ -60,43 +58,6 @@ function msBetween(startIso: string, endIso: string): number {
   const end = new Date(endIso).getTime();
   if (isNaN(start) || isNaN(end)) return 0;
   return Math.max(0, end - start);
-}
-
-// ---------------------------------------------------------------------------
-// Truncation detection
-// ---------------------------------------------------------------------------
-
-/** Max character length before text is flagged as potentially truncated. */
-const TRUNC_LENGTH_THRESHOLD = 100_000;
-
-/**
- * Whether the text appears truncated — ends mid-sentence without proper
- * sentence-ending punctuation.
- */
-function isTruncated(text: string): boolean {
-  if (text.length === 0) return false;
-  if (text.length >= TRUNC_LENGTH_THRESHOLD) return true;
-
-  const trimmed = text.trimEnd();
-  if (trimmed.length === 0) return false;
-
-  // Ends with sentence-ending punctuation → probably complete.
-  const lastChar = trimmed[trimmed.length - 1];
-  if (['.', '。', '!', '?', '！', '？', ')', '】', '」', '"', '"', '”'].includes(lastChar ?? '')) {
-    return false;
-  }
-
-  // Ends with a closing bracket / tag / backtick group → also likely complete.
-  if (['}', ']', '>', '`'].includes(lastChar ?? '')) return false;
-
-  // Very short text that ends abruptly (e.g. mid-word) → truncated.
-  const lastWord = trimmed.split(/\s+/).pop() ?? '';
-  if (lastWord.length < 3 && /[a-zA-Z]/.test(lastWord)) return true;
-
-  // Ends with comma, semicolon, colon, dash → likely mid-sentence.
-  if ([',', ';', ':', '-', '—', '，', '；', '：'].includes(lastChar ?? '')) return true;
-
-  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,9 +149,6 @@ function buildModelSegments(asst: AssistantLine): TimelineSegment[] {
         input: inputStr,
         tok,
       };
-      if (inputStr.length >= TRUNC_LENGTH_THRESHOLD) {
-        call.trunc = true;
-      }
       toolCalls.push(call);
     }
   }
@@ -204,9 +162,6 @@ function buildModelSegments(asst: AssistantLine): TimelineSegment[] {
       inTok,
       outTok,
     };
-    if (thinkText.length >= TRUNC_LENGTH_THRESHOLD || isTruncated(thinkText)) {
-      detail.thinkTrunc = true;
-    }
     segments.push({
       k: 'm',
       n: '模型生成',
@@ -225,9 +180,6 @@ function buildModelSegments(asst: AssistantLine): TimelineSegment[] {
       inTok,
       outTok,
     };
-    if (replyText.length >= TRUNC_LENGTH_THRESHOLD || isTruncated(replyText)) {
-      detail.textTrunc = true;
-    }
     segments.push({
       k: 'm',
       n: '模型生成',
@@ -253,14 +205,51 @@ function buildModelSegments(asst: AssistantLine): TimelineSegment[] {
     });
   }
 
-  // If no blocks produced any content, emit a minimal segment.
+  // If no blocks produced any content, emit a minimal segment that
+  // describes what was actually in the response.
   if (segments.length === 0) {
+    const typeSet = new Set<string>();
+    let redactedCount = 0;
+    let emptyThinking = 0;
+    let emptyText = 0;
+
+    for (const block of blocks) {
+      const b = block as { type: string; thinking?: string; text?: string; data?: string };
+      const t = b.type;
+      if (!t) continue;
+      typeSet.add(t);
+      if (t === 'redacted_thinking') {
+        redactedCount++;
+      } else if (t === 'thinking' && !b.thinking) {
+        emptyThinking++;
+      } else if (t === 'text' && !b.text) {
+        emptyText++;
+      }
+    }
+
+    const detail: SegmentDetail = { inTok, outTok };
+
+    if (redactedCount > 0) {
+      detail.think = `（Anthropic 安全脱敏机制：检测到 ${redactedCount} 个 redacted_thinking 块。模型思考触发了安全过滤，API 已将思考内容加密替换，但这些 token 仍计入上下文窗口。加密数据对客户端不可读。）`;
+      detail.thinkTok = 0;
+    } else if (emptyThinking > 0 && typeSet.size === 1) {
+      detail.think = `（检测到 ${emptyThinking} 个 thinking 块，但 thinking 字段为空。该模型（${asst.message.model}）在发出 tool_use 后的下一条 assistant 消息中不再重复输出思考文本，仅保留 thinking 块的元信息。）`;
+      detail.thinkTok = 0;
+    } else if (typeSet.size > 0) {
+      const parts: string[] = [];
+      if (emptyThinking > 0) parts.push(`${emptyThinking} 个 thinking 块内容为空`);
+      if (emptyText > 0) parts.push(`${emptyText} 个 text 块内容为空`);
+      const unknown = [...typeSet].filter(t => t !== 'thinking' && t !== 'text' && t !== 'redacted_thinking');
+      if (unknown.length > 0) parts.push(`未知类型：${unknown.join('、')}`);
+      detail.think = `（无法提取内容：${parts.join('；')}。当前支持 text / thinking / tool_use / redacted_thinking。）`;
+      detail.thinkTok = 0;
+    }
     segments.push({
       k: 'm',
       n: '模型生成',
       ms: 0,
       ts: asst.timestamp,
-      det: { inTok, outTok },
+      det: detail,
     });
   }
 
@@ -286,13 +275,6 @@ function buildToolSegment(
     resultTok: toolResult ? roundTok(toolResult.content) : 0,
     isError: toolResult?.is_error ?? false,
   };
-
-  if (toolResult && toolResult.content.length >= TRUNC_LENGTH_THRESHOLD) {
-    detail.resultTrunc = true;
-  }
-  if (toolResult && isTruncated(toolResult.content)) {
-    detail.resultTrunc = true;
-  }
 
   return {
     k: isSubAgent ? 's' : 't',
@@ -607,7 +589,7 @@ function computeContextInfo(
  *    - s-type: sub-agent execution (Task* tools with tool_result data)
  * 3. Calculates wall-clock duration for each segment from timestamps.
  * 4. Extracts detail (SegmentDetail) including thinking text, reply text,
- *    tool call inputs, token counts, and truncation flags.
+ *    tool call inputs, and token counts.
  * 5. Computes turn-level metrics: total durMs, modelMs, toolMs, subMs,
  *    stepCount, and longest segment.
  *

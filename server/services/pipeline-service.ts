@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import { getDb } from '../db';
 import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
 import type { SessionSummary, TurnData } from '../../src/types/session';
+import type Database from 'better-sqlite3';
 
 // ============================================================================
 // Shared pipeline service — eliminates duplicated import/refresh logic across
@@ -97,4 +98,117 @@ export function persistTurns(sessionId: string, turns: TurnData[]): void {
       JSON.stringify(turn.longest),
     );
   }
+}
+
+// ============================================================================
+// Unified import-and-persist helper
+// ============================================================================
+
+export interface ImportSessionResult {
+  sessionId: string;
+  summary: SessionSummary;
+  turns: TurnData[];
+}
+
+/**
+ * Insert a new session record and its turns inside a single transaction.
+ *
+ * Used by POST /upload and POST /scanner/import to create a fresh session.
+ * The caller is responsible for dedup checking.
+ */
+export function createSession(opts: {
+  jsonlContent: string;
+  filename: string;
+  hash: string;
+  aiTitle?: string;
+  rawJsonl?: string | null;
+}): ImportSessionResult {
+  const db = getDb();
+  const { summary, turns } = runPipelineOnContent(opts.jsonlContent, opts.filename);
+  const sessionId = opts.hash.substring(0, 16);
+
+  const insertSession = db.prepare(`
+    INSERT INTO sessions (
+      id, filename, file_hash, model, version, ai_title, cwd,
+      total_requests, peak_index, peak_tokens, peak_cache_hit, peak_turn_idx, peak_step,
+      total_output, context_limit,
+      turn_count, raw_size, categories_json, tools_json, series_json, raw_jsonl
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  db.transaction(() => {
+    insertSession.run(
+      sessionId,
+      opts.filename,
+      opts.hash,
+      summary.session.model,
+      summary.session.version,
+      opts.aiTitle ?? null,
+      summary.session.cwd,
+      summary.session.requests,
+      summary.session.peakIndex,
+      summary.session.peakTokens,
+      summary.session.peakCacheHit ?? 0,
+      summary.session.peakTurnIdx ?? 0,
+      summary.session.peakStep ?? 0,
+      summary.session.totalOutput,
+      summary.session.contextLimit,
+      turns.length,
+      Buffer.byteLength(opts.jsonlContent, 'utf-8'),
+      JSON.stringify(summary.categories),
+      JSON.stringify(summary.tools),
+      JSON.stringify(summary.series),
+      opts.rawJsonl ?? null,
+    );
+    persistTurns(sessionId, turns);
+  })();
+
+  return { sessionId, summary, turns };
+}
+
+/**
+ * Replace all turns for an existing session — used by POST /sessions/:id/refresh.
+ *
+ * Runs the pipeline on the provided content, deletes old turns, inserts new
+ * ones, and updates session metadata in a single transaction.
+ */
+export function refreshSession(opts: {
+  sessionId: string;
+  jsonlContent: string;
+  filename: string;
+}): ImportSessionResult {
+  const db = getDb();
+  const { summary, turns } = runPipelineOnContent(opts.jsonlContent, opts.filename);
+
+  const deleteTurns = db.prepare('DELETE FROM turns WHERE session_id = ?');
+  const updateSession = db.prepare(`
+    UPDATE sessions SET
+      turn_count = ?, total_requests = ?, peak_tokens = ?,
+      peak_cache_hit = ?, peak_turn_idx = ?, peak_step = ?,
+      total_output = ?, context_limit = ?,
+      categories_json = ?, tools_json = ?, series_json = ?,
+      updated_at = datetime('now')
+    WHERE id = ?
+  `);
+
+  db.transaction(() => {
+    deleteTurns.run(opts.sessionId);
+    persistTurns(opts.sessionId, turns);
+    updateSession.run(
+      turns.length,
+      summary.session.requests,
+      summary.session.peakTokens,
+      summary.session.peakCacheHit ?? 0,
+      summary.session.peakTurnIdx ?? 0,
+      summary.session.peakStep ?? 0,
+      summary.session.totalOutput,
+      summary.session.contextLimit,
+      JSON.stringify(summary.categories),
+      JSON.stringify(summary.tools),
+      JSON.stringify(summary.series),
+      opts.sessionId,
+    );
+  })();
+
+  return { sessionId: opts.sessionId, summary, turns };
 }

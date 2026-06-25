@@ -109,7 +109,7 @@ export function buildCategories(comp: Record<string, number>, fullCtx: number, c
     userMsgs: { label: '用户消息', group: 'convo' },
     subagent: { label: '子代理', group: 'convo' },
   };
-  const EST = new Set(['sysPrompt', 'tools']);
+  const EST = new Set(['sysPrompt', 'tool_defs']);
   const cats: ContextCategory[] = [];
   for (const [key, tokens] of Object.entries(comp)) {
     const t = Math.round(tokens * scaleF);

@@ -17,11 +17,24 @@ import {
   ERROR_TEXT,
 } from '../../styles/theme';
 import { fmt, fmtK, fmtDur, fmtDate } from '../../utils/format';
+import { post, get } from '../../api/client';
+import { MarkdownBlock } from '../shared/MarkdownBlock';
+import { DiffView } from '../shared/DiffView';
+import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import type { TurnDetail, TimelineSegment, SegmentDetail } from '../../types/session';
 
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/** Max height for collapsed content blocks. */
+const COLLAPSED_H = 180;
+
+/** Tools whose input should be rendered as a diff (old_string → new_string). */
+function isEditTool(name: string | undefined): boolean {
+  return name === 'Edit' || name === 'Write';
+}
 
 function parseJSON<T>(raw: string | undefined, fallback: T): T {
   if (!raw) return fallback;
@@ -30,6 +43,31 @@ function parseJSON<T>(raw: string | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/**
+ * Detect whether text looks like source code output (e.g. grep -n results,
+ * file contents with line numbers).  When true we can skip MarkdownBlock and
+ * render via SyntaxHighlighter directly.
+ */
+function looksLikeCode(text: string): boolean {
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return false;
+
+  // Count lines matching a line-numbered pattern (e.g. "123: code" or "123  code")
+  let numbered = 0;
+  let codeIndicators = 0;
+  for (const line of lines) {
+    if (/^\s*\d+:\s*\S/.test(line)) numbered++;
+    if (/\b(import|export|const|let|var|function|class|return|if|for|while|async|await|def|from|require)\b/.test(line)) codeIndicators++;
+  }
+
+  const pct = numbered / lines.length;
+  // Heavily line-numbered → almost certainly code output
+  if (pct >= 0.6) return true;
+  // Mix of line numbers and code keywords → likely code
+  if (pct >= 0.3 && codeIndicators >= 2) return true;
+  return false;
 }
 
 function segColor(k: string): string {
@@ -712,22 +750,50 @@ function SubAgentSummary({ subAgents }: { subAgents: SubAgentInfo[] }) {
 }
 
 function UserPromptSection({ prompt }: { prompt: string }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(prompt); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
+  };
   return (
     <div className="content-block">
       <div className="block-header">
         <span style={{ width: 7, height: 7, borderRadius: 2, background: 'oklch(0.80 0.12 148)', flexShrink: 0 }} />
         <span style={{ fontSize: 12, fontWeight: 600, color: SEMANTIC.textPrimary4 }}>用户输入</span>
+        <span style={{ flex: 1 }} />
+        <span onClick={copy} style={{ padding: '1px 6px', fontSize: 10, cursor: 'pointer', color: copied ? SEMANTIC.textGreen : SEMANTIC.textMuted2, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+          {copied ? '已复制' : '复制'}
+        </span>
       </div>
       <div style={{
-        maxHeight: 140, overflowY: 'auto', padding: '10px 12px',
+        maxHeight: open ? 'none' : COLLAPSED_H,
+        overflowY: open ? 'visible' : 'auto',
+        padding: '10px 12px',
         fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        fontSize: 13, lineHeight: 1.65, color: SEMANTIC.textPrimary3,
         background: 'oklch(0.20 0.01 265 / 0.5)',
         border: `1px solid ${SEMANTIC.borderSubtle1}`,
-        borderRadius: 8, whiteSpace: 'pre-wrap',
+        borderBottom: open ? `1px solid ${SEMANTIC.borderSubtle1}` : 'none',
+        borderRadius: open ? 8 : '8px 8px 0 0',
       }}>
-        {prompt}
+        <MarkdownBlock fontSize={13} text={prompt} />
       </div>
+      {!open && (
+        <div onClick={() => setOpen(true)} style={{
+          padding: '6px 0', textAlign: 'center', cursor: 'pointer',
+          border: `1px solid ${SEMANTIC.borderSubtle1}`, borderTop: 'none',
+          borderRadius: '0 0 8px 8px',
+          background: 'oklch(0.20 0.01 265 / 0.5)',
+        }}>
+          <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>展开剩余内容</span>
+        </div>
+      )}
+      {open && (
+        <div onClick={() => setOpen(false)} style={{
+          padding: '6px 0', textAlign: 'center', cursor: 'pointer',
+        }}>
+          <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>收起</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -739,6 +805,60 @@ interface StepDetailPanelProps {
 }
 
 function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
+  const [translations, setTranslations] = useState<Record<number, string>>({});
+  const [translating, setTranslating] = useState<Record<number, boolean>>({});
+  const [showOriginal, setShowOriginal] = useState<Record<number, boolean>>({});
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [copied, setCopied] = useState<Set<number>>(new Set());
+  const sessionId = useSessionStore((s) => s.currentSessionId);
+  const turnIndex = useSessionStore((s) => s.currentTurnIndex);
+  const stepIndex = index;
+
+  // Load cached translations when turn/step changes
+  useEffect(() => {
+    if (sessionId == null || turnIndex == null || stepIndex == null) return;
+    let cancelled = false;
+    get<{ translations: Record<string, Record<string, string>> }>(`/sessions/${sessionId}/translations/${turnIndex}`)
+      .then((res) => {
+        if (!cancelled && res.translations?.[String(stepIndex)]) {
+          setTranslations(res.translations[String(stepIndex)]!);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sessionId, turnIndex, stepIndex]);
+
+  // Reset non-cached state when switching steps
+  useEffect(() => {
+    setTranslations({});
+    setTranslating({});
+    setShowOriginal({});
+  }, [index]);
+
+  const handleCopy = useCallback(async (text: string, key: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied((p) => new Set(p).add(key));
+      setTimeout(() => setCopied((p) => { const n = new Set(p); n.delete(key); return n; }), 2000);
+    } catch { /* clipboard unavailable */ }
+  }, []);
+
+  const handleTranslate = useCallback(async (si: number, text: string) => {
+    if (translations[si] || translating[si]) return;
+    // Quick check: strip code blocks and inline code; if nothing translatable remains, skip
+    const stripped = text.replace(/```[\s\S]*?```|`[^`\n]+`/g, '').trim();
+    if (!stripped) {
+      setTranslations((p) => ({ ...p, [si]: '代码内容不支持翻译' }));
+      return;
+    }
+    setTranslating((p) => ({ ...p, [si]: true }));
+    try {
+      const res = await post<{ translated: string }>(`/sessions/${sessionId}/translate`, { text, turnIndex, stepIndex, sectionIndex: si });
+      setTranslations((p) => ({ ...p, [si]: res.translated }));
+    } catch { /* silently ignore */ }
+    finally { setTranslating((p) => ({ ...p, [si]: false })); }
+  }, [sessionId, translations, translating]);
+
   if (!seg || index === null) {
     // Show user prompt even when no step selected
     if (prompt) {
@@ -773,7 +893,14 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
     font: string;
     meta: string;
     body: string;
-    truncTxt: string;
+    /** When true, render body as Markdown. */
+    md?: boolean;
+    /** Language tag for syntax-highlighted code rendering (e.g. 'json'). */
+    lang?: string;
+    /** Tool name for diff rendering (e.g. 'Edit'). */
+    toolName?: string;
+    /** When true, preserve line breaks within each paragraph. */
+    preserveNewlines?: boolean;
   }
 
   const sections: Section[] = [];
@@ -786,7 +913,7 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
         font: SANS,
         meta: `${fmt(d.thinkTok ?? 0)} tok`,
         body: d.think,
-        truncTxt: d.thinkTrunc ? '\n\n…（内容已截断）' : '',
+        md: true,
       });
     }
     if (d.text) {
@@ -796,7 +923,7 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
         font: SANS,
         meta: `${fmt(d.textTok ?? 0)} tok`,
         body: d.text,
-        truncTxt: d.textTrunc ? '\n\n…（内容已截断）' : '',
+        md: true,
       });
     }
     (d.calls ?? []).forEach((c) => {
@@ -806,17 +933,17 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
         font: MONO,
         meta: `${fmt(c.tok)} tok`,
         body: c.input,
-        truncTxt: c.trunc ? '\n\n…（已截断）' : '',
+        lang: 'json',
+        toolName: c.name,
       });
     });
     if (!sections.length) {
       sections.push({
-        label: '（无文本内容）',
+        label: '（空响应）',
         accent: ERROR_TEXT,
         font: SANS,
         meta: '',
-        body: '该步骤仅包含控制信息。',
-        truncTxt: '',
+        body: '该响应不包含任何内容块。',
       });
     }
   } else {
@@ -827,7 +954,8 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
         font: MONO,
         meta: '',
         body: d.input,
-        truncTxt: '',
+        lang: 'json',
+        toolName: d.name,
       });
     }
     sections.push({
@@ -836,7 +964,8 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
       font: MONO,
       meta: `${fmt(d.resultTok ?? 0)} tok`,
       body: d.result ?? '（空）',
-      truncTxt: d.resultTrunc ? '\n\n…（结果已截断）' : '',
+      md: !d.isError,
+      preserveNewlines: !d.isError,
     });
   }
 
@@ -891,13 +1020,193 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: SEMANTIC.textMuted2 }}>
                 {sec.meta}
               </span>
+              {sec.body && (
+                <span
+                  onClick={() => handleCopy(showOriginal[si] ? sec.body : (translations[si] || sec.body), si)}
+                  style={{
+                    marginLeft: 8, padding: '1px 6px', fontSize: 10, cursor: 'pointer',
+                    color: copied.has(si) ? SEMANTIC.textGreen : SEMANTIC.textMuted2,
+                    fontFamily: "'IBM Plex Sans', sans-serif",
+                  }}
+                >
+                  {copied.has(si) ? '已复制' : '复制'}
+                </span>
+              )}
+              {sec.md && sec.body && (
+                (() => {
+                  const isCodeOnly = translations[si] === '代码内容不支持翻译';
+                  return (
+                <button
+                  onClick={() => handleTranslate(si, sec.body)}
+                  disabled={translating[si] || isCodeOnly}
+                  style={{
+                    marginLeft: 8,
+                    padding: '1px 8px',
+                    fontSize: 10,
+                    fontFamily: "'IBM Plex Sans', sans-serif",
+                    color: isCodeOnly ? SEMANTIC.textMuted2
+                         : translations[si] ? SEMANTIC.textGreen : SEMANTIC.textAccent2,
+                    background: isCodeOnly ? 'oklch(0.30 0.012 265 / 0.4)'
+                              : translations[si] ? 'oklch(0.55 0.08 150 / 0.10)' : 'oklch(0.45 0.10 60 / 0.08)',
+                    border: `1px solid ${isCodeOnly ? 'oklch(0.30 0.012 265 / 0.3)'
+                              : translations[si] ? 'oklch(0.45 0.08 150 / 0.3)' : 'oklch(0.45 0.10 60 / 0.15)'}`,
+                    borderRadius: 4,
+                    cursor: isCodeOnly ? 'default' : translating[si] ? 'wait' : 'pointer',
+                    opacity: translating[si] ? 0.6 : 1,
+                  }}
+                >
+                  {translating[si] ? '翻译中...' : isCodeOnly ? '不可翻译' : translations[si] ? '✓ 已翻译' : '翻译'}
+                </button>
+                  );
+                })()
+              )}
+              {translations[si] && translations[si] !== '代码内容不支持翻译' && (
+                <button
+                  onClick={() => setShowOriginal((p) => ({ ...p, [si]: !p[si] }))}
+                  style={{
+                    marginLeft: 4,
+                    padding: '1px 8px',
+                    fontSize: 10,
+                    fontFamily: "'IBM Plex Sans', sans-serif",
+                    color: showOriginal[si] === false ? SEMANTIC.textPrimary : SEMANTIC.textMuted2,
+                    background: showOriginal[si] === false ? 'oklch(0.34 0.014 265 / 0.5)' : 'oklch(0.26 0.012 265 / 0.5)',
+                    border: '1px solid oklch(0.32 0.014 265 / 0.5)',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showOriginal[si] === false ? '显示原文' : '隐藏原文'}
+                </button>
+              )}
             </div>
-            <div
-              className={`block-body${sec.font === MONO ? ' mono' : ''}`}
-              style={{ fontFamily: sec.font }}
-            >
-              {sec.body}{sec.truncTxt}
-            </div>
+            {(!translations[si] || showOriginal[si] !== false) && (() => {
+              const isOpen = expanded.has(si);
+              const isExpandable = (sec.md || sec.lang) && sec.body;
+              const maxH = isExpandable && !isOpen ? COLLAPSED_H : 'none';
+              const ovf = isExpandable && !isOpen ? 'auto' : 'visible';
+
+              const toggle = (open: boolean) => (
+                <div onClick={() => setExpanded((p) => { const n = new Set(p); open ? n.delete(si) : n.add(si); return n; })}
+                  style={{ padding: '6px 0', textAlign: 'center', cursor: 'pointer' }}>
+                  <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>
+                    {open ? '收起' : '展开剩余内容'}
+                  </span>
+                </div>
+              );
+
+              if (sec.lang) {
+                // Edit tool: render as side-by-side diff
+                if (sec.lang === 'json' && isEditTool(sec.toolName)) {
+                  return (
+                    <>
+                      <div className="block-body mono" style={{ fontFamily: sec.font, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
+                        <DiffView body={sec.body} />
+                      </div>
+                      {isExpandable && toggle(isOpen)}
+                    </>
+                  );
+                }
+
+                let displayBody = sec.body;
+                if (sec.lang === 'json') {
+                  try { displayBody = JSON.stringify(JSON.parse(sec.body), null, 2); } catch { /* keep as-is */ }
+                }
+                return (
+                  <>
+                    <div className="block-body mono" style={{ fontFamily: sec.font, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
+                      <SyntaxHighlighter
+                        language={sec.lang}
+                        style={atomOneDark}
+                        customStyle={{
+                          margin: 0, borderRadius: 6,
+                          border: '1px solid oklch(0.28 0.012 265)',
+                          fontSize: 11, lineHeight: 1.55,
+                          background: 'oklch(0.15 0.008 265)',
+                          maxHeight: isExpandable && !isOpen ? COLLAPSED_H : undefined,
+                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        }}
+                      >
+                        {displayBody}
+                      </SyntaxHighlighter>
+                    </div>
+                    {isExpandable && toggle(isOpen)}
+                  </>
+                );
+              }
+
+              if (sec.md) {
+                const isCode = looksLikeCode(sec.body);
+                if (isCode) {
+                  return (
+                    <>
+                      <div className="block-body mono" style={{ fontFamily: MONO, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
+                        <SyntaxHighlighter
+                          language="typescript"
+                          style={atomOneDark}
+                          customStyle={{
+                            margin: 0, borderRadius: 6,
+                            border: '1px solid oklch(0.28 0.012 265)',
+                            fontSize: 11, lineHeight: 1.55,
+                            background: 'oklch(0.15 0.008 265)',
+                            maxHeight: isExpandable && !isOpen ? COLLAPSED_H : undefined,
+                            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                          }}
+                        >
+                          {sec.body}
+                        </SyntaxHighlighter>
+                      </div>
+                      {isExpandable && toggle(isOpen)}
+                    </>
+                  );
+                }
+                return (
+                  <>
+                    <div className="block-body" style={{ fontFamily: sec.font, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
+                      <MarkdownBlock fontSize={12} text={sec.body} preserveNewlines={sec.preserveNewlines} />
+                    </div>
+                    {isExpandable && toggle(isOpen)}
+                  </>
+                );
+              }
+
+              return (
+                <div className="block-body mono" style={{ fontFamily: sec.font }}>
+                  {sec.body}
+                </div>
+              );
+            })()}
+            {translations[si] && (() => {
+              if (translations[si] === '代码内容不支持翻译') {
+                return (
+              <div className="block-body"
+                style={{
+                  fontFamily: sec.font, marginTop: 8, padding: '8px 12px', borderRadius: 6,
+                  border: '1px solid oklch(0.50 0.10 60 / 0.25)', background: 'oklch(0.50 0.10 60 / 0.05)',
+                  fontSize: 12, lineHeight: 1.6, color: SEMANTIC.textAccent2,
+                }}
+              >
+                ⚠ 代码内容不支持翻译
+              </div>
+                );
+              }
+              return (
+              <div className="block-body"
+                style={{
+                  fontFamily: sec.font,
+                  marginTop: 8,
+                  padding: '12px 14px',
+                  borderRadius: 6,
+                  border: '1px solid oklch(0.45 0.08 150 / 0.25)',
+                  background: 'oklch(0.55 0.08 150 / 0.04)',
+                }}
+              >
+                <div style={{ fontSize: 10, fontWeight: 600, color: SEMANTIC.textGreen, marginBottom: 6 }}>
+                  中文翻译
+                </div>
+                <MarkdownBlock fontSize={12} text={translations[si]!} />
+              </div>
+              );
+            })()}
           </div>
         ))}
       </div>
@@ -1293,7 +1602,7 @@ export default function TurnInspector() {
             <div
               className="thin-scrollbar"
               style={{
-                maxHeight: 760,
+                maxHeight: 'calc(100vh - 160px)',
                 overflowY: 'auto',
                 padding: '8px',
                 display: 'flex',
@@ -1332,6 +1641,7 @@ export default function TurnInspector() {
             display: 'flex',
             flexDirection: 'column',
             gap: 18,
+            minWidth: 0,
           }}
         >
           {currentTurnLoading ? (

@@ -93,6 +93,11 @@ function parseMessageContent(raw: unknown): MessageContent[] {
         });
         break;
       }
+      case 'redacted_thinking': {
+        const data = isString(item.data) ? item.data : '';
+        contents.push({ type: 'redacted_thinking', data });
+        break;
+      }
       case 'tool_use': {
         const id = isString(item.id) ? item.id : '';
         const name = isString(item.name) ? item.name : '';

@@ -7,6 +7,7 @@ import type {
   AssistantMessage,
   ContentBlock,
 } from '../types/session';
+import { BLOCK_WRAPPER_CHARS } from './constants';
 
 // ---------------------------------------------------------------------------
 // Token estimator interface
@@ -38,15 +39,6 @@ export type TurnContextComposition = Record<string, number>;
 export interface CategoryMetrics {
   tokens: number;
   raw: number;
-}
-
-export interface TurnContextEntry {
-  /** 1-based turn index. */
-  turnIndex: number;
-  /** Cumulative category key -> {tokens, raw} up to and including this turn. */
-  comp: Record<string, CategoryMetrics>;
-  /** Cumulative total context tokens at turn end. */
-  cumTotal: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +95,6 @@ export function setMemoryChars(chars: number): void {
  * Image blocks are ignored (no text contribution).
  */
 /** Per-block JSON wrapper overhead: {"type":"text","text":"..."} ≈ 23 chars ≈ 8 tok @ 3.0. */
-const BLOCK_WRAPPER_CHARS = 23;
 
 function extractContentText(content: string | ContentBlock[]): string {
   if (typeof content === 'string') return content;
@@ -135,7 +126,7 @@ function extractToolResultText(block: ContentBlock): string {
 // ---------------------------------------------------------------------------
 
 /** Returns true if the tool name indicates a sub-agent spawn. */
-function isTaskTool(name: string): boolean {
+function isSubAgentTool(name: string): boolean {
   return name === 'Agent' || name === 'Workflow';
 }
 
@@ -204,7 +195,7 @@ function toTokenMap(metrics: Record<string, CategoryMetrics>): TurnContextCompos
 
 const CORE_CATEGORIES = [
   'sysPrompt',
-  'tools',
+  'tool_defs',
   'skills',
   'memory',
   'mcp',
@@ -240,7 +231,7 @@ function seedCoreScaffolding(
   est: TokenEstimator,
 ): void {
   addPadding(cum.sysPrompt!,  SYS_PROMPT_FALLBACK_CHARS,  est);
-  addPadding(cum.tools!,      TOOL_DEFS_FALLBACK_CHARS,   est);
+  addPadding(cum.tool_defs!,   TOOL_DEFS_FALLBACK_CHARS,   est);
   addPadding(cum.skills!,     SKILLS_FALLBACK_CHARS,      est);
   addPadding(cum.memory!,     MEMORY_FALLBACK_CHARS,      est);
   addPadding(cum.mcp!,        MCP_FALLBACK_CHARS,         est);
@@ -305,7 +296,7 @@ function processGroup(
         if (!resultText) continue;
 
         const toolName = toolIdToName.get(block.tool_use_id) ?? 'unknown';
-        if (isTaskTool(toolName)) {
+        if (isSubAgentTool(toolName)) {
           addTo(cum.subagent!, resultText, est);
         } else {
           addTo(cum.toolResults!, resultText, est);
@@ -457,58 +448,4 @@ export function computeContext(
   }
 
   return compositions;
-}
-
-// ---------------------------------------------------------------------------
-// Rich variant — same logic, richer output
-// ---------------------------------------------------------------------------
-
-/**
- * Compute cumulative context composition with raw character counts.
- *
- * Identical to `computeContext` in logic, but returns `TurnContextEntry[]`
- * where each entry includes `{tokens, raw}` metrics per category plus
- * a `cumTotal` field.
- *
- * Use this when you need both estimated tokens and raw character counts
- * for diagnostics, debugging, or detailed display.
- */
-export function computeContextRich(
-  groups: TurnGroup[],
-  estimator: TokenEstimator,
-): TurnContextEntry[] {
-  const cum = initCum();
-  seedCoreScaffolding(cum, estimator);
-
-  const entries: TurnContextEntry[] = [];
-  let lastApiTotal = 0;
-  for (const group of groups) {
-    let turnApiMax = 0;
-    for (const line of group.asstLines) {
-      const usage = line.message.usage;
-      if (!usage) continue;
-      const t = usage.input_tokens + (usage.cache_read_input_tokens ?? 0);
-      if (t > turnApiMax) turnApiMax = t;
-    }
-
-    if (turnApiMax > 0) {
-      if (lastApiTotal > 0 && turnApiMax < lastApiTotal * 0.5) {
-        for (const key of Object.keys(cum)) {
-          cum[key] = initAccum();
-        }
-        seedCoreScaffolding(cum, estimator);
-      }
-      lastApiTotal = turnApiMax;
-    }
-
-    processGroup(group, estimator, cum);
-    const comp = snapshot(cum);
-    entries.push({
-      turnIndex: group.turnIndex,
-      comp,
-      cumTotal: totalTokens(cum),
-    });
-  }
-
-  return entries;
 }

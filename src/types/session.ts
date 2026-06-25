@@ -24,6 +24,12 @@ export interface ThinkingContent {
   signature: string;
 }
 
+export interface RedactedThinkingContent {
+  type: 'redacted_thinking';
+  /** Base64-encoded encrypted thinking data.  Not human-readable. */
+  data: string;
+}
+
 export interface TextContent {
   type: 'text';
   text: string;
@@ -36,7 +42,7 @@ export interface ToolUseContent {
   input: Record<string, unknown> | object;
 }
 
-export type MessageContent = ThinkingContent | TextContent | ToolUseContent;
+export type MessageContent = ThinkingContent | RedactedThinkingContent | TextContent | ToolUseContent;
 
 // --- Base session line ---
 
@@ -202,16 +208,13 @@ export interface ToolCallDetail {
   name: string;
   input: string;
   tok: number;
-  trunc?: boolean;
 }
 
 export interface SegmentDetail {
   think?: string;
   thinkTok?: number;
-  thinkTrunc?: boolean;
   text?: string;
   textTok?: number;
-  textTrunc?: boolean;
   calls?: ToolCallDetail[];
   inTok?: number;
   outTok?: number;
@@ -219,7 +222,6 @@ export interface SegmentDetail {
   input?: string;
   result?: string;
   resultTok?: number;
-  resultTrunc?: boolean;
   isError?: boolean;
   subAgents?: { file: string; model: string; prompt: string; asstCount: number; durMs: number; toolCalls: string[] }[];
   /** Cumulative tools snapshot at this step (t-type / s-type only). */

@@ -70,13 +70,6 @@ function calibrateEstimator(_groups: TurnGroup[]): TokenEstimator {
   return { estimate(text: string): number { return text.length / 3.0; } };
 }
 
-/** Default token estimator: ~4 chars per token (English text heuristic). */
-const defaultEstimator: TokenEstimator = {
-  estimate(text: string): number {
-    return text.length / 4;
-  },
-};
-
 // ---------------------------------------------------------------------------
 // Primary pipeline function (synchronous)
 // ---------------------------------------------------------------------------
@@ -220,76 +213,4 @@ function extractPromptText(userLine: TurnGroup['userLine']): string {
     return texts.join('\n');
   }
   return '';
-}
-
-// ---------------------------------------------------------------------------
-// Progress-reporting variant (async)
-// ---------------------------------------------------------------------------
-
-/**
- * Run the full pipeline with progress callbacks.
- *
- * Useful for UI integration where each stage can update a progress bar.
- * The pipeline runs synchronously (no async work), but the Promise wrapper
- * allows the caller to `await` for completion and receive progress updates.
- *
- * @param jsonlText  Raw JSONL transcript string.
- * @param filename   Source filename.
- * @param onProgress Callback invoked at each stage boundary.
- * @returns          Promise resolving to the pipeline output.
- */
-export function runPipelineWithProgress(
-  jsonlText: string,
-  filename: string,
-  onProgress: (stage: string, percent: number) => void,
-): Promise<{ summary: SessionSummary; turns: TurnData[]; errors: ParseError[] }> {
-  return new Promise((resolve) => {
-    // Stage 0
-    onProgress('Parsing JSONL...', 0);
-    const { lines, errors } = parseJsonl(jsonlText);
-
-    // Yield to the event loop so UI can update between stages.
-    setTimeout(() => {
-      // Stage 1
-      onProgress('Grouping turns...', 20);
-      const groups = identifyTurns(lines);
-
-      setTimeout(() => {
-        // Stage 2
-        onProgress('Computing context...', 30);
-        const estimator = calibrateEstimator(groups);
-        const compositions = computeContext(groups, estimator);
-
-        setTimeout(() => {
-          // Stage 3
-          onProgress('Computing deltas...', 50);
-          const deltas = computeDeltas(compositions);
-
-          setTimeout(() => {
-            // Stage 4
-            onProgress('Computing timeline...', 65);
-            const timelines = computeTimeline(groups, compositions);
-
-            setTimeout(() => {
-              // Stage 5
-              onProgress('Aggregating session...', 85);
-              const summary = aggregateSession(
-                groups,
-                compositions,
-                timelines,
-                filename,
-              );
-
-              // Assemble
-              onProgress('Assembling result...', 95);
-              const turns = assembleTurns(groups, compositions, deltas, timelines);
-
-              onProgress('Done', 100);
-              resolve({ summary, turns, errors });
-            }, 0);
-          }, 0);
-        }, 0);
-      }, 0);
-    }, 0);
-  });
 }

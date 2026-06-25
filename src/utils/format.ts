@@ -51,15 +51,6 @@ export function fmtDur(ms: number): string {
 }
 
 /**
- * Percentage string to one decimal place.
- *
- * @example fmtPct(3, 7) => "42.9%"
- */
-export function fmtPct(n: number, total: number): string {
-  return ((n / total) * 100).toFixed(2) + '%';
-}
-
-/**
  * Format an ISO timestamp as "MM-DD HH:MM".
  *
  * @example fmtDate("2026-06-15T14:30:00Z") => "06-15 14:30"

@@ -167,13 +167,6 @@ export function loadExistingManifest(
 }
 
 /**
- * 读取单个分片文件的内容。
- */
-export function readShardFile(filePath: string): string {
-  return readFileSync(filePath, 'utf-8');
-}
-
-/**
  * 从 JSONL 原始内容中提取会话转录，按轮次分组后写入持久化文件树。
  *
  * 幂等设计：若目标目录已存在有效的 manifest.json 且 force 不为 true，
