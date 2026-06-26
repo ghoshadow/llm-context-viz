@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getDb } from '../db';
 import { callLLM } from '../llm/client';
 import { refreshSession } from '../services/pipeline-service';
+import { reassembleTranslatedSegments } from '../services/translation-reassembly';
 import { enrichWithSubAgents } from './scanner';
 import { readFileSync } from 'fs';
 import { getSessionSource } from '../../src/utils/sessionSource';
@@ -370,32 +371,10 @@ ${items}`;
       translatedMap.set(0, response);
     }
 
-    // Reassemble: merge translated segments back with original Chinese parts.
-    // Insert newlines between segments where needed so that markdown code fences
-    // (```) are always on their own line — otherwise MarkdownBlock can't detect them.
-    let ti = 0;
-    const resultParts: string[] = [];
-    let lastEndsWithNewline = true; // start of text counts as "after newline"
-    for (let si = 0; si < segments.length; si++) {
-      const seg = segments[si]!;
-      // If this segment starts with a code fence and the previous content
-      // doesn't end with a newline, insert one.
-      if (!lastEndsWithNewline && seg.text.startsWith('```')) {
-        resultParts.push('\n');
-        lastEndsWithNewline = true;
-      }
-      if (seg.zh) {
-        resultParts.push(seg.text);
-        lastEndsWithNewline = seg.text.endsWith('\n');
-      } else {
-        const part = translatedMap.get(ti) ?? toTranslate[ti]!;
-        resultParts.push(part);
-        lastEndsWithNewline = part.endsWith('\n');
-        ti++;
-      }
-    }
-    const raw = resultParts.join('');
-    const translated = raw.replace(/\n{3,}/g, '\n\n');
+    const translated = reassembleTranslatedSegments(
+      segments,
+      toTranslate.map((source, index) => translatedMap.get(index) ?? source),
+    );
     db.prepare(
       'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
     ).run(sessionId, turnIndex, stepIndex, sectionIndex, translated);
