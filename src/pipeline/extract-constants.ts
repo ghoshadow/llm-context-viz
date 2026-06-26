@@ -256,9 +256,7 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
           '',
           `字符数: ${systemBlocks.total}`,
           '',
-          '```text',
           systemTexts.join('\n\n--- system block ---\n\n'),
-          '```',
         ].join('\n'),
         TOOL_DEFS_FALLBACK_CHARS: [
           '# TOOL_DEFS_FALLBACK_CHARS',

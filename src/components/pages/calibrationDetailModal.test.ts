@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  getCalibrationDetailDisplay,
   getCalibrationDetailLayout,
   getCalibrationDetailSectionIndex,
 } from './calibrationDetailModal';
@@ -22,4 +23,34 @@ test('builds different translation cache sections for different constants and co
   assert.notEqual(sysA, sysB);
   assert.notEqual(sysA, toolsA);
   assert.equal(getCalibrationDetailSectionIndex('SYS_PROMPT_FALLBACK_CHARS', 'alpha'), sysA);
+});
+
+test('renders system prompt detail as plain text and unwraps legacy text fence', () => {
+  const legacy = [
+    '# SYS_PROMPT_FALLBACK_CHARS',
+    '',
+    '字符数: 42',
+    '',
+    '```text',
+    'before',
+    '```json',
+    '{"ok":true}',
+    '```',
+    'after',
+    '```',
+  ].join('\n');
+
+  assert.deepEqual(getCalibrationDetailDisplay('SYS_PROMPT_FALLBACK_CHARS', legacy), {
+    text: ['before', '```json', '{"ok":true}', '```', 'after'].join('\n'),
+    markdown: false,
+  });
+});
+
+test('keeps tool detail as markdown for json code rendering', () => {
+  const detail = ['# TOOL_DEFS_FALLBACK_CHARS', '', '```json', '{"name":"Read"}', '```'].join('\n');
+
+  assert.deepEqual(getCalibrationDetailDisplay('TOOL_DEFS_FALLBACK_CHARS', detail), {
+    text: detail,
+    markdown: true,
+  });
 });

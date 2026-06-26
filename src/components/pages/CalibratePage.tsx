@@ -7,7 +7,11 @@ import { fmt } from '../../utils/format';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { getCalibrationFailureNotice } from './calibrationFailureNotice';
 import { MarkdownBlock } from '../shared/MarkdownBlock';
-import { getCalibrationDetailLayout, getCalibrationDetailSectionIndex } from './calibrationDetailModal';
+import {
+  getCalibrationDetailDisplay,
+  getCalibrationDetailLayout,
+  getCalibrationDetailSectionIndex,
+} from './calibrationDetailModal';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -150,6 +154,26 @@ function DetailButton({ disabled, onClick }: { disabled?: boolean; onClick: () =
   );
 }
 
+function DetailContent({ text, markdown }: { text: string; markdown: boolean }) {
+  if (markdown) {
+    return <MarkdownBlock text={text} variant="markdown" preserveNewlines />;
+  }
+
+  return (
+    <pre style={{
+      margin: 0,
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      fontFamily: MONO,
+      fontSize: 12,
+      lineHeight: 1.65,
+      color: S.textPrimary3,
+    }}>
+      {text}
+    </pre>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -283,12 +307,16 @@ export default function CalibratePage() {
 
   const detailTranslatedText = detailModal ? detailTranslations[detailModal.key] : undefined;
   const detailLayout = getCalibrationDetailLayout(detailTranslatedText);
+  const detailDisplay = detailModal ? getCalibrationDetailDisplay(detailModal.key, detailModal.text) : undefined;
+  const detailTranslatedDisplay = detailModal && detailTranslatedText
+    ? getCalibrationDetailDisplay(detailModal.key, detailTranslatedText)
+    : undefined;
 
   const handleDetailCopy = useCallback(async () => {
-    if (!detailModal) return;
+    if (!detailModal || !detailDisplay) return;
     const text = detailTranslatedText
-      ? `原文\n\n${detailModal.text}\n\n译文\n\n${detailTranslatedText}`
-      : detailModal.text;
+      ? `原文\n\n${detailDisplay.text}\n\n译文\n\n${detailTranslatedDisplay?.text ?? detailTranslatedText}`
+      : detailDisplay.text;
     try {
       await navigator.clipboard.writeText(text);
       setDetailCopied(true);
@@ -296,10 +324,10 @@ export default function CalibratePage() {
     } catch {
       setDetailTranslateError('复制失败：浏览器剪贴板不可用。');
     }
-  }, [detailModal, detailTranslatedText]);
+  }, [detailDisplay, detailModal, detailTranslatedDisplay, detailTranslatedText]);
 
   const handleDetailTranslate = useCallback(async () => {
-    if (!detailModal || detailTranslating) return;
+    if (!detailModal || !detailDisplay || detailTranslating) return;
     if (detailTranslations[detailModal.key]) return;
     if (!currentSessionId || currentTurnIndex == null) {
       setDetailTranslateError('请先打开一个会话和轮次，再使用翻译。');
@@ -309,10 +337,10 @@ export default function CalibratePage() {
     setDetailTranslating(true);
     try {
       const res = await post<{ translated: string }>(`/sessions/${currentSessionId}/translate`, {
-        text: detailModal.text,
+        text: detailDisplay.text,
         turnIndex: currentTurnIndex,
         stepIndex: -100,
-        sectionIndex: getCalibrationDetailSectionIndex(detailModal.key, detailModal.text),
+        sectionIndex: getCalibrationDetailSectionIndex(detailModal.key, detailDisplay.text),
       });
       setDetailTranslations((prev) => ({ ...prev, [detailModal.key]: res.translated }));
     } catch (err) {
@@ -320,7 +348,7 @@ export default function CalibratePage() {
     } finally {
       setDetailTranslating(false);
     }
-  }, [currentSessionId, currentTurnIndex, detailModal, detailTranslating, detailTranslations]);
+  }, [currentSessionId, currentTurnIndex, detailDisplay, detailModal, detailTranslating, detailTranslations]);
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 0', fontFamily: SANS, color: 'oklch(0.93 0.006 265)' }}>
@@ -405,15 +433,17 @@ export default function CalibratePage() {
                 }}>
                   <div>
                     <div style={{ marginBottom: 8, fontSize: 11, color: S.textMuted, fontFamily: MONO }}>原文</div>
-                    <MarkdownBlock text={detailModal.text} variant="markdown" preserveNewlines />
+                    {detailDisplay && <DetailContent text={detailDisplay.text} markdown={detailDisplay.markdown} />}
                   </div>
                   <div>
                     <div style={{ marginBottom: 8, fontSize: 11, color: S.textMuted, fontFamily: MONO }}>译文</div>
-                    <MarkdownBlock text={detailTranslatedText || ''} variant="markdown" preserveNewlines />
+                    {detailTranslatedDisplay && (
+                      <DetailContent text={detailTranslatedDisplay.text} markdown={detailTranslatedDisplay.markdown} />
+                    )}
                   </div>
                 </div>
               ) : (
-                <MarkdownBlock text={detailModal.text} variant="markdown" preserveNewlines />
+                detailDisplay && <DetailContent text={detailDisplay.text} markdown={detailDisplay.markdown} />
               )}
             </div>
           </div>

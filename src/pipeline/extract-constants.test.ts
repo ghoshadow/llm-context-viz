@@ -18,7 +18,7 @@ test('extracts markdown-viewable details for calibrated constants', () => {
           system: [
             { text: 'billing-header cc_version=2.1.170' },
             { text: 'You are a Claude agent' },
-            { text: 'Harness prompt text' },
+            { text: ['Harness prompt text', '```json', '{"example":true}', '```', 'after fence'].join('\n') },
           ],
           tools: [{ name: 'Read', input_schema: { type: 'object' } }],
           messages: [{
@@ -46,8 +46,9 @@ test('extracts markdown-viewable details for calibrated constants', () => {
     const extracted = extractConstants(logPath);
 
     assert.ok(extracted?.details);
-    assert.match(extracted.details.SYS_PROMPT_FALLBACK_CHARS, /```text/);
+    assert.doesNotMatch(extracted.details.SYS_PROMPT_FALLBACK_CHARS, /```text/);
     assert.match(extracted.details.SYS_PROMPT_FALLBACK_CHARS, /Harness prompt text/);
+    assert.match(extracted.details.SYS_PROMPT_FALLBACK_CHARS, /```json\n\{"example":true\}\n```/);
     assert.match(extracted.details.TOOL_DEFS_FALLBACK_CHARS, /```json/);
     assert.match(extracted.details.TOOL_DEFS_FALLBACK_CHARS, /"name": "Read"/);
     assert.match(extracted.details.SYSTEM_REMINDER_CHROME_CHARS, /```text/);
