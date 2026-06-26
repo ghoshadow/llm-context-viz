@@ -4,6 +4,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { post, put, get } from '../../api/client';
 import { SEMANTIC } from '../../styles/theme';
 import { fmt, fmtK } from '../../utils/format';
+import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -164,7 +165,7 @@ export default function CalibratePage() {
   }, [result]);
 
   // Token estimate
-  const estTok = (chars: number) => Math.round(chars / 3.5);
+  const estTok = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 0', fontFamily: SANS, color: 'oklch(0.93 0.006 265)' }}>

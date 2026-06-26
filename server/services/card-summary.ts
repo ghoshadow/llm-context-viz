@@ -1,7 +1,12 @@
 import crypto from 'crypto';
-import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { getDb } from '../db';
-import { nodeText } from '../obsidian/card-context';
+import {
+  nodeText,
+  type ObsidianNodeLike,
+  type ObsidianEdgeLike,
+  type ObsidianOntologyDataLike,
+} from '../obsidian/card-context';
+import { callLLM } from '../llm/client';
 
 // ============================================================================
 // Types
@@ -22,33 +27,10 @@ export interface CardSummaryRecord {
   completed_at: string | null;
 }
 
-export interface OntologyNodeLike {
-  id: string;
-  label: string;
-  type: string;
-  firstTurn: number;
-  turns?: number[];
-  claim?: string;
-  snippet?: string;
-  aggregateId?: string;
-  evidence?: Array<{ turn: number; source: string; text: string; weight: number }>;
-}
-
-export interface OntologyEdgeLike {
-  s: string;
-  t: string;
-  label: string;
-  direction?: 'directed' | 'undirected' | 'bidirectional';
-  firstTurn: number;
-  conf?: number;
-}
-
-export interface OntologyDataLike {
-  nodes: OntologyNodeLike[];
-  edges: OntologyEdgeLike[];
-  types?: Array<{ key: string; label: string }>;
-  aggregates?: Array<{ id: string; label: string; startTurn: number; endTurn: number; nodeIds?: string[] }>;
-}
+// Re-export Obsidian types for consumers that previously used the local definitions.
+export type OntologyNodeLike = ObsidianNodeLike;
+export type OntologyEdgeLike = ObsidianEdgeLike;
+export type OntologyDataLike = ObsidianOntologyDataLike;
 
 // ============================================================================
 // Prompt building
@@ -146,37 +128,12 @@ ${edgesText || '无显式关系'}
 // ============================================================================
 
 async function runKnowledgeSummaryLLM(prompt: string): Promise<string> {
-  const model = process.env.LLM_MODEL || 'deepseek-v4-pro';
-  const apiKey = process.env.LLM_API_KEY;
-  const baseUrl = process.env.LLM_BASE_URL || 'https://api.deepseek.com/anthropic';
-
-  if (!apiKey) throw new Error('未设置 LLM_API_KEY 环境变量');
-
-  const q = query({
-    prompt,
-    options: {
-      model,
-      maxTurns: 1,
-      thinking: { type: 'disabled' as const },
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      env: { ...process.env, ANTHROPIC_API_KEY: apiKey, ANTHROPIC_BASE_URL: baseUrl } as Record<string, string>,
-    },
-  });
-
-  const chunks: string[] = [];
-  for await (const msg of q) {
-    if (msg.type !== 'assistant') continue;
-    const am = msg as SDKMessage & { type: 'assistant'; message?: { content?: unknown[] } };
-    for (const block of am.message?.content || []) {
-      const b = block as { type?: string; text?: string };
-      if (b.type === 'text' && b.text) chunks.push(b.text);
-    }
+  try {
+    return await callLLM(prompt);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error('LLM 未返回知识总结: ' + message);
   }
-
-  const summary = chunks.join('\n').trim();
-  if (!summary) throw new Error('LLM 未返回知识总结');
-  return summary;
 }
 
 // ============================================================================

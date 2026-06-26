@@ -16,38 +16,7 @@ import type {
 } from '../types/session';
 import type { TurnContextComposition } from './compute-context';
 import { BLOCK_WRAPPER_CHARS } from './constants';
-
-// ---------------------------------------------------------------------------
-// Token estimation (inline — consistent with other stages)
-// ---------------------------------------------------------------------------
-
-// Token estimation: use the same 3.5 chars/token ratio as the pipeline
-// calibrator so composition and timeline agree on token counts.
-// DeepSeek official ratio: 1 English char ≈ 0.3 tok (~3.33 chars/tok),
-// 1 Chinese char ≈ 0.6 tok (~1.67 chars/tok). Claude Code sessions are
-// mostly English/code, so 3.0 is a reasonable weighted average.
-function estTokens(text: string): number {
-  return text.length / 3.0;
-}
-
-function roundTok(text: string): number {
-  return Math.round(estTokens(text));
-}
-
-/** Extract plain text from a tool_result content block, adding per-block wrapper cost. */
-function extractToolResultText(content: string | any[]): string {
-  if (typeof content === 'string') return content;
-  let result = '';
-  for (const block of content) {
-    if (block && block.type === 'text') {
-      result += (block.text as string) ?? '';
-      result += ' '.repeat(BLOCK_WRAPPER_CHARS); // JSON wrapper overhead
-    } else if (block && block.type === 'tool_result') {
-      result += extractToolResultText(block.content);
-    }
-  }
-  return result;
-}
+import { isSubAgentTool, roundTokens, extractPromptText, extractContentText } from './utils';
 
 // ---------------------------------------------------------------------------
 // Time helpers
@@ -58,21 +27,6 @@ function msBetween(startIso: string, endIso: string): number {
   const end = new Date(endIso).getTime();
   if (isNaN(start) || isNaN(end)) return 0;
   return Math.max(0, end - start);
-}
-
-// ---------------------------------------------------------------------------
-// Sub-agent detection
-// ---------------------------------------------------------------------------
-
-function isTaskTool(name: string): boolean {
-  return name.startsWith('Task');
-}
-
-function isSubAgentTool(name: string): boolean {
-  // Only Agent and Workflow actually spawn sub-agents.
-  // Task* tools (TaskCreate, TaskUpdate, etc.) are management commands,
-  // not sub-agent spawns.
-  return name === 'Agent' || name === 'Workflow';
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +97,7 @@ function buildModelSegments(asst: AssistantLine): TimelineSegment[] {
   for (const block of blocks) {
     if (block.type === 'tool_use') {
       const inputStr = JSON.stringify(block.input);
-      const tok = roundTok(inputStr);
+      const tok = roundTokens(inputStr);
       const call: ToolCallDetail = {
         name: block.name,
         input: inputStr,
@@ -155,7 +109,7 @@ function buildModelSegments(asst: AssistantLine): TimelineSegment[] {
 
   // Build segment for thinking phase.
   if (thinkText) {
-    const thinkTok = roundTok(thinkText);
+    const thinkTok = roundTokens(thinkText);
     const detail: SegmentDetail = {
       think: thinkText,
       thinkTok,
@@ -173,7 +127,7 @@ function buildModelSegments(asst: AssistantLine): TimelineSegment[] {
 
   // Build segment for text phase.
   if (replyText) {
-    const textTok = roundTok(replyText);
+    const textTok = roundTokens(replyText);
     const detail: SegmentDetail = {
       text: replyText,
       textTok,
@@ -272,7 +226,7 @@ function buildToolSegment(
     name: toolUse.name,
     input: inputStr,
     result: toolResult?.content ?? '',
-    resultTok: toolResult ? roundTok(toolResult.content) : 0,
+    resultTok: toolResult ? roundTokens(toolResult.content) : 0,
     isError: toolResult?.is_error ?? false,
   };
 
@@ -515,23 +469,7 @@ function computeTurnMetrics(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Phase 6: Extract user prompt text.
-// ---------------------------------------------------------------------------
-
-function extractPrompt(userLine: UserLine): string {
-  const content = userLine.message.content;
-  if (typeof content === 'string') return content;
-  const parts: string[] = [];
-  for (const block of content) {
-    if (block.type === 'text') {
-      parts.push(block.text);
-    }
-  }
-  return parts.join('\n');
-}
-
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 // Phase 7: Compute context composition info for the turn.
 // ---------------------------------------------------------------------------
 
@@ -621,7 +559,7 @@ export function computeTimeline(
       }
       results.push({
         i,
-        prompt: extractPrompt(group.userLine),
+        prompt: extractPromptText(group.userLine.message.content),
         ts: group.startTs,
         asstReqs: 0,
         maxInput: 0,
@@ -803,7 +741,7 @@ export function computeTimeline(
               const existing = cumTools[c.name] ?? { calls: 0, resultTokens: 0, task: c.name === 'Agent' || c.name === 'Workflow' };
               const resultStr = typeof trBlock.content === 'string'
                 ? trBlock.content
-                : extractToolResultText(trBlock.content);
+                : extractContentText(trBlock.content);
               existing.resultTokens += Math.round(resultStr.length / 3.5);
               cumTools[c.name] = existing;
               break;
@@ -844,7 +782,7 @@ export function computeTimeline(
     // 10. Build the result.
     results.push({
       i, // 0-based index (matching array position).
-      prompt: extractPrompt(group.userLine),
+      prompt: extractPromptText(group.userLine.message.content),
       ts: group.startTs,
       asstReqs,
       maxInput,

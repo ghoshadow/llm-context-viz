@@ -11,6 +11,7 @@ import type {
 } from '../types/session';
 import type { TurnContextComposition } from './compute-context';
 import type { TimelineResult } from './compute-timeline';
+import { isTaskTool } from './utils';
 
 // ============================================================================
 // Session metadata extraction
@@ -63,14 +64,6 @@ const CATEGORY_META: Record<string, { label: string; group: ContextCategory['gro
 };
 
 const ESTIMATED_KEYS = new Set(['sysPrompt', 'tool_defs', 'skills', 'memory', 'mcp', 'reminders']);
-
-// ============================================================================
-// Tool name classification
-// ============================================================================
-
-function isTaskTool(name: string): boolean {
-  return name.startsWith('Task');
-}
 
 // ============================================================================
 // Main aggregation function

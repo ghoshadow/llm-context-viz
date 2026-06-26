@@ -9,3 +9,4 @@ data/extractions/
 src/pipeline/system-constants.json
 .env
 tsconfig.tsbuildinfo
+.playwright-mcp/

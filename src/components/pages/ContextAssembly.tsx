@@ -10,6 +10,7 @@ import {
 } from '../../styles/theme';
 import { squarify } from '../../utils/geometry';
 import { fmt, fmtK } from '../../utils/format';
+import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import type {
   ContextCategory,
   ToolAggregation,
@@ -522,8 +523,8 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
     const toolRows: ToolRow[] = tools.map((t) => ({
       name: t.name,
       calls: t.calls,
-      resultChars: Math.round(t.resultTokens * 3.0),
-      resultFmt: fmt(Math.round(t.resultTokens * 3.0)) + ' chars',
+      resultChars: Math.round(t.resultTokens * CHARS_PER_TOKEN),
+      resultFmt: fmt(Math.round(t.resultTokens * CHARS_PER_TOKEN)) + ' chars',
       barPct: (t.resultTokens / maxRes) * 100,
       color: t.task ? 'oklch(0.67 0.15 25)' : 'oklch(0.76 0.13 62)',
       taskTag: t.task ? ' · 子 Agent' : '',
@@ -1805,7 +1806,7 @@ export default function ContextAssembly({ peakData, embedded, mode }: PeakDataPr
         }}
       >
         <span>
-          Token 数量按 ~3.0 字符/token 估算（DeepSeek 官方：英文 3.33 / 中文 1.67） · {derived.cwd} · v{derived.version}
+          Token 数量按 ~{CHARS_PER_TOKEN} 字符/token 估算（DeepSeek 官方：英文 3.33 / 中文 1.67） · {derived.cwd} · v{derived.version}
         </span>
         <span>
           标"估算"的模块（系统提示词 · 工具 schema）为近似值 —— 日志中未记录

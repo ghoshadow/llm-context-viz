@@ -5,6 +5,7 @@ import { existsSync, readFileSync, realpathSync } from 'fs';
 import { getKnowledgeCardContext, type ObsidianOntologyDataLike } from '../obsidian/card-context';
 import { rejectUntrustedLocalRequest } from '../obsidian/local-request';
 import { resolveObsidianNotePath, validateConfig, writeObsidianCard } from '../obsidian/sync';
+import { getObsidianConfig } from './obsidian';
 import { findJsonlFile } from './shared';
 import {
   type OntologyDataLike,
@@ -26,21 +27,6 @@ const router = Router({ mergeParams: true });
 
 function params(req: any): { id: string } { return req.params; }
 function cardParams(req: any): { id: string; topicId: string } { return req.params; }
-
-// ============================================================================
-// Obsidian helpers (small, used by 2 routes — keep local)
-// ============================================================================
-
-function getObsidianConfig(): { vaultPath: string | null; notesDir: string; filenameTemplate: string } {
-  const row = getDb().prepare(
-    `SELECT vault_path, notes_dir, filename_template FROM obsidian_config WHERE id = 1`
-  ).get() as { vault_path: string | null; notes_dir: string; filename_template: string } | undefined;
-  return {
-    vaultPath: row?.vault_path || null,
-    notesDir: row?.notes_dir || 'LLM知识卡片',
-    filenameTemplate: row?.filename_template || '第{{startTurn}}-{{endTurn}}轮 - {{title}} - {{topicHash}}.md',
-  };
-}
 
 function getSavedCardSummary(sessionId: string, topicId: string): string | null {
   const row = getDb().prepare(
@@ -68,6 +54,36 @@ function syncRecordMatchesCurrentVault(row: ObsidianSyncRecord | undefined, conf
   catch { return false; }
 }
 
+// ── Shared DB helpers (eliminates repeated query patterns) ────────────────
+
+/** Retrieve and parse the ontology JSON for a session, or null. */
+function getOntologyData(sessionId: string): OntologyDataLike | null {
+  const row = getDb().prepare(
+    'SELECT ontology_json FROM ontology WHERE session_id = ?'
+  ).get(sessionId) as { ontology_json: string } | undefined;
+  if (!row) return null;
+  return JSON.parse(row.ontology_json);
+}
+
+/** Retrieve a session's raw JSONL, falling back to disk search. */
+function getSessionRawJsonl(sessionId: string): string | null {
+  const row = getDb().prepare(
+    'SELECT id, raw_jsonl, filename FROM sessions WHERE id = ?'
+  ).get(sessionId) as { id: string; raw_jsonl: string | null; filename: string } | undefined;
+  if (!row) return null;
+  if (row.raw_jsonl) return row.raw_jsonl;
+  const filePath = findJsonlFile(row.filename);
+  if (filePath && existsSync(filePath)) return readFileSync(filePath, 'utf-8');
+  return null;
+}
+
+/** Upsert ontology data for a session. */
+function saveOntology(sessionId: string, data: unknown, maxTurn: number): void {
+  getDb().prepare(
+    `INSERT OR REPLACE INTO ontology (session_id, ontology_json, max_turn, updated_at) VALUES (?, ?, ?, datetime('now'))`
+  ).run(sessionId, JSON.stringify(data), maxTurn);
+}
+
 // ============================================================================
 // GET / — get ontology data
 // ============================================================================
@@ -78,7 +94,7 @@ router.get('/', (req, res) => {
     const row = db.prepare('SELECT ontology_json, max_turn FROM ontology WHERE session_id = ?')
       .get(params(req).id) as { ontology_json: string; max_turn: number } | undefined;
 
-    if (!row) return res.status(404).json({ error: '该会话尚无本体数据。请通过 POST 上传本体 JSON。' });
+    if (!row) return res.json({ data: null });
 
     const data = JSON.parse(row.ontology_json);
     // 动态补全 aggregates（旧数据兼容）
@@ -128,8 +144,7 @@ router.post('/', (req, res) => {
       return res.status(404).json({ error: '会话不存在' });
     }
     const maxTurn = Math.max(...data.nodes.map((n: { firstTurn: number }) => n.firstTurn), 1);
-    db.prepare(`INSERT OR REPLACE INTO ontology (session_id, ontology_json, max_turn, updated_at) VALUES (?, ?, ?, datetime('now'))`)
-      .run(params(req).id, JSON.stringify(data), maxTurn);
+    saveOntology(params(req).id, data, maxTurn);
     return res.json({ sessionId: params(req).id, maxTurn, data });
   } catch (err) {
     console.error('POST /ontology error:', err);
@@ -177,12 +192,9 @@ router.put('/summarize-card/:topicId', (req, res) => {
     if (typeof summary !== 'string' || !summary.trim()) {
       return res.status(400).json({ error: '知识总结内容不能为空' });
     }
-    const db = getDb();
-    const row = db.prepare('SELECT ontology_json FROM ontology WHERE session_id = ?')
-      .get(id) as { ontology_json: string } | undefined;
-    if (!row) return res.status(404).json({ error: '该会话尚无本体数据' });
+    const data = getOntologyData(id);
+    if (!data) return res.status(404).json({ error: '该会话尚无本体数据' });
 
-    const data = JSON.parse(row.ontology_json) as OntologyDataLike;
     const topic = Array.isArray(data.nodes) ? data.nodes.find((n) => n.id === topicId) : undefined;
     if (!topic) return res.status(400).json({ error: '主题节点不存在' });
     if (topic.type !== 'topic') return res.status(400).json({ error: '只有问题/主题节点可以保存知识总结' });
@@ -321,9 +333,7 @@ router.post('/build', (req, res) => {
     if (!db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(params(req).id)) return res.status(404).json({ error: '会话不存在' });
 
     const result = buildOntology({ candidates, relations, config });
-    const { data, meta } = result;
-    db.prepare(`INSERT OR REPLACE INTO ontology (session_id, ontology_json, max_turn, updated_at) VALUES (?, ?, ?, datetime('now'))`)
-      .run(params(req).id, JSON.stringify(data), meta.maxTurn);
+    saveOntology(params(req).id, result.data, result.meta.maxTurn);
     return res.status(201).json({ sessionId: params(req).id, ...result });
   } catch (err) {
     return res.status(500).json({ error: err instanceof Error ? err.message : '构建本体数据时出错' });
@@ -347,17 +357,13 @@ router.get('/content-status', async (req, res) => {
 router.post('/content-extract', async (req, res) => {
   try {
     const sessionId = params(req).id;
-    const db = getDb();
-    const session = db.prepare('SELECT id, raw_jsonl, filename FROM sessions WHERE id = ?')
-      .get(sessionId) as { id: string; raw_jsonl: string | null; filename: string } | undefined;
-    if (!session) return res.status(404).json({ error: '会话不存在' });
-
-    let rawJsonl = session.raw_jsonl;
-    if (!rawJsonl) {
-      const filePath = findJsonlFile(session.filename);
-      if (filePath && existsSync(filePath)) rawJsonl = readFileSync(filePath, 'utf-8');
+    const rawJsonl = getSessionRawJsonl(sessionId);
+    if (rawJsonl === null) {
+      // null means session not found
+      const exists = getDb().prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId);
+      if (!exists) return res.status(404).json({ error: '会话不存在' });
+      return res.status(400).json({ error: '该会话的原始 JSONL 数据不可用' });
     }
-    if (!rawJsonl) return res.status(400).json({ error: '该会话的原始 JSONL 数据不可用' });
 
     const { extractToFiles } = await import('../content/extract-to-files.js');
     const { shardSize, maxShardChars, force } = req.body || {};
@@ -417,16 +423,12 @@ router.post('/extract', async (req, res) => {
     const db = getDb();
     updateExtractJob(sessionId, 'start', { shards: 0, totalTurns: 0 });
 
-    const session = db.prepare('SELECT id, raw_jsonl, filename FROM sessions WHERE id = ?')
-      .get(sessionId) as { id: string; raw_jsonl: string | null; filename: string } | undefined;
-    if (!session) { send('error', { message: '会话不存在' }); return; }
-
-    let rawJsonl = session.raw_jsonl;
-    if (!rawJsonl) {
-      const filePath = findJsonlFile(session.filename);
-      if (filePath && existsSync(filePath)) rawJsonl = readFileSync(filePath, 'utf-8');
+    const rawJsonl = getSessionRawJsonl(sessionId);
+    if (rawJsonl === null) {
+      const exists = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId);
+      if (!exists) { send('error', { message: '会话不存在' }); return; }
+      send('error', { message: '该会话的原始 JSONL 数据不可用' }); return;
     }
-    if (!rawJsonl) { send('error', { message: '该会话的原始 JSONL 数据不可用' }); return; }
 
     const { extractAndBuild } = await import('../llm/extract-ontology.js');
     const { shardSize, maxShardChars, force, incremental, retryFailedOnly, extractionDepth } = req.body || {};
@@ -472,8 +474,7 @@ router.post('/extract', async (req, res) => {
           } catch { /* fall through */ }
         }
       }
-      db.prepare(`INSERT OR REPLACE INTO ontology (session_id, ontology_json, max_turn, updated_at) VALUES (?, ?, ?, datetime('now'))`)
-        .run(sessionId, JSON.stringify(data), meta.maxTurn);
+      saveOntology(sessionId, data, meta.maxTurn);
       send('complete', { sessionId, maxTurn: meta.maxTurn, stats: result.shardStats });
     } else {
       send('error', { message: result.message, detail: result.detail, stage: result.stage });

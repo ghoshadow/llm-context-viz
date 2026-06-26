@@ -97,6 +97,65 @@ function renderInlineMarkdown(text: string, keyPrefix: string): React.ReactNode[
 }
 
 // ---------------------------------------------------------------------------
+// Markdown Table
+// ---------------------------------------------------------------------------
+
+/** Check if a trimmed line is a markdown table row (starts and ends with |). */
+function isTableRow(line: string): boolean {
+  return /^\|.+\|$/.test(line);
+}
+
+/** Check if a trimmed line is a table separator row: |---|:---:|---| etc. */
+function isTableSeparator(line: string): boolean {
+  return /^\|[\s\-:|]+\|$/.test(line) && line.includes('-');
+}
+
+/** Parse alignment from a separator row. Returns 'left' | 'center' | 'right' for each column. */
+function parseAlignments(separator: string): Array<'left' | 'center' | 'right'> {
+  return separator
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((cell) => {
+      const trimmed = cell.trim();
+      if (trimmed.startsWith(':') && trimmed.endsWith(':')) return 'center';
+      if (trimmed.endsWith(':')) return 'right';
+      return 'left';
+    });
+}
+
+/** Split a table row into cell values (trimmed, without leading/trailing |). */
+function parseTableCells(row: string): string[] {
+  return row
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+const TABLE_STYLE: React.CSSProperties = {
+  width: '100%',
+  margin: '0 0 12px',
+  borderCollapse: 'collapse' as const,
+  fontSize: 12,
+  lineHeight: 1.55,
+};
+
+const TH_STYLE: React.CSSProperties = {
+  padding: '7px 10px',
+  borderBottom: '2px solid oklch(0.38 0.014 265)',
+  textAlign: 'left' as const,
+  fontWeight: 650,
+  color: 'oklch(0.88 0.01 265)',
+  background: 'oklch(0.19 0.01 265 / 0.6)',
+  whiteSpace: 'nowrap' as const,
+};
+
+const TD_STYLE: React.CSSProperties = {
+  padding: '6px 10px',
+  borderBottom: '1px solid oklch(0.24 0.012 265)',
+  verticalAlign: 'top' as const,
+};
+
+// ---------------------------------------------------------------------------
 // Code Block (with syntax highlighting when language is specified)
 // ---------------------------------------------------------------------------
 
@@ -173,6 +232,7 @@ export function MarkdownBlock({ text, fontSize = 12.5, preserveNewlines = false 
   const blocks: React.ReactNode[] = [];
   let paragraph: string[] = [];
   let list: Array<{ ordered: boolean; text: string }> = [];
+  let tableRows: string[] = [];
   let code: string[] | null = null;
   let codeLang = '';
   let codeFence = '';
@@ -214,6 +274,54 @@ export function MarkdownBlock({ text, fontSize = 12.5, preserveNewlines = false 
     list = [];
   };
 
+  const flushTable = () => {
+    if (tableRows.length < 2) { tableRows = []; return; }
+    // Expect: header row, separator row, then 0+ data rows
+    if (!isTableRow(tableRows[0]!) || !isTableSeparator(tableRows[1]!)) {
+      // Not a valid table — fall back to paragraph rendering
+      flushParagraph();
+      tableRows = [];
+      return;
+    }
+    const headerCells = parseTableCells(tableRows[0]!);
+    const alignments = parseAlignments(tableRows[1]!);
+    const dataRows = tableRows.slice(2).filter((r) => isTableRow(r));
+
+    // Pad alignments to match header column count
+    while (alignments.length < headerCells.length) alignments.push('left');
+
+    blocks.push(
+      <div key={`table-wrap-${blocks.length}`} style={{ overflowX: 'auto', marginBottom: 12 }}>
+        <table style={TABLE_STYLE}>
+          <thead>
+            <tr>
+              {headerCells.map((cell, ci) => (
+                <th key={ci} style={{ ...TH_STYLE, textAlign: alignments[ci] ?? 'left' }}>
+                  {renderInlineMarkdown(cell, `th-${blocks.length}-${ci}`)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dataRows.map((row, ri) => {
+              const cells = parseTableCells(row);
+              return (
+                <tr key={ri}>
+                  {headerCells.map((_, ci) => (
+                    <td key={ci} style={{ ...TD_STYLE, textAlign: alignments[ci] ?? 'left' }}>
+                      {renderInlineMarkdown(cells[ci] ?? '', `td-${blocks.length}-${ri}-${ci}`)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>,
+    );
+    tableRows = [];
+  };
+
   lines.forEach((rawLine) => {
     const line = rawLine.trimEnd();
     const trimmed = line.trim();
@@ -252,8 +360,20 @@ export function MarkdownBlock({ text, fontSize = 12.5, preserveNewlines = false 
     if (!trimmed) {
       flushParagraph();
       flushList();
+      flushTable();
       return;
     }
+
+    // Table rows
+    if (isTableRow(trimmed) || (tableRows.length > 0 && isTableSeparator(trimmed))) {
+      if (tableRows.length === 0) {
+        flushParagraph();
+        flushList();
+      }
+      tableRows.push(trimmed);
+      return;
+    }
+    if (tableRows.length > 0) flushTable();
 
     // Headings
     const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
@@ -318,6 +438,7 @@ export function MarkdownBlock({ text, fontSize = 12.5, preserveNewlines = false 
 
   flushParagraph();
   flushList();
+  flushTable();
 
   // Unclosed code block
   const openCode = code as string[] | null;

@@ -2,7 +2,7 @@
  * schema.ts
  *
  * Zod schema 定义 — 候选实体、关系和分片输出格式。
- * 被 mcp-collector.ts（MCP tool 参数验证）和 build-ontology.ts（类型引用）共用。
+ * 被 extract-ontology.ts（LLM 提取验证）和 build-ontology.ts（类型引用）共用。
  */
 
 import { z } from 'zod';

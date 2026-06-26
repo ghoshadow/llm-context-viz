@@ -7,7 +7,7 @@ import type {
   AssistantMessage,
   ContentBlock,
 } from '../types/session';
-import { BLOCK_WRAPPER_CHARS } from './constants';
+import { isSubAgentTool, extractContentText } from './utils';
 
 // ---------------------------------------------------------------------------
 // Token estimator interface
@@ -33,8 +33,8 @@ export type TurnContextComposition = Record<string, number>;
 
 /**
  * Rich per-turn context entry with raw character counts in addition to
- * token estimates. Consumers that need `{tokens, raw}` pairs should
- * call `computeContextRich` instead of `computeContext`.
+ * token estimates. Internally used by the `snapshot()` helper; consumers
+ * typically use `TurnContextComposition` (tokens-only) as the pipeline output.
  */
 export interface CategoryMetrics {
   tokens: number;
@@ -89,45 +89,11 @@ export function setMemoryChars(chars: number): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Flatten ContentBlock trees into a plain text string.
- *
- * Handles text blocks, nested tool_result blocks, and nested text children.
- * Image blocks are ignored (no text contribution).
- */
-/** Per-block JSON wrapper overhead: {"type":"text","text":"..."} ≈ 23 chars ≈ 8 tok @ 3.0. */
-
-function extractContentText(content: string | ContentBlock[]): string {
-  if (typeof content === 'string') return content;
-
-  let result = '';
-  for (const block of content) {
-    if (block.type === 'text') {
-      result += block.text;
-      result += ' '.repeat(BLOCK_WRAPPER_CHARS); // JSON wrapper overhead
-    } else if (block.type === 'tool_result') {
-      // Recurse: tool_result.content is string | ContentBlock[]
-      result += extractContentText(block.content);
-    }
-    // image blocks contribute no text
-  }
-  return result;
-}
-
-/**
  * Extract text from a tool_result block only (asserts the type).
  */
 function extractToolResultText(block: ContentBlock): string {
   if (block.type !== 'tool_result') return '';
   return extractContentText(block.content);
-}
-
-// ---------------------------------------------------------------------------
-// Helpers: tool-name classification
-// ---------------------------------------------------------------------------
-
-/** Returns true if the tool name indicates a sub-agent spawn. */
-function isSubAgentTool(name: string): boolean {
-  return name === 'Agent' || name === 'Workflow';
 }
 
 // ---------------------------------------------------------------------------

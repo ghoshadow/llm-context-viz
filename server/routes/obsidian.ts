@@ -1,37 +1,34 @@
 import { Router } from 'express';
 import { getDb } from '../db';
-import { validateConfig } from '../obsidian/sync';
+import { validateConfig, DEFAULT_FILENAME_TEMPLATE, type ObsidianConfig } from '../obsidian/sync';
 import { rejectUntrustedLocalRequest } from '../obsidian/local-request';
 
 const router = Router();
 
 const DEFAULT_NOTES_DIR = 'LLM知识卡片';
-const DEFAULT_FILENAME_TEMPLATE = '第{{startTurn}}-{{endTurn}}轮 - {{title}} - {{topicHash}}.md';
 
-interface ObsidianConfigRow {
-  vault_path: string | null;
-  notes_dir: string;
-  filename_template: string;
-}
-
-function getConfigRow(): ObsidianConfigRow {
+/**
+ * Read Obsidian config from the DB, returning camelCase defaults if not set.
+ * Exported so other route modules (ontology) can reuse it.
+ */
+export function getObsidianConfig(): ObsidianConfig {
   const row = getDb().prepare(`
     SELECT vault_path, notes_dir, filename_template
     FROM obsidian_config
     WHERE id = 1
-  `).get() as ObsidianConfigRow | undefined;
+  `).get() as { vault_path: string | null; notes_dir: string; filename_template: string } | undefined;
 
-  return row || {
-    vault_path: null,
-    notes_dir: DEFAULT_NOTES_DIR,
-    filename_template: DEFAULT_FILENAME_TEMPLATE,
+  return {
+    vaultPath: row?.vault_path || null,
+    notesDir: row?.notes_dir || DEFAULT_NOTES_DIR,
+    filenameTemplate: row?.filename_template || DEFAULT_FILENAME_TEMPLATE,
   };
 }
 
 router.get('/config', (_req, res) => {
   try {
     if (rejectUntrustedLocalRequest(_req, res)) return;
-    const row = getConfigRow();
+    const row = getObsidianConfig();
     const validation = validateConfig({
       vaultPath: row.vault_path,
       notesDir: row.notes_dir,

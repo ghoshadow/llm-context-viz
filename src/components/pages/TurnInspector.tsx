@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUIStore } from '../../store/uiStore';
 import {
@@ -18,6 +18,7 @@ import {
 } from '../../styles/theme';
 import { fmt, fmtK, fmtDur, fmtDate } from '../../utils/format';
 import { post, get } from '../../api/client';
+import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { MarkdownBlock } from '../shared/MarkdownBlock';
 import { DiffView } from '../shared/DiffView';
 import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -63,10 +64,13 @@ function looksLikeCode(text: string): boolean {
   }
 
   const pct = numbered / lines.length;
+  const kwPct = codeIndicators / lines.length;
   // Heavily line-numbered → almost certainly code output
   if (pct >= 0.6) return true;
   // Mix of line numbers and code keywords → likely code
   if (pct >= 0.3 && codeIndicators >= 2) return true;
+  // High density of code keywords (e.g. file contents without line numbers)
+  if (kwPct >= 0.3 || codeIndicators >= 5) return true;
   return false;
 }
 
@@ -253,19 +257,19 @@ function ContextStructure({
       .sort((a, b) => comp[b]! - comp[a]!);
   }, [comp]);
 
-  // Raw character counts (comp values are tokens = chars/3.0)
+  // Raw character counts (comp values are tokens = chars/CHARS_PER_TOKEN)
   const compSum = Object.values(comp).reduce((a, b) => a! + b!, 0) || 1;
-  const charTotal = Math.round(compSum * 3.0);
+  const charTotal = Math.round(compSum * CHARS_PER_TOKEN);
 
   const barSegs = order.map((k) => ({
     key: k,
     color: COLORS[k] ?? 'oklch(0.5 0 0)',
     pct: (comp[k]! / compSum) * 100,
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
-    title: `${LABELS[k] ?? k} — ${fmt(Math.round(comp[k]! * 3.0))} chars`,
+    title: `${LABELS[k] ?? k} — ${fmt(Math.round(comp[k]! * CHARS_PER_TOKEN))} chars`,
   }));
 
-  const charValues = order.map(k => Math.round(comp[k]! * 3.0));
+  const charValues = order.map(k => Math.round(comp[k]! * CHARS_PER_TOKEN));
   const charDrift = charTotal - charValues.reduce((a, b) => a + b, 0);
   if (charDrift !== 0 && charValues.length > 0) {
     let maxIdx = 0;
@@ -1232,7 +1236,7 @@ function DeltaPanel({ delta }: DeltaPanelProps) {
       key: k,
       label: DELTA_LABELS[k] ?? k,
       color: COLORS[k] ?? 'oklch(0.5 0 0)',
-      tokensFmt: fmt(Math.round(delta[k]! * 3.0)) + ' chars',
+      tokensFmt: fmt(Math.round(delta[k]! * CHARS_PER_TOKEN)) + ' chars',
       barPct: Math.max(3, (delta[k]! / dmax) * 100),
     }));
   }, [delta]);
@@ -1403,6 +1407,25 @@ export default function TurnInspector() {
     setSelectedStepIndex(null);
   }, [currentTurnIndex, setSelectedStepIndex]);
 
+  const prevSegLen = useRef(0);
+
+  // Auto-refresh: re-parse JSONL (reads from disk) then update if changed
+  useEffect(() => {
+    if (!currentSessionId || currentTurnIndex === null) return;
+    const timer = setInterval(async () => {
+      try {
+        await post(`/sessions/${currentSessionId}/refresh`);
+        const t = await get<TurnDetail>(`/sessions/${currentSessionId}/turns/${currentTurnIndex}`);
+        const newLen = (t.segs ?? []).length;
+        if (newLen !== prevSegLen.current) {
+          prevSegLen.current = newLen;
+          useSessionStore.setState({ currentTurn: t });
+        }
+      } catch { /* silently skip */ }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [currentSessionId, currentTurnIndex]);
+
   const handleCompEnter = useCallback((key: string) => {
     setHoveredComp(key);
   }, []);
@@ -1425,7 +1448,7 @@ export default function TurnInspector() {
     const modelMs = currentTurn.model_ms ?? 0;
     const toolMs = currentTurn.tool_ms ?? 0;
     const subMs = currentTurn.sub_ms ?? 0;
-    const stepCount = currentTurn.step_count ?? 0;
+    const stepCount = segs.length;
 
     const longestName = longest.k === 'm' ? '模型生成' : longest.n;
     const longestMs = longest.ms ?? 0;
@@ -1778,7 +1801,7 @@ export default function TurnInspector() {
       {/* ================================================================ */}
       <footer className="app-footer">
         <span>
-          Token 数量按 ~3.0 字符/token 估算（基于 DeepSeek 官方比率：英文 3.33 / 中文 1.67） · "累计拼装"为到该轮为止拼入上下文的内容总量 · 标"估算"的模块为近似值
+          Token 数量按 ~{CHARS_PER_TOKEN} 字符/token 估算（基于 DeepSeek 官方比率：英文 3.33 / 中文 1.67） · "累计拼装"为到该轮为止拼入上下文的内容总量 · 标"估算"的模块为近似值
         </span>
       </footer>
 

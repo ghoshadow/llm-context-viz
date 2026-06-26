@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import multer from 'multer';
 import crypto from 'crypto';
-import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { getDb } from '../db';
+import { callLLM } from '../llm/client';
 import { createSession, refreshSession } from '../services/pipeline-service';
 import { enrichWithSubAgents } from './scanner';
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs';
@@ -378,13 +378,6 @@ router.post('/:id/translate', async (req, res) => {
       return res.json({ translated: text });
     }
 
-    const model = process.env.LLM_MODEL || 'deepseek-v4-pro';
-    const apiKey = process.env.LLM_API_KEY;
-    const baseUrl = process.env.LLM_BASE_URL || 'https://api.deepseek.com/anthropic';
-    if (!apiKey) {
-      return res.status(500).json({ error: '未设置 LLM_API_KEY 环境变量' });
-    }
-
     // Build a numbered list of segments to translate
     const items = toTranslate.map((t, i) => `[${i}] ${t}`).join('\n%%%\n');
     const prompt = `请将以下 ${toTranslate.length} 段非中文内容逐段翻译为中文。
@@ -396,30 +389,15 @@ router.post('/:id/translate', async (req, res) => {
 
 ${items}`;
 
-    const q = query({
-      prompt,
-      options: {
-        model,
-        maxTurns: 1,
-        thinking: { type: 'disabled' as const },
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        env: { ...process.env, ANTHROPIC_API_KEY: apiKey, ANTHROPIC_BASE_URL: baseUrl } as Record<string, string>,
-      },
-    });
-
-    const rawChunks: string[] = [];
-    for await (const msg of q) {
-      if (msg.type !== 'assistant') continue;
-      const am = msg as SDKMessage & { type: 'assistant'; message?: { content?: unknown[] } };
-      for (const block of am.message?.content || []) {
-        const b = block as { type?: string; text?: string };
-        if (b.type === 'text' && b.text) rawChunks.push(b.text);
-      }
+    let response: string;
+    try {
+      response = await callLLM(prompt);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return res.status(500).json({ error: '翻译失败: ' + message });
     }
 
-    const response = rawChunks.join('\n').trim();
-    if (!response) throw new Error('LLM 未返回翻译结果');
+    if (!response) return res.status(500).json({ error: '翻译失败: LLM 未返回翻译结果' });
 
     // Parse numbered segments — line-based, using %%% as segment delimiter.
     // [N] markers are only recognized after a %%% separator (or at the start),

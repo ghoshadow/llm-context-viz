@@ -5,6 +5,7 @@ import { SEMANTIC } from '../../styles/theme';
 import OntologyGraph from './OntologyGraph';
 import OntologyToolbar from './OntologyToolbar';
 import OntologyDetailPanel from './OntologyDetailPanel';
+import ProgressBar from '../shared/ProgressBar';
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -431,9 +432,7 @@ export default function OntologyPage() {
                   : extractPhase === 'merging' ? '正在合并分片结果...' : '正在构建知识图谱...'}
               </div>
               {extractPhase === 'extracting' && extractProgress.shardsTotal > 0 && (
-                <div style={{ height: 5, borderRadius: 3, background: 'oklch(0.24 0.012 265)', overflow: 'hidden', marginBottom: 10 }}>
-                  <div style={{ height: '100%', borderRadius: 3, width: `${Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)}%`, background: 'oklch(0.74 0.12 165)', transition: 'width .3s ease' }} />
-                </div>
+                <ProgressBar pct={Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)} />
               )}
               {extractProgress.shardDetails.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 180, overflowY: 'auto' }}>
@@ -650,16 +649,11 @@ export default function OntologyPage() {
                 ? `提取中 ${extractProgress.shardsCompleted}/${extractProgress.shardsTotal}`
                 : extractPhase === 'merging' ? '合并分片结果...' : '构建知识图谱...'}
             </div>
-            <div style={{ height: 3, borderRadius: 2, background: 'oklch(0.24 0.012 265)', overflow: 'hidden' }}>
-              <div style={{
-                height: '100%', borderRadius: 2,
-                width: extractPhase === 'extracting' && extractProgress.shardsTotal > 0
-                  ? `${Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)}%`
-                  : extractPhase === 'extracting' ? '0%' : extractProgress.shardsTotal > 0 ? `${Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)}%` : '100%',
-                background: 'oklch(0.74 0.12 165)',
-                transition: 'width .3s ease',
-              }} />
-            </div>
+            <ProgressBar height={3} marginBottom={0} pct={
+              extractPhase === 'extracting' && extractProgress.shardsTotal > 0
+                ? Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100)
+                : extractPhase === 'extracting' ? 0 : extractProgress.shardsTotal > 0 ? Math.round((extractProgress.shardsCompleted / extractProgress.shardsTotal) * 100) : 100
+            } />
           </div>
           {extractError && (
             <span style={{ fontSize: 11, color: 'oklch(0.76 0.13 45)', flexShrink: 0, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

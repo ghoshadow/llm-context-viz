@@ -16,7 +16,6 @@ import type {
   SessionSummary,
   TurnData,
   TurnGroup,
-  TimelineSegment,
   TurnDelta,
 } from '../types/session';
 
@@ -26,6 +25,7 @@ import { computeContext } from './compute-context';
 import { computeDeltas } from './compute-deltas';
 import { computeTimeline } from './compute-timeline';
 import { aggregateSession } from './aggregate-session';
+import { estimateTokens, extractPromptText } from './utils';
 
 import type { ParseError } from './parse-jsonl';
 import type { TurnContextComposition, TokenEstimator } from './compute-context';
@@ -43,32 +43,12 @@ export { loadCalibratedConstants } from './compute-context';
 export { computeDeltas } from './compute-deltas';
 export { computeTimeline } from './compute-timeline';
 export { aggregateSession } from './aggregate-session';
+// Re-export shared utilities
+export { estimateTokens, CHARS_PER_TOKEN, isSubAgentTool, isTaskTool } from './utils';
 
 export type { ParseError } from './parse-jsonl';
 export type { TurnContextComposition, TokenEstimator } from './compute-context';
 export type { TimelineResult } from './compute-timeline';
-
-/**
- * Calibrate chars-per-token ratio from the first assistant message's usage data.
- *
- * The first request carries the full system scaffolding plus the first user message.
- * `usage.input_tokens` is the ground truth for how many tokens that content consumed.
- * Dividing the raw character count by the actual token count gives a per-session ratio
- * that accounts for language mix (Chinese/English/code) and model-specific tokenization.
- */
-/**
- * Return a calibrated token estimator if API usage data is available;
- * otherwise fall back to a sensible default.
- *
- * The hardcoded system-module character counts used previously turned out to
- * be unreliable — the actual system prompt varies by CLI version, enabled
- * skills, MCP servers, etc.  Instead we use 3.0 chars/token, a weighted
- * average between English (1 char ≈ 0.3 tok → 3.33) and Chinese
- * (1 char ≈ 0.6 tok → 1.67), per DeepSeek official docs.
- */
-function calibrateEstimator(_groups: TurnGroup[]): TokenEstimator {
-  return { estimate(text: string): number { return text.length / 3.0; } };
-}
 
 // ---------------------------------------------------------------------------
 // Primary pipeline function (synchronous)
@@ -92,8 +72,8 @@ export function runPipeline(jsonlText: string, filename: string): {
   // Stage 1: Group into turns
   const groups: TurnGroup[] = identifyTurns(lines);
 
-  // Calibrate token estimator from actual API usage data
-  const estimator = calibrateEstimator(groups);
+  // Use the shared 3.0 chars/token estimator (see utils.ts for rationale)
+  const estimator: TokenEstimator = { estimate: estimateTokens };
 
   // Stage 2: Compute cumulative context composition
   const compositions: TurnContextComposition[] = computeContext(groups, estimator);
@@ -138,7 +118,7 @@ function assembleTurns(
     const tl = timelines[i];
 
     // Extract user prompt text from the initiating user line
-    const prompt = extractPromptText(group.userLine);
+    const prompt = extractPromptText(group.userLine.message.content);
 
     // Tool usage: count tool_use blocks by name across all assistant lines
     const tools: Record<string, number> = {};
@@ -197,20 +177,4 @@ function assembleTurns(
   }
 
   return turns;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function extractPromptText(userLine: TurnGroup['userLine']): string {
-  const content = userLine.message.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    const texts = content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text);
-    return texts.join('\n');
-  }
-  return '';
 }
