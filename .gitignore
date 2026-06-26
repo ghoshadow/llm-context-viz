@@ -5,6 +5,7 @@ data/*.db-*
 data/extractions/
 .DS_Store
 .claude-trace/
+.codex-trace/
 .claude/
 src/pipeline/system-constants.json
 .env
