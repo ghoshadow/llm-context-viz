@@ -81,6 +81,14 @@ function appendOutput(job: CalibrationJob, text: string): void {
   }
 }
 
+export function summarizeCalibrationProxyExit(code: number | null, output: string[]): string {
+  const fallback = `calibration proxy exited with code ${code}`;
+  const explicitError = [...output].reverse().find((line) => line.includes('[calibration-proxy] ERROR '));
+  if (!explicitError) return fallback;
+  const detail = explicitError.replace(/^.*?\[calibration-proxy\] ERROR\s+/, '').trim();
+  return detail ? `${detail}; ${fallback}` : fallback;
+}
+
 function snapshot(job: CalibrationJob): CalibrationJobSnapshot {
   const { child: _child, cleanupTimer: _cleanupTimer, ...rest } = job;
   return { ...rest, output: [...rest.output] };
@@ -164,7 +172,7 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
     if (code !== 0 && job.status !== 'captured') {
       job.status = 'failed';
       job.completedAt = new Date().toISOString();
-      job.error = `calibration proxy exited with code ${code}`;
+      job.error = summarizeCalibrationProxyExit(code, job.output);
       job.message = code === 2
         ? 'no target request captured; capture target may not match the active Claude Code base URL'
         : 'calibration proxy failed';
