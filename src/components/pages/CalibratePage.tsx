@@ -5,6 +5,7 @@ import { post, put, get } from '../../api/client';
 import { SEMANTIC } from '../../styles/theme';
 import { fmt } from '../../utils/format';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
+import { getCalibrationFailureNotice } from './calibrationFailureNotice';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,6 +101,19 @@ function StatCard({ label, value, unit, accent }: { label: string; value: string
   );
 }
 
+function ErrorNotice({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      marginTop: 2, padding: '10px 14px', borderRadius: 8,
+      background: 'oklch(0.50 0.14 25 / 0.15)',
+      border: '1px solid oklch(0.50 0.14 25 / 0.3)',
+      color: 'oklch(0.72 0.14 25)', fontSize: 13,
+    }}>
+      {children}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -116,6 +130,7 @@ export default function CalibratePage() {
   const [autoTargetHost, setAutoTargetHost] = useState('http://127.0.0.1:15721');
   const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
+  const permissionNotice = getCalibrationFailureNotice(autoJob);
 
   // Load current constants on mount
   useEffect(() => {
@@ -303,15 +318,30 @@ export default function CalibratePage() {
               log: {autoJob.logFile}
             </div>
           )}
-          {autoJob?.error && (
+          {permissionNotice ? (
+            <ErrorNotice>
+              <div style={{ fontWeight: 600, color: 'oklch(0.78 0.14 25)', marginBottom: 4 }}>
+                {permissionNotice.title}
+              </div>
+              <div style={{ lineHeight: 1.5 }}>{permissionNotice.detail}</div>
+              {permissionNotice.command && (
+                <pre style={{
+                  margin: '8px 0 0', padding: '8px 10px', borderRadius: 7,
+                  background: 'oklch(0.15 0.01 265)', color: S.textPrimary3,
+                  fontFamily: MONO, fontSize: 12, whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}>{permissionNotice.command}</pre>
+              )}
+            </ErrorNotice>
+          ) : autoJob?.error && (
             <div style={{ fontSize: 12, color: 'oklch(0.72 0.14 25)' }}>
               {autoJob.error}
             </div>
           )}
           {error && (
-            <div style={{ marginTop: 2, padding: '10px 14px', borderRadius: 8, background: 'oklch(0.50 0.14 25 / 0.15)', border: '1px solid oklch(0.50 0.14 25 / 0.3)', color: 'oklch(0.72 0.14 25)', fontSize: 13 }}>
+            <ErrorNotice>
               {error}
-            </div>
+            </ErrorNotice>
           )}
         </div>
       </section>
