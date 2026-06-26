@@ -44,7 +44,7 @@ The primary Codex calibration path is automatic:
 
 4. The proxy forwards to the original configured base URL and captures the first `/responses` request and response.
 5. The extractor reads the captured request body and streamed response usage.
-6. The raw capture is discarded by default after constants are extracted.
+6. The raw capture is written to `.codex-trace/codex-api-log-*.jsonl` for audit and future parser improvements.
 
 This approach avoids HTTPS MITM and certificate installation because the child Codex process is explicitly pointed at the local proxy. The proxy then talks to the original upstream using the original scheme (`http` or `https`).
 
@@ -167,9 +167,9 @@ Extend the calibration route without breaking existing Claude clients.
   - Start a temporary local reverse proxy.
   - Spawn `codex exec --ephemeral` with a temporary `base_url` override.
   - Capture the first `/responses` request/response.
+  - Persist the raw capture under `.codex-trace/` with sensitive headers redacted.
   - Extract constants.
   - Return the extraction result and optionally apply it when `apply=1`.
-  - Do not persist raw request/response bodies unless the caller passes an explicit debug flag.
 
 - `POST /api/calibrate?source=codex`
   - Upload a Codex API capture log as a manual fallback.
@@ -198,10 +198,11 @@ Responsibilities:
 
 - Read `~/.codex/config.toml` and locate the active model provider base URL.
 - Allocate a local port and start the reverse proxy.
-- Redact sensitive headers before any optional debug logging.
+- Redact sensitive headers before writing the raw capture log.
+- Write each captured request/response pair to `.codex-trace/codex-api-log-<timestamp>.jsonl`.
 - Spawn the Codex calibration command with a temporary `base_url` override.
 - Stop after the child exits or after a timeout.
-- Return the captured request/response pair to the extractor.
+- Return the captured request/response pair and raw log path to the extractor.
 
 Timeout behavior:
 
@@ -221,7 +222,8 @@ Claude mode keeps the current instructions and result cards.
 Codex mode shows:
 
 - Primary action: `自动校准 Codex 常量`.
-- Status output for the automatic flow: proxy started, Codex probe started, request captured, constants extracted, applied.
+- Status output for the automatic flow: proxy started, Codex probe started, request captured, raw log saved, constants extracted, applied.
+- Raw log path after success, for example `.codex-trace/codex-api-log-2026-06-26T...jsonl`.
 - Manual fallback: upload `.codex-trace/codex-api-log-*.jsonl`.
 - Extracted cards:
   - Codex CLI version if available from paired JSONL or request metadata, otherwise `unknown`
@@ -238,15 +240,17 @@ Automatic calibration should default to applying the extracted constants after s
 
 ## Trace Safety
 
-The automatic reverse proxy must redact sensitive headers before any optional debug logging:
+The automatic reverse proxy must persist raw API request/response bodies for auditability. Before writing logs it must redact sensitive headers:
 
 - `authorization`
 - `cookie`
 - keys containing `key`, `token`, `secret`, or `auth`
 
-The extractor should never persist request headers. The constants file should persist only counts, tool names, hashes, model/version metadata, and timestamps.
+The raw log may contain model-visible prompt content, tool definitions, tool outputs, reasoning summaries, and encrypted reasoning blobs. This is expected and useful for calibration debugging. It must stay local.
 
-Automatic calibration should not write `.codex-trace/` by default. If a debug option writes raw capture logs, `.codex-trace/` remains local-only and must not be committed.
+The constants file should persist only counts, tool names, hashes, model/version metadata, timestamps, and the raw log path. It should not duplicate the full request or response body.
+
+The `.codex-trace/` directory remains local-only and must not be committed.
 
 ## Testing
 
