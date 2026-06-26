@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   getCalibrationDetailDisplay,
   getCalibrationDetailLayout,
+  getCalibrationDetailTranslationSlot,
   getCalibrationDetailSectionIndex,
 } from './calibrationDetailModal';
 
@@ -23,6 +24,13 @@ test('builds different translation cache sections for different constants and co
   assert.notEqual(sysA, sysB);
   assert.notEqual(sysA, toolsA);
   assert.equal(getCalibrationDetailSectionIndex('SYS_PROMPT_FALLBACK_CHARS', 'alpha'), sysA);
+});
+
+test('builds stable translation cache slot for calibration detail', () => {
+  assert.deepEqual(getCalibrationDetailTranslationSlot('SYS_PROMPT_FALLBACK_CHARS', 'alpha'), {
+    stepIndex: -100,
+    sectionIndex: getCalibrationDetailSectionIndex('SYS_PROMPT_FALLBACK_CHARS', 'alpha'),
+  });
 });
 
 test('renders system prompt detail as plain text and unwraps legacy text fence', () => {

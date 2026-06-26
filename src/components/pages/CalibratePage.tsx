@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useUIStore } from '../../store/uiStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { post, put, get } from '../../api/client';
@@ -10,7 +10,7 @@ import { MarkdownBlock } from '../shared/MarkdownBlock';
 import {
   getCalibrationDetailDisplay,
   getCalibrationDetailLayout,
-  getCalibrationDetailSectionIndex,
+  getCalibrationDetailTranslationSlot,
 } from './calibrationDetailModal';
 
 // ---------------------------------------------------------------------------
@@ -311,6 +311,27 @@ export default function CalibratePage() {
   const detailTranslatedDisplay = detailModal && detailTranslatedText
     ? getCalibrationDetailDisplay(detailModal.key, detailTranslatedText)
     : undefined;
+  const detailTranslationSlot = useMemo(
+    () => detailModal && detailDisplay
+      ? getCalibrationDetailTranslationSlot(detailModal.key, detailDisplay.text)
+      : undefined,
+    [detailDisplay, detailModal],
+  );
+
+  useEffect(() => {
+    if (!detailModal || !detailTranslationSlot || !currentSessionId || currentTurnIndex == null) return;
+    if (detailTranslations[detailModal.key]) return;
+    let cancelled = false;
+    get<{ translations: Record<string, Record<string, string>> }>(`/sessions/${currentSessionId}/translations/${currentTurnIndex}`)
+      .then((res) => {
+        const translated = res.translations?.[String(detailTranslationSlot.stepIndex)]?.[String(detailTranslationSlot.sectionIndex)];
+        if (!cancelled && translated) {
+          setDetailTranslations((prev) => ({ ...prev, [detailModal.key]: translated }));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentSessionId, currentTurnIndex, detailModal, detailTranslationSlot, detailTranslations]);
 
   const handleDetailCopy = useCallback(async () => {
     if (!detailModal || !detailDisplay) return;
@@ -327,7 +348,7 @@ export default function CalibratePage() {
   }, [detailDisplay, detailModal, detailTranslatedDisplay, detailTranslatedText]);
 
   const handleDetailTranslate = useCallback(async () => {
-    if (!detailModal || !detailDisplay || detailTranslating) return;
+    if (!detailModal || !detailDisplay || !detailTranslationSlot || detailTranslating) return;
     if (detailTranslations[detailModal.key]) return;
     if (!currentSessionId || currentTurnIndex == null) {
       setDetailTranslateError('请先打开一个会话和轮次，再使用翻译。');
@@ -339,8 +360,8 @@ export default function CalibratePage() {
       const res = await post<{ translated: string }>(`/sessions/${currentSessionId}/translate`, {
         text: detailDisplay.text,
         turnIndex: currentTurnIndex,
-        stepIndex: -100,
-        sectionIndex: getCalibrationDetailSectionIndex(detailModal.key, detailDisplay.text),
+        stepIndex: detailTranslationSlot.stepIndex,
+        sectionIndex: detailTranslationSlot.sectionIndex,
       });
       setDetailTranslations((prev) => ({ ...prev, [detailModal.key]: res.translated }));
     } catch (err) {
@@ -348,7 +369,7 @@ export default function CalibratePage() {
     } finally {
       setDetailTranslating(false);
     }
-  }, [currentSessionId, currentTurnIndex, detailDisplay, detailModal, detailTranslating, detailTranslations]);
+  }, [currentSessionId, currentTurnIndex, detailDisplay, detailModal, detailTranslating, detailTranslations, detailTranslationSlot]);
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 0', fontFamily: SANS, color: 'oklch(0.93 0.006 265)' }}>

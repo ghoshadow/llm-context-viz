@@ -1,5 +1,6 @@
 export type CalibrationDetailLayout = 'single' | 'side-by-side';
 export type CalibrationDetailDisplay = { text: string; markdown: boolean };
+export type CalibrationDetailTranslationSlot = { stepIndex: number; sectionIndex: number };
 
 export type CalibrationDetailKey =
   | 'SYS_PROMPT_FALLBACK_CHARS'
@@ -28,6 +29,16 @@ export function getCalibrationDetailSectionIndex(key: CalibrationDetailKey, text
     SYSTEM_REMINDER_CHROME_CHARS: 920300000,
   };
   return base[key] + hashText(text);
+}
+
+export function getCalibrationDetailTranslationSlot(
+  key: CalibrationDetailKey,
+  text: string,
+): CalibrationDetailTranslationSlot {
+  return {
+    stepIndex: -100,
+    sectionIndex: getCalibrationDetailSectionIndex(key, text),
+  };
 }
 
 function hashText(text: string): number {
