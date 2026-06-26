@@ -166,7 +166,7 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
       job.completedAt = new Date().toISOString();
       job.error = `calibration proxy exited with code ${code}`;
       job.message = code === 2
-        ? 'no target request captured; Claude Code may not honor HTTPS_PROXY or target host may be wrong'
+        ? 'no target request captured; capture target may not match the active Claude Code base URL'
         : 'calibration proxy failed';
       scheduleCleanup(job);
       return;

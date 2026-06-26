@@ -9,6 +9,7 @@ const {
   redactHeaders,
   makeLogFilePath,
   chooseWritableLogFilePath,
+  resolveCaptureTarget,
   cleanForwardHeaders,
   tryParse,
 } = require('./calibration-proxy-utils.cjs');
@@ -92,4 +93,20 @@ test('tryParse parses json and leaves text untouched', () => {
   assert.equal(tryParse('text/plain', 'hello'), 'hello');
   assert.equal(tryParse('application/json', '{oops'), '{oops');
   assert.equal(tryParse('application/json', ''), null);
+});
+
+test('resolveCaptureTarget treats full URL as base-url mode', () => {
+  assert.deepEqual(resolveCaptureTarget('http://127.0.0.1:15721'), {
+    mode: 'base-url',
+    upstreamBaseUrl: 'http://127.0.0.1:15721',
+    targetHost: '127.0.0.1',
+  });
+});
+
+test('resolveCaptureTarget treats bare host as connect mode', () => {
+  assert.deepEqual(resolveCaptureTarget('api.deepseek.com'), {
+    mode: 'connect',
+    upstreamBaseUrl: null,
+    targetHost: 'api.deepseek.com',
+  });
 });

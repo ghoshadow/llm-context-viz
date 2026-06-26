@@ -136,7 +136,7 @@ export default function CalibratePage() {
   const [applied, setApplied] = useState(false);
   const [currentConstants, setCurrentConstants] = useState<CurrentConstants | null>(null);
   const [autoPrompt, setAutoPrompt] = useState('say hi');
-  const [autoTargetHost, setAutoTargetHost] = useState('api.deepseek.com');
+  const [autoTargetHost, setAutoTargetHost] = useState('http://127.0.0.1:15721');
   const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
 
@@ -288,6 +288,9 @@ export default function CalibratePage() {
           <div style={{ fontSize: 12, color: S.textMuted, fontFamily: MONO, wordBreak: 'break-all' }}>
             cwd: {sessionCwd || '未选择会话'}
           </div>
+          <div style={{ fontSize: 12, color: S.textDesc3, lineHeight: 1.5 }}>
+            Capture Target 可填完整 Base URL（如 cc_switch 的 http://127.0.0.1:15721），也可填裸 host（如 api.deepseek.com）。
+          </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 340px', minWidth: 0 }}>
               Prompt
@@ -303,7 +306,7 @@ export default function CalibratePage() {
               />
             </label>
             <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 220px', minWidth: 0 }}>
-              Target Host
+              Capture Target
               <input
                 value={autoTargetHost}
                 onChange={(e) => setAutoTargetHost(e.target.value)}
@@ -312,7 +315,7 @@ export default function CalibratePage() {
                   border: `1px solid ${S.borderColor}`, borderRadius: 8, padding: '10px 12px',
                   background: 'oklch(0.16 0.01 265)', color: S.textPrimary3, fontFamily: MONO,
                 }}
-                aria-label="目标 API host"
+                aria-label="捕获目标 host 或 base url"
               />
             </label>
           </div>

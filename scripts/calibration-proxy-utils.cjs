@@ -103,6 +103,29 @@ function chooseWritableLogFilePath(cwd, date = new Date(), homeDir = os.homedir(
   return path.join(fallbackDir, `api-log-${timestampForFile(date)}.jsonl`);
 }
 
+function normalizeBaseUrl(value) {
+  const url = new URL(value);
+  const normalized = url.toString();
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+function resolveCaptureTarget(value) {
+  const raw = String(value || "").trim();
+  if (/^https?:\/\//i.test(raw)) {
+    const url = new URL(raw);
+    return {
+      mode: "base-url",
+      upstreamBaseUrl: normalizeBaseUrl(raw),
+      targetHost: url.hostname,
+    };
+  }
+  return {
+    mode: "connect",
+    upstreamBaseUrl: null,
+    targetHost: raw || "api.deepseek.com",
+  };
+}
+
 function pickPort(host = "127.0.0.1") {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -124,5 +147,6 @@ module.exports = {
   ensureDir,
   makeLogFilePath,
   chooseWritableLogFilePath,
+  resolveCaptureTarget,
   pickPort,
 };
