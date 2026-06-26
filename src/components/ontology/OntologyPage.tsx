@@ -27,7 +27,6 @@ export default function OntologyPage() {
   const ontologyError = useSessionStore((s) => s.ontologyError);
   const ontologyFetched = useSessionStore((s) => s.ontologyFetched);
   const fetchOntology = useSessionStore((s) => s.fetchOntology);
-  const buildOntology = useSessionStore((s) => s.buildOntology);
   const extractOntology = useSessionStore((s) => s.extractOntology);
   const fetchExtractStatus = useSessionStore((s) => s.fetchExtractStatus);
   const extractPhase = useSessionStore((s) => s.extractPhase);
@@ -38,12 +37,6 @@ export default function OntologyPage() {
   const extractRootDir = useSessionStore((s) => s.extractRootDir);
   const extractError = useSessionStore((s) => s.extractError);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
-
-  // Build form state
-  const [buildJson, setBuildJson] = useState('');
-  const [buildExpanded, setBuildExpanded] = useState(false);
-  const [buildMsg, setBuildMsg] = useState<string | null>(null);
-  const [buildErr, setBuildErr] = useState<string | null>(null);
 
   // Auto-extract state
   const [shardSize, setShardSize] = useState(30);
@@ -226,28 +219,6 @@ export default function OntologyPage() {
 
   // ─── Render: always show page shell with header/nav ─────────────────────
 
-  const tryBuild = async () => {
-    setBuildMsg(null); setBuildErr(null);
-    try {
-      const parsed = JSON.parse(buildJson);
-      if (!parsed.candidates || !parsed.relations) {
-        setBuildErr('JSON 必须包含 candidates 和 relations 数组');
-        return;
-      }
-      setBuildMsg('构建中...');
-      const ok = await buildOntology(parsed);
-      if (ok) {
-        setBuildMsg('构建成功！图谱已保存。');
-        setBuildJson('');
-        setBuildExpanded(false);
-      } else {
-        setBuildErr('构建失败，请检查控制台');
-      }
-    } catch (e) {
-      setBuildErr(e instanceof SyntaxError ? 'JSON 格式错误: ' + e.message : String(e));
-    }
-  };
-
   const renderBody = () => {
     if (ontologyLoading) {
       return (
@@ -267,12 +238,7 @@ export default function OntologyPage() {
       return (
         <div style={{ maxWidth: 700, margin: '60px auto 0', padding: '0 20px', color: SEMANTIC.textMuted, fontSize: 14, lineHeight: 1.8, flex: 1 }}>
           <h2 style={{ fontSize: 20, fontWeight: 600, color: SEMANTIC.textPrimary, marginBottom: 12 }}>暂无本体数据</h2>
-          <p>本体数据需要从会话内容中通过语义抽取生成。两种方式提供数据：</p>
-          <ol style={{ paddingInlineStart: 20, margin: '8px 0' }}>
-            <li>🤖 自动提取（推荐）：由 LLM 自动从会话内容中抽取实体和关系</li>
-            <li>直接上传已构建好的 <code style={{ fontFamily: "'IBM Plex Mono', monospace", background: SEMANTIC.innerCardBg, padding: '2px 6px', borderRadius: 4 }}>OntologyData</code> JSON（POST /:id/ontology）</li>
-            <li>通过下面的构建管线，提供候选实体 + 语义关系，自动过滤/消歧/组装</li>
-          </ol>
+          <p>本体数据会由 LLM 自动从会话内容中抽取实体和关系，并构建为可浏览的知识图谱。</p>
 
           {renderExtractCards(false)}
         </div>
@@ -464,28 +430,6 @@ export default function OntologyPage() {
         </div>
       </div>
 
-      {/* ── Build pipeline card ──────────────────────────────────────────── */}
-      <div style={{ marginTop: 24, border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 12, background: SEMANTIC.cardBg, overflow: 'hidden' }}>
-        <button onClick={() => setBuildExpanded(!buildExpanded)}
-          style={{ width: '100%', textAlign: 'left', border: 'none', padding: '14px 18px', background: 'transparent', color: SEMANTIC.textPrimary, cursor: 'pointer', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          通过构建管线生成（粘贴候选 JSON）
-          <span style={{ fontSize: 11, color: SEMANTIC.textMuted, fontWeight: 400 }}>{buildExpanded ? '收起 ▲' : '展开 ▼'}</span>
-        </button>
-        {buildExpanded && (
-          <div style={{ padding: '0 18px 18px' }}>
-            <p style={{ margin: '0 0 10px', fontSize: 12, color: SEMANTIC.textDesc3 }}>粘贴包含 <code>candidates</code>、<code>relations</code> 和可选 <code>config</code> 的 JSON。</p>
-            <textarea value={buildJson} onChange={(e) => setBuildJson(e.target.value)}
-              placeholder='{"candidates": [...], "relations": [...], "config": {...}}' rows={8}
-              style={{ width: '100%', background: 'oklch(0.19 0.01 265)', color: SEMANTIC.textPrimary, border: `1px solid ${SEMANTIC.borderColor}`, borderRadius: 8, padding: 12, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, resize: 'vertical', lineHeight: 1.5 }} />
-            <button onClick={tryBuild} disabled={!buildJson.trim() || ontologyLoading}
-              style={{ marginTop: 10, padding: '9px 18px', borderRadius: 8, cursor: 'pointer', border: '1px solid oklch(0.45 0.09 165)', background: 'oklch(0.74 0.12 165 / 0.14)', color: 'oklch(0.84 0.10 165)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, opacity: buildJson.trim() ? 1 : 0.4 }}>
-              {ontologyLoading ? '构建中...' : '▶ 构建图谱'}
-            </button>
-            {buildMsg && <div style={{ marginTop: 8, fontSize: 12, color: 'oklch(0.78 0.12 150)' }}>{buildMsg}</div>}
-            {buildErr && <div style={{ marginTop: 8, fontSize: 12, color: 'oklch(0.76 0.13 45)' }}>{buildErr}</div>}
-          </div>
-        )}
-      </div>
     </>
   );
 
@@ -509,12 +453,7 @@ export default function OntologyPage() {
           <h2 style={{ fontSize: 20, fontWeight: 600, color: SEMANTIC.textPrimary, margin: '0 0 12px' }}>
             {extractMode === 'incremental' ? '增量更新本体数据' : '重建本体数据'}
           </h2>
-          <p>本体数据需要从会话内容中通过语义抽取生成。两种方式提供数据：</p>
-          <ol style={{ paddingInlineStart: 20, margin: '8px 0' }}>
-            <li>🤖 自动提取（推荐）：由 LLM 自动从会话内容中抽取实体和关系</li>
-            <li>直接上传已构建好的 <code style={{ fontFamily: "'IBM Plex Mono', monospace", background: SEMANTIC.innerCardBg, padding: '2px 6px', borderRadius: 4 }}>OntologyData</code> JSON（POST /:id/ontology）</li>
-            <li>通过下面的构建管线，提供候选实体 + 语义关系，自动过滤/消歧/组装</li>
-          </ol>
+          <p>本体数据会由 LLM 自动从会话内容中抽取实体和关系。你可以重建完整图谱，或只提取新增轮次做增量更新。</p>
           {renderExtractCards(true)}
         </div>
       </div>

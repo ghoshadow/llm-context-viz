@@ -3,6 +3,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db';
 import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
+import { isCodexJsonl, runCodexPipeline } from '../../src/pipeline/codex-jsonl';
 import type { SessionSummary, TurnData } from '../../src/types/session';
 import type Database from 'better-sqlite3';
 
@@ -17,6 +18,8 @@ import type Database from 'better-sqlite3';
  * JSONL line's `cwd` field.
  */
 export function computeMemoryChars(jsonlContent?: string): number {
+  if (jsonlContent && isCodexJsonl(jsonlContent)) return 0;
+
   let memChars = 0;
   try {
     const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
@@ -48,6 +51,10 @@ export function runPipelineOnContent(
   jsonlContent: string,
   filename: string,
 ): { summary: SessionSummary; turns: TurnData[] } {
+  if (isCodexJsonl(jsonlContent)) {
+    return runCodexPipeline(jsonlContent, filename);
+  }
+
   loadCalibratedConstants();
   setMemoryChars(computeMemoryChars(jsonlContent));
   return runPipeline(jsonlContent, filename);

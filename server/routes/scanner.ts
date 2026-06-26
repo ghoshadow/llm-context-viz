@@ -8,15 +8,23 @@ import { createSession } from '../services/pipeline-service';
 
 const router = Router();
 
-// Default scan paths — Claude Code stores transcripts under ~/.claude/projects/
+type SessionSource = 'claude' | 'codex';
+
+// Default scan paths — Claude Code and Codex store transcripts in different homes.
 const DEFAULT_SCAN_PATHS = [
   join(homedir(), '.claude', 'projects'),
+  join(homedir(), '.codex', 'sessions'),
+  join(homedir(), '.codex', 'archived_sessions'),
 ];
 
 /**
  * Recursively scan a directory for .jsonl files.
  * Returns an array of { path, name, size, modified } for each file found.
  */
+function inferSource(filePath: string): SessionSource {
+  return filePath.includes(`${join(homedir(), '.codex')}/`) ? 'codex' : 'claude';
+}
+
 function scanDir(dir: string, maxDepth = 3): FoundFile[] {
   const results: FoundFile[] = [];
   if (!existsSync(dir)) return results;
@@ -35,6 +43,7 @@ function scanDir(dir: string, maxDepth = 3): FoundFile[] {
             name: entry,
             size: st.size,
             modified: st.mtime.toISOString(),
+            source: inferSource(full),
           });
         }
       } catch {
@@ -53,6 +62,7 @@ interface FoundFile {
   name: string;
   size: number;
   modified: string;
+  source: SessionSource;
   title?: string;
   model?: string;
   requests?: number;
@@ -73,7 +83,26 @@ function isQuickToolResult(obj: any): boolean {
   return false;
 }
 
+function textFromOpenAiContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((block) => {
+      if (!block || typeof block !== 'object') return '';
+      const b = block as { type?: string; text?: string };
+      return (b.type === 'input_text' || b.type === 'output_text') && typeof b.text === 'string'
+        ? b.text
+        : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
 function quickMeta(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+  return inferSource(filePath) === 'codex' ? quickMetaCodex(filePath) : quickMetaClaude(filePath);
+}
+
+function quickMetaClaude(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
   let title: string | undefined;
   let model: string | undefined;
   let requests = 0;
@@ -114,6 +143,52 @@ function quickMeta(filePath: string): { title?: string; model?: string; requests
   } catch { /* can't read */ }
 
   return { title, model, requests, peakTokens, turnCount };
+}
+
+function quickMetaCodex(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+  let title: string | undefined;
+  let fallbackTitle: string | undefined;
+  let model: string | undefined;
+  let requests = 0;
+  let peakTokens = 0;
+  let turnCount = 0;
+  const seenTurns = new Set<string>();
+
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const lines = raw.split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const payload = obj.payload || {};
+
+        if (obj.type === 'session_meta') {
+          if (!fallbackTitle && typeof payload.id === 'string') fallbackTitle = payload.id;
+          if (!model && typeof payload.model === 'string') model = payload.model;
+        } else if (obj.type === 'turn_context') {
+          if (!model && typeof payload.model === 'string') model = payload.model;
+        }
+
+        if (payload.type === 'task_started' && typeof payload.turn_id === 'string') {
+          seenTurns.add(payload.turn_id);
+          turnCount = seenTurns.size;
+        } else if (payload.type === 'user_message' && !title && typeof payload.message === 'string') {
+          title = payload.message.trim().slice(0, 120);
+        } else if (obj.type === 'response_item' && payload.type === 'message' && payload.role === 'user' && !title) {
+          const text = textFromOpenAiContent(payload.content).trim();
+          if (text && !text.startsWith('<environment_context>')) title = text.slice(0, 120);
+        } else if (obj.type === 'event_msg' && payload.type === 'token_count') {
+          requests++;
+          const usage = payload.info?.last_token_usage;
+          const input = usage?.input_tokens;
+          if (typeof input === 'number' && input > peakTokens) peakTokens = input;
+        }
+      } catch { /* skip malformed lines */ }
+    }
+  } catch { /* can't read */ }
+
+  return { title: title || fallbackTitle, model: model || 'codex', requests, peakTokens, turnCount };
 }
 
 // ── GET /scan ──────────────────────────────────────────────────────────────
@@ -228,6 +303,9 @@ function extractSessionTitle(jsonlContent: string): string {
     for (const line of jsonlContent.split('\n').slice(0, 50)) {
       if (!line.trim()) continue;
       const obj = JSON.parse(line);
+      if (obj.type === 'event_msg' && obj.payload?.type === 'user_message' && typeof obj.payload.message === 'string') {
+        return obj.payload.message.trim().slice(0, 120);
+      }
       // First non-tool user message is the best title
       if (obj.type === 'user' && !obj.isSidechain && obj.message?.role === 'user') {
         const c = obj.message.content;
@@ -403,10 +481,6 @@ router.post('/import', (req, res) => {
     const { sessionId, summary, turns } = createSession({
       jsonlContent: content, filename, hash, aiTitle, rawJsonl: null,
     });
-
-    // Enrich turns with sub-agent summaries from the session directory
-    const sessDir = filePath.replace(/\.jsonl$/, '');
-    enrichWithSubAgents(turns, sessDir);
 
     res.status(201).json({
       imported: true,

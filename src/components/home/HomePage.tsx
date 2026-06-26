@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUIStore } from '../../store/uiStore';
 import type { SessionListItem } from '../../types/session';
 import { SEMANTIC } from '../../styles/theme';
 import { fmtK, fmtDateOnly } from '../../utils/format';
+import { getSessionSource, type SessionSource } from '../../utils/sessionSource';
 
 // ─── Styles (inline objects) ────────────────────────────────────────────
 
@@ -69,6 +70,34 @@ const s = {
     maxWidth: 1080,
     margin: '0 auto',
   },
+
+  tabs: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 4,
+    padding: 4,
+    maxWidth: 1080,
+    margin: '0 auto 18px',
+    borderRadius: 8,
+    background: 'oklch(0.15 0.008 265)',
+    border: `1px solid ${SEMANTIC.borderColor}`,
+  } as React.CSSProperties,
+
+  tabBtn: {
+    border: 'none',
+    borderRadius: 6,
+    padding: '8px 10px',
+    background: 'transparent',
+    color: SEMANTIC.textMuted,
+    cursor: 'pointer',
+    fontSize: 13,
+    fontFamily: "'IBM Plex Mono', monospace",
+  } as React.CSSProperties,
+
+  tabBtnActive: {
+    background: 'oklch(0.74 0.13 60 / 0.14)',
+    color: SEMANTIC.textAccent2,
+  } as React.CSSProperties,
 
   empty: {
     textAlign: 'center' as const,
@@ -263,8 +292,9 @@ function SessionCard({ session, onSelect, onDelete }: {
 
 // ─── SessionList ────────────────────────────────────────────────────────
 
-function SessionList({ sessions, onSelect, onDelete }: {
+function SessionList({ sessions, activeSource, onSelect, onDelete }: {
   sessions: SessionListItem[];
+  activeSource: SessionSource;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -272,7 +302,7 @@ function SessionList({ sessions, onSelect, onDelete }: {
     return (
       <div style={s.grid}>
         <div style={s.empty}>
-          暂无会话，扫描本地会话目录开始分析
+          {activeSource === 'codex' ? '暂无已导入 Codex 会话' : '暂无已导入 Claude Code 会话'}
         </div>
       </div>
     );
@@ -295,6 +325,7 @@ function SessionList({ sessions, onSelect, onDelete }: {
 // ─── HomePage ───────────────────────────────────────────────────────────
 
 export default function HomePage() {
+  const [activeSource, setActiveSource] = useState<SessionSource>('claude');
   const sessions = useSessionStore((st) => st.sessions);
   const sessionsLoading = useSessionStore((st) => st.sessionsLoading);
   const fetchSessions = useSessionStore((st) => st.fetchSessions);
@@ -306,6 +337,16 @@ export default function HomePage() {
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
+
+  const claudeSessions = useMemo(
+    () => sessions.filter((session) => getSessionSource(session) === 'claude'),
+    [sessions],
+  );
+  const codexSessions = useMemo(
+    () => sessions.filter((session) => getSessionSource(session) === 'codex'),
+    [sessions],
+  );
+  const visibleSessions = activeSource === 'codex' ? codexSessions : claudeSessions;
 
   const handleSelect = async (id: string) => {
     await selectSession(id);
@@ -328,7 +369,7 @@ export default function HomePage() {
         </div>
         <h1 style={s.h1}>LLM 上下文可视化</h1>
         <p style={s.desc}>
-          扫描本地 Claude Code 会话 JSONL 文件，查看上下文窗口增长、分类 Token 构成，
+          扫描本地 Claude Code 与 Codex 会话 JSONL 文件，查看上下文窗口增长、分类 Token 构成，
           并逐轮检查推理与工具调用细节。
         </p>
         <button
@@ -341,7 +382,7 @@ export default function HomePage() {
             e.currentTarget.style.background = 'oklch(0.74 0.13 60)';
           }}
         >
-          📂 扫描本地
+          扫描本地
         </button>
       </header>
 
@@ -351,11 +392,36 @@ export default function HomePage() {
           <div style={s.empty}>加载中...</div>
         </div>
       ) : (
-        <SessionList
-          sessions={sessions}
-          onSelect={handleSelect}
-          onDelete={handleDelete}
-        />
+        <>
+          {sessions.length > 0 && (
+            <div style={s.tabs} role="tablist" aria-label="已导入会话来源">
+              {([
+                ['claude', `Claude Code (${claudeSessions.length})`],
+                ['codex', `Codex (${codexSessions.length})`],
+              ] as const).map(([source, label]) => {
+                const active = activeSource === source;
+                return (
+                  <button
+                    key={source}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    style={{ ...s.tabBtn, ...(active ? s.tabBtnActive : {}) }}
+                    onClick={() => setActiveSource(source)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <SessionList
+            sessions={visibleSessions}
+            activeSource={activeSource}
+            onSelect={handleSelect}
+            onDelete={handleDelete}
+          />
+        </>
       )}
 
       {/* Footer */}

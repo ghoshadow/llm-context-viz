@@ -74,6 +74,16 @@ function looksLikeCode(text: string): boolean {
   return false;
 }
 
+function looksLikeDiffToolOutput(text: string): boolean {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  if (lines.some(l => l.trim().startsWith('diff --git '))) return true;
+
+  return lines.some((line, idx) =>
+    /^[+\- ]\|.*\|$/.test(line.trimEnd()) &&
+    /^\s?\|[\s\-:|]+\|$/.test((lines[idx + 1] ?? '').trimEnd())
+  );
+}
+
 function segColor(k: string): string {
   if (k === 'm') return STEP_COLORS.model;
   if (k === 's') return STEP_COLORS.subagent;
@@ -779,7 +789,7 @@ function UserPromptSection({ prompt }: { prompt: string }) {
         borderBottom: open ? `1px solid ${SEMANTIC.borderSubtle1}` : 'none',
         borderRadius: open ? 8 : '8px 8px 0 0',
       }}>
-        <MarkdownBlock fontSize={13} text={prompt} />
+        <MarkdownBlock fontSize={13} text={prompt} variant="tool-output" />
       </div>
       {!open && (
         <div onClick={() => setOpen(true)} style={{
@@ -1139,6 +1149,17 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
               }
 
               if (sec.md) {
+                if (looksLikeDiffToolOutput(sec.body)) {
+                  return (
+                    <>
+                      <div className="block-body" style={{ fontFamily: sec.font, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
+                        <MarkdownBlock fontSize={12} text={sec.body} preserveNewlines={sec.preserveNewlines} variant="tool-output" />
+                      </div>
+                      {isExpandable && toggle(isOpen)}
+                    </>
+                  );
+                }
+
                 const isCode = looksLikeCode(sec.body);
                 if (isCode) {
                   return (
@@ -1166,7 +1187,7 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
                 return (
                   <>
                     <div className="block-body" style={{ fontFamily: sec.font, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
-                      <MarkdownBlock fontSize={12} text={sec.body} preserveNewlines={sec.preserveNewlines} />
+                      <MarkdownBlock fontSize={12} text={sec.body} preserveNewlines={sec.preserveNewlines} variant="tool-output" />
                     </div>
                     {isExpandable && toggle(isOpen)}
                   </>
@@ -1207,7 +1228,7 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
                 <div style={{ fontSize: 10, fontWeight: 600, color: SEMANTIC.textGreen, marginBottom: 6 }}>
                   中文翻译
                 </div>
-                <MarkdownBlock fontSize={12} text={translations[si]!} />
+                <MarkdownBlock fontSize={12} text={translations[si]!} variant="tool-output" />
               </div>
               );
             })()}

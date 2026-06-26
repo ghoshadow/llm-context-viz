@@ -307,6 +307,7 @@ export interface TurnData {
 export interface SessionListItem {
   id: string;
   filename: string;
+  source?: 'claude' | 'codex';
   model: string;
   version: string;
   ai_title?: string;

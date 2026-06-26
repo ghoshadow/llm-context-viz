@@ -4,6 +4,7 @@ import { callLLM } from '../llm/client';
 import { refreshSession } from '../services/pipeline-service';
 import { enrichWithSubAgents } from './scanner';
 import { readFileSync } from 'fs';
+import { getSessionSource } from '../../src/utils/sessionSource';
 
 import { findJsonlFile } from './shared';
 import ontologyRouter from './ontology';
@@ -29,9 +30,9 @@ router.get('/', (_req, res) => {
          FROM sessions
          ORDER BY created_at DESC`,
       )
-      .all();
+      .all() as Array<Record<string, unknown>>;
 
-    return res.json(rows);
+    return res.json(rows.map((row) => ({ ...row, source: getSessionSource(row) })));
   } catch (err) {
     console.error('GET / error:', err);
     return res.status(500).json({ error: '获取会话列表时出错' });
