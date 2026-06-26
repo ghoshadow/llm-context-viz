@@ -16,7 +16,7 @@ const router = Router();
 
 router.put('/apply', (req, res) => {
   try {
-    const body = req.body as { cwd?: string; summary?: ExtractedConstants['summary']; ccVersion?: string; model?: string };
+    const body = req.body as { cwd?: string; summary?: ExtractedConstants['summary']; details?: ExtractedConstants['details']; ccVersion?: string; model?: string };
     if (!body.cwd) {
       return res.status(400).json({ error: '缺少 cwd 字段，无法确定当前项目。' });
     }
@@ -26,6 +26,7 @@ router.put('/apply', (req, res) => {
 
     const data = writeProjectConstants(body.cwd, {
       summary: body.summary,
+      details: body.details,
       ccVersion: body.ccVersion,
       model: body.model,
     });

@@ -61,6 +61,8 @@ export interface ExtractedConstants {
     TOOL_DEFS_FALLBACK_CHARS: number;
     SYSTEM_REMINDER_CHROME_CHARS: number;
   };
+  /** Markdown-viewable source content for each calibrated constant. */
+  details?: Record<keyof ExtractedConstants['summary'], string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,10 +88,12 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
 
     // --- System blocks ---
     const systemBlocks: SystemBlocks = { total: 0, billing: 0, agentIdentity: 0, harness: 0 };
+    const systemTexts: string[] = [];
     const sysArr = body.system;
     if (Array.isArray(sysArr)) {
       for (const sb of sysArr) {
         const text: string = sb?.text ?? '';
+        systemTexts.push(text);
         systemBlocks.total += text.length;
         if (text.includes('cc_version') || text.includes('billing-header'))
           systemBlocks.billing += text.length;
@@ -101,7 +105,9 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
     }
 
     // --- Tools ---
-    const toolsChars = JSON.stringify(body.tools ?? []).length;
+    const tools = body.tools ?? [];
+    const toolsJson = JSON.stringify(tools, null, 2);
+    const toolsChars = JSON.stringify(tools).length;
 
     // --- User message (<system-reminder>) ---
     const userMsg = body.messages[0] as any;
@@ -161,6 +167,7 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
     }
 
     let contentTotal = 0;
+    const contentRanges: Array<[number, number]> = [];
 
     // Global CLAUDE.md content
     if (globalStart >= 0) {
@@ -172,7 +179,7 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
         : currentDateStart > globalStart ? currentDateStart
         : endOfText
       );
-      if (ce > cs) { up.globalClaudeMd = ce - cs; contentTotal += up.globalClaudeMd; }
+      if (ce > cs) { up.globalClaudeMd = ce - cs; contentTotal += up.globalClaudeMd; contentRanges.push([cs, ce]); }
     }
 
     // Project CLAUDE.md content
@@ -184,7 +191,7 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
         : currentDateStart > projStart ? currentDateStart
         : endOfText
       );
-      if (ce > cs) { up.projectClaudeMd = ce - cs; contentTotal += up.projectClaudeMd; }
+      if (ce > cs) { up.projectClaudeMd = ce - cs; contentTotal += up.projectClaudeMd; contentRanges.push([cs, ce]); }
     }
 
     // MCP instructions content
@@ -195,14 +202,14 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
         : currentDateStart > mcpStart ? currentDateStart
         : endOfText
       );
-      if (ce > cs) { up.mcpInstructions = ce - cs; contentTotal += up.mcpInstructions; }
+      if (ce > cs) { up.mcpInstructions = ce - cs; contentTotal += up.mcpInstructions; contentRanges.push([cs, ce]); }
     }
 
     // Skills listing content
     if (skillsStart >= 0) {
       const cs = contentStartAfter(skillsStart);
       const ce = contentEndBefore(currentDateStart > skillsStart ? currentDateStart : endOfText);
-      if (ce > cs) { up.skillsListing = ce - cs; contentTotal += up.skillsListing; }
+      if (ce > cs) { up.skillsListing = ce - cs; contentTotal += up.skillsListing; contentRanges.push([cs, ce]); }
     }
 
     // currentDate + IMPORTANT + closing tag
@@ -212,6 +219,7 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
 
     // Chrome = total - actual file content (everything else is wrapper/chrome)
     up.chrome = Math.max(0, endOfText - contentTotal);
+    const chromeText = buildChromeText(userText.slice(0, endOfText), contentRanges);
 
     // --- API token count ---
     let firstRequestTokens = 0;
@@ -242,8 +250,53 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
         TOOL_DEFS_FALLBACK_CHARS: toolsChars,
         SYSTEM_REMINDER_CHROME_CHARS: up.chrome,
       },
+      details: {
+        SYS_PROMPT_FALLBACK_CHARS: [
+          '# SYS_PROMPT_FALLBACK_CHARS',
+          '',
+          `字符数: ${systemBlocks.total}`,
+          '',
+          '```text',
+          systemTexts.join('\n\n--- system block ---\n\n'),
+          '```',
+        ].join('\n'),
+        TOOL_DEFS_FALLBACK_CHARS: [
+          '# TOOL_DEFS_FALLBACK_CHARS',
+          '',
+          `字符数: ${toolsChars}`,
+          '',
+          '```json',
+          toolsJson,
+          '```',
+        ].join('\n'),
+        SYSTEM_REMINDER_CHROME_CHARS: [
+          '# SYSTEM_REMINDER_CHROME_CHARS',
+          '',
+          `字符数: ${up.chrome}`,
+          '',
+          '```text',
+          chromeText,
+          '```',
+        ].join('\n'),
+      },
     };
   }
 
   return null;
+}
+
+function buildChromeText(text: string, rangesToRemove: Array<[number, number]>): string {
+  if (rangesToRemove.length === 0) return text;
+  const ranges = rangesToRemove
+    .map(([start, end]) => [Math.max(0, start), Math.min(text.length, end)] as [number, number])
+    .filter(([start, end]) => end > start)
+    .sort((a, b) => a[0] - b[0]);
+  let out = '';
+  let cursor = 0;
+  for (const [start, end] of ranges) {
+    if (start > cursor) out += text.slice(cursor, start);
+    cursor = Math.max(cursor, end);
+  }
+  if (cursor < text.length) out += text.slice(cursor);
+  return out.trim();
 }

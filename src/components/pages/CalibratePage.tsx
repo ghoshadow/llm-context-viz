@@ -6,6 +6,7 @@ import { SEMANTIC } from '../../styles/theme';
 import { fmt } from '../../utils/format';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { getCalibrationFailureNotice } from './calibrationFailureNotice';
+import { MarkdownBlock } from '../shared/MarkdownBlock';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,7 +43,15 @@ interface ExtractedResult {
     TOOL_DEFS_FALLBACK_CHARS: number;
     SYSTEM_REMINDER_CHROME_CHARS: number;
   };
+  details?: ConstantDetails;
 }
+
+type ConstantKey =
+  | 'SYS_PROMPT_FALLBACK_CHARS'
+  | 'TOOL_DEFS_FALLBACK_CHARS'
+  | 'SYSTEM_REMINDER_CHROME_CHARS';
+
+type ConstantDetails = Partial<Record<ConstantKey, string>>;
 
 interface CurrentConstants {
   source?: 'project' | 'defaults';
@@ -52,6 +61,7 @@ interface CurrentConstants {
   SYS_PROMPT_FALLBACK_CHARS: number;
   TOOL_DEFS_FALLBACK_CHARS: number;
   SYSTEM_REMINDER_CHROME_CHARS: number;
+  details?: ConstantDetails;
   appliedAt?: string;
   ccVersion?: string;
   model?: string;
@@ -118,6 +128,27 @@ function ErrorNotice({ children }: { children: React.ReactNode }) {
   );
 }
 
+function DetailButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        border: `1px solid ${disabled ? S.borderSubtle2 : S.borderColor}`,
+        borderRadius: 7,
+        padding: '4px 8px',
+        background: disabled ? 'oklch(0.19 0.008 265)' : 'oklch(0.22 0.012 265)',
+        color: disabled ? S.textMuted2 : S.textSecondary,
+        fontSize: 11,
+        fontFamily: SANS,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    >
+      查看
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -134,6 +165,7 @@ export default function CalibratePage() {
   const [autoTargetHost, setAutoTargetHost] = useState('http://127.0.0.1:15721');
   const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
+  const [detailModal, setDetailModal] = useState<{ key: ConstantKey; title: string; text: string } | null>(null);
   const permissionNotice = getCalibrationFailureNotice(autoJob);
 
   // Load current constants on mount
@@ -214,6 +246,7 @@ export default function CalibratePage() {
       await put('/calibrate/apply', {
         cwd: sessionCwd,
         summary: result.summary,
+        details: result.details,
         ccVersion: result.ccVersion,
         model: result.model,
       });
@@ -233,8 +266,51 @@ export default function CalibratePage() {
   // Token estimate
   const estTok = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
 
+  const openDetail = useCallback((key: ConstantKey, details: ConstantDetails | undefined, title: string) => {
+    const text = details?.[key];
+    if (!text) return;
+    setDetailModal({ key, title, text });
+  }, []);
+
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 0', fontFamily: SANS, color: 'oklch(0.93 0.006 265)' }}>
+      {detailModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1200,
+            background: 'oklch(0.10 0.006 265 / 0.74)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+          }}
+          onClick={() => setDetailModal(null)}
+        >
+          <div
+            style={{
+              width: 'min(980px, 96vw)', maxHeight: '88vh', overflow: 'hidden',
+              background: 'oklch(0.155 0.008 265)',
+              border: `1px solid ${S.borderColor}`, borderRadius: 14,
+              boxShadow: '0 34px 90px oklch(0 0 0 / 0.58)',
+              display: 'flex', flexDirection: 'column',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 18px', borderBottom: `1px solid ${S.borderColor}`, background: 'oklch(0.185 0.009 265)' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 650, color: S.textPrimary3 }}>{detailModal.title}</div>
+                <div style={{ fontSize: 11, color: S.textMuted, fontFamily: MONO }}>{detailModal.key}</div>
+              </div>
+              <button
+                onClick={() => setDetailModal(null)}
+                style={{ border: `1px solid ${S.borderColor}`, borderRadius: 8, width: 30, height: 30, background: 'oklch(0.22 0.01 265)', color: S.textSecondary, cursor: 'pointer', fontSize: 14 }}
+              >
+                x
+              </button>
+            </div>
+            <div style={{ padding: '16px 18px', overflow: 'auto' }}>
+              <MarkdownBlock text={detailModal.text} variant="markdown" preserveNewlines />
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <header className="header-bar">
         <div style={{ maxWidth: 680 }}>
@@ -425,17 +501,35 @@ export default function CalibratePage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
               <div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYS_PROMPT_FALLBACK_CHARS</div>
-                <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.SYS_PROMPT_FALLBACK_CHARS.toLocaleString()}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.SYS_PROMPT_FALLBACK_CHARS.toLocaleString()}</div>
+                  <DetailButton
+                    disabled={!result.details?.SYS_PROMPT_FALLBACK_CHARS}
+                    onClick={() => openDetail('SYS_PROMPT_FALLBACK_CHARS', result.details, '系统提示词内容')}
+                  />
+                </div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>≈ {estTok(result.summary.SYS_PROMPT_FALLBACK_CHARS)} tok</div>
               </div>
               <div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>TOOL_DEFS_FALLBACK_CHARS</div>
-                <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.TOOL_DEFS_FALLBACK_CHARS.toLocaleString()}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.TOOL_DEFS_FALLBACK_CHARS.toLocaleString()}</div>
+                  <DetailButton
+                    disabled={!result.details?.TOOL_DEFS_FALLBACK_CHARS}
+                    onClick={() => openDetail('TOOL_DEFS_FALLBACK_CHARS', result.details, '工具定义 JSON')}
+                  />
+                </div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>≈ {estTok(result.summary.TOOL_DEFS_FALLBACK_CHARS)} tok</div>
               </div>
               <div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYSTEM_REMINDER_CHROME_CHARS</div>
-                <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.SYSTEM_REMINDER_CHROME_CHARS.toLocaleString()}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.SYSTEM_REMINDER_CHROME_CHARS.toLocaleString()}</div>
+                  <DetailButton
+                    disabled={!result.details?.SYSTEM_REMINDER_CHROME_CHARS}
+                    onClick={() => openDetail('SYSTEM_REMINDER_CHROME_CHARS', result.details, 'system-reminder 包装内容')}
+                  />
+                </div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>≈ {estTok(result.summary.SYSTEM_REMINDER_CHROME_CHARS)} tok</div>
               </div>
             </div>
@@ -497,15 +591,33 @@ export default function CalibratePage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                 <div>
                   <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYS_PROMPT_FALLBACK_CHARS</div>
-                  <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYS_PROMPT_FALLBACK_CHARS.toLocaleString()}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYS_PROMPT_FALLBACK_CHARS.toLocaleString()}</div>
+                    <DetailButton
+                      disabled={!currentConstants.details?.SYS_PROMPT_FALLBACK_CHARS}
+                      onClick={() => openDetail('SYS_PROMPT_FALLBACK_CHARS', currentConstants.details, '系统提示词内容')}
+                    />
+                  </div>
                 </div>
                 <div>
                   <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>TOOL_DEFS_FALLBACK_CHARS</div>
-                  <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.TOOL_DEFS_FALLBACK_CHARS.toLocaleString()}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.TOOL_DEFS_FALLBACK_CHARS.toLocaleString()}</div>
+                    <DetailButton
+                      disabled={!currentConstants.details?.TOOL_DEFS_FALLBACK_CHARS}
+                      onClick={() => openDetail('TOOL_DEFS_FALLBACK_CHARS', currentConstants.details, '工具定义 JSON')}
+                    />
+                  </div>
                 </div>
                 <div>
                   <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYSTEM_REMINDER_CHROME_CHARS</div>
-                  <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYSTEM_REMINDER_CHROME_CHARS.toLocaleString()}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYSTEM_REMINDER_CHROME_CHARS.toLocaleString()}</div>
+                    <DetailButton
+                      disabled={!currentConstants.details?.SYSTEM_REMINDER_CHROME_CHARS}
+                      onClick={() => openDetail('SYSTEM_REMINDER_CHROME_CHARS', currentConstants.details, 'system-reminder 包装内容')}
+                    />
+                  </div>
                 </div>
               </div>
             </>

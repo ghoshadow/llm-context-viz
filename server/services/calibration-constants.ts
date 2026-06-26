@@ -21,10 +21,12 @@ export interface ProjectCalibrationConstants {
   SYS_PROMPT_FALLBACK_CHARS: number;
   TOOL_DEFS_FALLBACK_CHARS: number;
   SYSTEM_REMINDER_CHROME_CHARS: number;
+  details?: ExtractedConstants['details'];
 }
 
 export interface WriteProjectConstantsInput {
   summary: ExtractedConstants['summary'];
+  details?: ExtractedConstants['details'];
   ccVersion?: string;
   model?: string;
 }
@@ -91,6 +93,7 @@ export function readProjectConstants(cwd: string): ProjectCalibrationConstants {
     SYS_PROMPT_FALLBACK_CHARS: Number(data.SYS_PROMPT_FALLBACK_CHARS ?? DEFAULT_CALIBRATION_CONSTANTS.SYS_PROMPT_FALLBACK_CHARS),
     TOOL_DEFS_FALLBACK_CHARS: Number(data.TOOL_DEFS_FALLBACK_CHARS ?? DEFAULT_CALIBRATION_CONSTANTS.TOOL_DEFS_FALLBACK_CHARS),
     SYSTEM_REMINDER_CHROME_CHARS: Number(data.SYSTEM_REMINDER_CHROME_CHARS ?? DEFAULT_CALIBRATION_CONSTANTS.SYSTEM_REMINDER_CHROME_CHARS),
+    details: data.details,
   };
 }
 
@@ -106,6 +109,7 @@ export function writeProjectConstants(cwd: string, input: WriteProjectConstantsI
     ccVersion: input.ccVersion || 'unknown',
     model: input.model || 'unknown',
     ...input.summary,
+    ...(input.details ? { details: input.details } : {}),
   };
   try {
     writeFileSync(path, JSON.stringify(data, null, 2) + '\n');

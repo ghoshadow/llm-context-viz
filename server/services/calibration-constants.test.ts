@@ -45,6 +45,11 @@ test('writes and reads project constants', () => {
         TOOL_DEFS_FALLBACK_CHARS: 456,
         SYSTEM_REMINDER_CHROME_CHARS: 789,
       },
+      details: {
+        SYS_PROMPT_FALLBACK_CHARS: '# sys',
+        TOOL_DEFS_FALLBACK_CHARS: '# tools',
+        SYSTEM_REMINDER_CHROME_CHARS: '# reminder',
+      },
     });
     assert.equal(written.source, 'project');
     assert.equal(written.cwd, project);
@@ -55,6 +60,7 @@ test('writes and reads project constants', () => {
     assert.equal(current.SYS_PROMPT_FALLBACK_CHARS, 123);
     assert.equal(current.TOOL_DEFS_FALLBACK_CHARS, 456);
     assert.equal(current.SYSTEM_REMINDER_CHROME_CHARS, 789);
+    assert.equal(current.details?.TOOL_DEFS_FALLBACK_CHARS, '# tools');
   } finally {
     rmSync(project, { recursive: true, force: true });
   }
