@@ -20,6 +20,21 @@ test('keeps translated markdown heading on its own line', () => {
   );
 });
 
+test('keeps heading break when source heading has leading whitespace', () => {
+  const translated = reassembleTranslatedSegments(
+    [
+      { zh: true, text: '主动拆分回答或使用文件输出' },
+      { zh: false, text: '\n# currentDate\nToday date is 2026/06/26.' },
+    ],
+    ['currentDate\n今天的日期是 2026/06/26。'],
+  );
+
+  assert.equal(
+    translated,
+    '主动拆分回答或使用文件输出\ncurrentDate\n今天的日期是 2026/06/26。',
+  );
+});
+
 test('keeps code fences on their own line after translated text', () => {
   const translated = reassembleTranslatedSegments(
     [

@@ -23,9 +23,9 @@ export function getCalibrationDetailDisplay(key: CalibrationDetailKey, detail: s
 
 export function getCalibrationDetailSectionIndex(key: CalibrationDetailKey, text: string): number {
   const base: Record<CalibrationDetailKey, number> = {
-    SYS_PROMPT_FALLBACK_CHARS: 910100000,
-    TOOL_DEFS_FALLBACK_CHARS: 910200000,
-    SYSTEM_REMINDER_CHROME_CHARS: 910300000,
+    SYS_PROMPT_FALLBACK_CHARS: 920100000,
+    TOOL_DEFS_FALLBACK_CHARS: 920200000,
+    SYSTEM_REMINDER_CHROME_CHARS: 920300000,
   };
   return base[key] + hashText(text);
 }

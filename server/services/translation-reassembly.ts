@@ -26,5 +26,6 @@ export function reassembleTranslatedSegments(
 
 function needsLeadingNewline(sourceText: string, text: string, lastEndsWithNewline: boolean): boolean {
   if (lastEndsWithNewline) return false;
-  return text.startsWith('```') || text.startsWith('# ') || /^#{1,6}\s/.test(sourceText);
+  const sourceStart = sourceText.trimStart();
+  return text.startsWith('```') || text.startsWith('# ') || /^#{1,6}\s/.test(sourceStart);
 }
