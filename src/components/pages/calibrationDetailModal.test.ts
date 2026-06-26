@@ -75,6 +75,22 @@ test('renders system reminder detail as plain text and unwraps legacy text fence
   });
 });
 
+test('normalizes stuck heading breaks in translated plain text details', () => {
+  const translated = [
+    '# SYSTEM_REMINDER_CHROME_CHARS',
+    '',
+    '字符数: 42',
+    '',
+    '主动拆分回答或使用文件输出# currentDate',
+    '当前日期为 2026/06/26。',
+  ].join('\n');
+
+  assert.deepEqual(getCalibrationDetailDisplay('SYSTEM_REMINDER_CHROME_CHARS', translated), {
+    text: '主动拆分回答或使用文件输出\n# currentDate\n当前日期为 2026/06/26。',
+    markdown: false,
+  });
+});
+
 test('keeps tool detail as markdown for json code rendering', () => {
   const detail = ['# TOOL_DEFS_FALLBACK_CHARS', '', '```json', '{"name":"Read"}', '```'].join('\n');
 

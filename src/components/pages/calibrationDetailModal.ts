@@ -17,16 +17,16 @@ export function getCalibrationDetailDisplay(key: CalibrationDetailKey, detail: s
   }
 
   return {
-    text: unwrapPlainTextDetail(key, detail),
+    text: normalizePlainTextHeadings(unwrapPlainTextDetail(key, detail)),
     markdown: false,
   };
 }
 
 export function getCalibrationDetailSectionIndex(key: CalibrationDetailKey, text: string): number {
   const base: Record<CalibrationDetailKey, number> = {
-    SYS_PROMPT_FALLBACK_CHARS: 920100000,
-    TOOL_DEFS_FALLBACK_CHARS: 920200000,
-    SYSTEM_REMINDER_CHROME_CHARS: 920300000,
+    SYS_PROMPT_FALLBACK_CHARS: 930100000,
+    TOOL_DEFS_FALLBACK_CHARS: 930200000,
+    SYSTEM_REMINDER_CHROME_CHARS: 930300000,
   };
   return base[key] + hashText(text);
 }
@@ -57,6 +57,10 @@ function unwrapPlainTextDetail(key: CalibrationDetailKey, detail: string): strin
 
   const current = new RegExp(`^# ${title}\\n\\n字符数: \\d+\\n\\n([\\s\\S]*)$`).exec(detail);
   return current?.[1] ?? detail;
+}
+
+function normalizePlainTextHeadings(text: string): string {
+  return text.replace(/([^\n])(#\s+[A-Za-z][^\n]*)/g, '$1\n$2');
 }
 
 function escapeRegExp(text: string): string {
