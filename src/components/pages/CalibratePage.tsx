@@ -1,9 +1,9 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useUIStore } from '../../store/uiStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { post, put, get } from '../../api/client';
 import { SEMANTIC } from '../../styles/theme';
-import { fmt, fmtK } from '../../utils/format';
+import { fmt } from '../../utils/format';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 
 // ---------------------------------------------------------------------------
@@ -107,29 +107,6 @@ function StatCard({ label, value, unit, accent }: { label: string; value: string
 export default function CalibratePage() {
   const setPage = useUIStore((s) => s.setPage);
   const sessionCwd = useSessionStore((s) => s.currentSession?.cwd);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [projectRoot, setProjectRoot] = useState<string | null>(null);
-
-  // Fetch project root from health endpoint
-  useEffect(() => {
-    get<{ projectRoot?: string }>('/health').then(d => {
-      if (d.projectRoot) setProjectRoot(d.projectRoot);
-    }).catch(() => {});
-  }, []);
-
-  // Pre-fill the proxy command with the session's cwd and project root
-  const proxyCommand = useMemo(() => {
-    const scriptPath = projectRoot
-      ? `${projectRoot}/scripts/transparent-proxy.cjs`
-      : '/path/to/llm-context-viz/scripts/transparent-proxy.cjs';
-    if (sessionCwd) {
-      return `cd ${sessionCwd} && sudo node ${scriptPath} --cwd ${sessionCwd} -- claude -p "say hi"`;
-    }
-    return `cd /path/to/session-project && sudo node ${scriptPath} --cwd $(pwd) -- claude -p "say hi"`;
-  }, [sessionCwd, projectRoot]);
-
-  const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ExtractedResult | null>(null);
   const [applying, setApplying] = useState(false);
@@ -200,35 +177,6 @@ export default function CalibratePage() {
     }
   }, [autoJob?.jobId]);
 
-  // Handle file drop
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const f = e.dataTransfer.files[0];
-    if (f) { setFile(f); setError(null); setResult(null); setApplied(false); }
-  }, []);
-
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) { setFile(f); setError(null); setResult(null); setApplied(false); }
-  }, []);
-
-  // Upload & extract
-  const handleUpload = useCallback(async () => {
-    if (!file) return;
-    setUploading(true);
-    setError(null);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const data = await post<ExtractedResult>('/calibrate', formData);
-      setResult(data);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setUploading(false);
-    }
-  }, [file]);
-
   // Apply constants
   const handleApply = useCallback(async () => {
     if (!result) return;
@@ -261,7 +209,7 @@ export default function CalibratePage() {
           </div>
           <h1>更新系统级上下文常量</h1>
           <p className="subtitle">
-            Claude Code 版本更新后，系统提示词、工具定义等上下文常量可能变化。优先用无 sudo 本地代理自动截获一次请求，必要时仍可上传日志兜底。
+            Claude Code 版本更新后，系统提示词、工具定义等上下文常量可能变化。使用无 sudo 本地代理自动截获一次请求，并将日志固定写入项目内 .claude-trace/。
           </p>
         </div>
         <div style={{ display: 'flex', gap: 9, fontFamily: MONO, fontSize: 12 }}>
@@ -279,7 +227,7 @@ export default function CalibratePage() {
       <section style={{ marginTop: 28 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>1. 自动截获 API 请求</h2>
         <p style={{ fontSize: 13, color: S.textDesc3, marginBottom: 16, lineHeight: 1.6 }}>
-          使用无 sudo 本地代理启动一次 Claude Code，请求成功后会自动解析捕获日志。不会修改 /etc/hosts，也不会监听 443 端口。
+          使用无 sudo 本地代理启动一次 Claude Code，请求成功后会自动解析捕获日志。日志固定写入当前会话项目的 .claude-trace/ 目录。
         </p>
         <div style={{
           border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '16px 18px',
@@ -360,61 +308,12 @@ export default function CalibratePage() {
               {autoJob.error}
             </div>
           )}
-        </div>
-      </section>
-
-      {/* Manual fallback */}
-      <section style={{ marginTop: 28 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>备用：上传截获的 API 日志</h2>
-        <p style={{ fontSize: 13, color: S.textDesc3, marginBottom: 16, lineHeight: 1.6 }}>
-          如果自动代理没有捕获到 Claude Code 流量，可以继续使用透明代理生成 <code style={{ fontFamily: MONO, background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4 }}>.claude-trace/api-log-*.jsonl</code> 文件后上传。
-        </p>
-
-        {/* Drop zone */}
-        <div
-          onDrop={handleDrop}
-          onDragOver={e => e.preventDefault()}
-          onClick={() => fileInputRef.current?.click()}
-          style={{
-            border: `2px dashed ${file ? 'oklch(0.74 0.13 60)' : S.borderColor}`,
-            borderRadius: 14, padding: '40px 20px', textAlign: 'center',
-            cursor: 'pointer', background: file ? 'oklch(0.74 0.13 60 / 0.06)' : 'oklch(0.18 0.01 265)',
-            transition: 'all .2s',
-          }}
-        >
-          <input ref={fileInputRef} type="file" accept=".jsonl" onChange={handleFileChange} style={{ display: 'none' }} />
-          {file ? (
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: 'oklch(0.74 0.13 60)' }}>{file.name}</div>
-              <div style={{ fontSize: 12, color: S.textMuted, marginTop: 4 }}>{(file.size / 1024).toFixed(1)} KB</div>
-            </div>
-          ) : (
-            <div>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📁</div>
-              <div style={{ fontSize: 14, color: S.textDesc3 }}>拖拽 .jsonl 文件到此处，或点击选择</div>
+          {error && (
+            <div style={{ marginTop: 2, padding: '10px 14px', borderRadius: 8, background: 'oklch(0.50 0.14 25 / 0.15)', border: '1px solid oklch(0.50 0.14 25 / 0.3)', color: 'oklch(0.72 0.14 25)', fontSize: 13 }}>
+              {error}
             </div>
           )}
         </div>
-
-        <button
-          disabled={!file || uploading}
-          onClick={handleUpload}
-          style={{
-            marginTop: 14, border: 'none', borderRadius: 10, padding: '12px 28px',
-            fontSize: 14, fontWeight: 600, fontFamily: SANS, cursor: (!file || uploading) ? 'not-allowed' : 'pointer',
-            background: (!file || uploading) ? 'oklch(0.28 0.01 265)' : 'oklch(0.74 0.13 60)',
-            color: (!file || uploading) ? S.textMuted : 'oklch(0.12 0.01 265)',
-            opacity: (!file || uploading) ? 0.6 : 1,
-          }}
-        >
-          {uploading ? '解析中...' : '提取常量'}
-        </button>
-
-        {error && (
-          <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'oklch(0.50 0.14 25 / 0.15)', border: '1px solid oklch(0.50 0.14 25 / 0.3)', color: 'oklch(0.72 0.14 25)', fontSize: 13 }}>
-            {error}
-          </div>
-        )}
       </section>
 
       {/* Step 2: Results */}
@@ -552,36 +451,6 @@ export default function CalibratePage() {
           )}
         </div>
       </section>
-
-      {/* Footer: proxy usage */}
-      <footer style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 18 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>4. 手动兜底命令</h2>
-        <div style={{
-          border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
-          background: 'oklch(0.185 0.009 265)',
-        }}>
-          <div style={{ fontFamily: MONO, fontSize: 11, color: 'oklch(0.80 0.05 148)', lineHeight: 1.8 }}>
-            <div># 1. 启动透明代理（会临时修改 /etc/hosts，退出时自动恢复）</div>
-            {sessionCwd ? (
-              <div>
-                <div style={{ color: S.textMuted }}># 已自动填入当前会话的项目目录 ({sessionCwd})</div>
-                <span style={{ background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                  {proxyCommand}
-                </span>
-              </div>
-            ) : (
-              <div>
-                <div style={{ color: S.textMuted }}># 未加载会话，请先打开一个会话以自动检测项目目录</div>
-                <span style={{ background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                  {`sudo node ${projectRoot || '/path/to/llm-context-viz'}/scripts/transparent-proxy.cjs --cwd /path/to/project -- claude -p "say hi"`}
-                </span>
-              </div>
-            )}
-            <div style={{ marginTop: 8 }}># 2. 代理会在运行目录生成 .claude-trace/api-log-*.jsonl</div>
-            <div># 3. 在此页面拖拽上传该文件</div>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

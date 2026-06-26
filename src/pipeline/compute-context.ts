@@ -45,8 +45,8 @@ export interface CategoryMetrics {
 // Estimated system-module character sizes
 // ---------------------------------------------------------------------------
 // Defaults calibrated from a real API request capture (Claude Code v2.1.170,
-// deepseek-v4-pro). These can be overridden by uploading a capture via the
-// /api/calibrate endpoint, which writes system-constants.json.
+// deepseek-v4-pro). These can be overridden by running automatic calibration
+// from the UI, which writes system-constants.json.
 //
 // Measured from proxy capture:
 //   system blocks:  5,768 chars (billing 85 + agent 62 + harness 5,621)

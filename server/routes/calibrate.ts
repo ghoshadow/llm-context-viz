@@ -1,9 +1,8 @@
 import { Router } from 'express';
-import multer from 'multer';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
-import { extractConstants, type ExtractedConstants } from '../../src/pipeline/extract-constants';
+import type { ExtractedConstants } from '../../src/pipeline/extract-constants';
 import {
   cancelCalibrationJob,
   getCalibrationJob,
@@ -13,30 +12,10 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = join(__filename, '..'); // server/routes/
 
-const upload = multer({ dest: '/tmp/claude-trace-uploads' });
 const router = Router();
 
 // Constants file path (next to compute-context.ts)
 const CONSTANTS_FILE = join(__dirname, '..', '..', 'src', 'pipeline', 'system-constants.json');
-
-// ── POST / — upload captured API log and extract constants ──
-
-router.post('/', upload.single('file'), (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: '缺少文件' });
-    }
-
-    const extracted = extractConstants(req.file.path);
-    if (!extracted) {
-      return res.status(400).json({ error: '未找到有效的 API 请求数据。请确认文件是通过 transparent-proxy.js 截获的。' });
-    }
-
-    return res.json(extracted);
-  } catch (err) {
-    return res.status(500).json({ error: '解析失败: ' + (err as Error).message });
-  }
-});
 
 // ── PUT /apply — save extracted constants to disk ──
 

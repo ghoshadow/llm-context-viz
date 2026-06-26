@@ -14,8 +14,7 @@ const {
   redactHeaders,
   cleanForwardHeaders,
   tryParse,
-  ensureDir,
-  chooseWritableLogFilePath,
+  getProjectLogFilePath,
   resolveCaptureTarget,
 } = require("./calibration-proxy-utils.cjs");
 
@@ -252,8 +251,7 @@ async function main() {
   if (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0) throw new Error("Invalid --timeout-ms");
   if (!fs.existsSync(opts.cwd) || !fs.statSync(opts.cwd).isDirectory()) throw new Error(`Invalid cwd: ${opts.cwd}`);
 
-  const logFile = chooseWritableLogFilePath(opts.cwd);
-  ensureDir(path.dirname(logFile));
+  const logFile = getProjectLogFilePath(opts.cwd);
 
   let captured = false;
   let timedOut = false;

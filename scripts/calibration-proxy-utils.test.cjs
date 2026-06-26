@@ -1,14 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const {
   parseConnectAuthority,
   isSensitiveHeader,
   redactHeaders,
   makeLogFilePath,
-  chooseWritableLogFilePath,
+  getProjectLogFilePath,
   resolveCaptureTarget,
   cleanForwardHeaders,
   tryParse,
@@ -57,21 +56,18 @@ test('makeLogFilePath stays under cwd .claude-trace', () => {
   );
 });
 
-test('chooseWritableLogFilePath falls back when project trace dir is not writable', () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cal-proxy-'));
-  const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cal-proxy-home-'));
+test('getProjectLogFilePath fails when project trace path is not writable', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'cal-proxy-'));
   const project = path.join(tmpRoot, 'demo-project');
-  const traceDir = path.join(project, '.claude-trace');
-  fs.mkdirSync(traceDir, { recursive: true });
-  fs.chmodSync(traceDir, 0o555);
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, '.claude-trace'), 'not a directory');
   try {
-    const logFile = chooseWritableLogFilePath(project, new Date('2026-06-26T01:02:03.456Z'), homeRoot);
-    assert.equal(logFile.startsWith(path.join(homeRoot, '.claude-trace', 'logs')), true);
-    assert.equal(logFile.endsWith('api-log-2026-06-26-01-02-03.jsonl'), true);
+    assert.throws(
+      () => getProjectLogFilePath(project, new Date('2026-06-26T01:02:03.456Z')),
+      /Project trace directory is not writable/,
+    );
   } finally {
-    fs.chmodSync(traceDir, 0o755);
     fs.rmSync(tmpRoot, { recursive: true, force: true });
-    fs.rmSync(homeRoot, { recursive: true, force: true });
   }
 });
 

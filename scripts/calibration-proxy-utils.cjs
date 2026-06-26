@@ -2,7 +2,6 @@
 
 const fs = require("fs");
 const net = require("net");
-const os = require("os");
 const path = require("path");
 
 function parseConnectAuthority(authority) {
@@ -79,28 +78,20 @@ function makeLogFilePath(cwd, date = new Date()) {
   return path.join(path.resolve(cwd), ".claude-trace", `api-log-${timestampForFile(date)}.jsonl`);
 }
 
-function canWriteDir(dir) {
+function getProjectLogFilePath(cwd, date = new Date()) {
+  const logFile = makeLogFilePath(cwd, date);
+  const traceDir = path.dirname(logFile);
   try {
-    ensureDir(dir);
-    fs.accessSync(dir, fs.constants.W_OK);
-    return true;
-  } catch {
-    return false;
+    ensureDir(traceDir);
+    if (!fs.statSync(traceDir).isDirectory()) {
+      throw new Error("trace path exists but is not a directory");
+    }
+    fs.accessSync(traceDir, fs.constants.W_OK);
+  } catch (err) {
+    const reason = err?.message ? ` (${err.message})` : "";
+    throw new Error(`Project trace directory is not writable: ${traceDir}${reason}`);
   }
-}
-
-function safeProjectName(cwd) {
-  return path.basename(path.resolve(cwd)).replace(/[^a-zA-Z0-9._-]/g, "_") || "project";
-}
-
-function chooseWritableLogFilePath(cwd, date = new Date(), homeDir = os.homedir()) {
-  const projectLogFile = makeLogFilePath(cwd, date);
-  const projectTraceDir = path.dirname(projectLogFile);
-  if (canWriteDir(projectTraceDir)) return projectLogFile;
-
-  const fallbackDir = path.join(homeDir, ".claude-trace", "logs", safeProjectName(cwd));
-  ensureDir(fallbackDir);
-  return path.join(fallbackDir, `api-log-${timestampForFile(date)}.jsonl`);
+  return logFile;
 }
 
 function normalizeBaseUrl(value) {
@@ -146,7 +137,7 @@ module.exports = {
   tryParse,
   ensureDir,
   makeLogFilePath,
-  chooseWritableLogFilePath,
+  getProjectLogFilePath,
   resolveCaptureTarget,
   pickPort,
 };
