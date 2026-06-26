@@ -11,12 +11,12 @@ export function getCalibrationDetailLayout(translatedText?: string): Calibration
 }
 
 export function getCalibrationDetailDisplay(key: CalibrationDetailKey, detail: string): CalibrationDetailDisplay {
-  if (key !== 'SYS_PROMPT_FALLBACK_CHARS') {
+  if (key === 'TOOL_DEFS_FALLBACK_CHARS') {
     return { text: detail, markdown: true };
   }
 
   return {
-    text: unwrapSystemPromptDetail(detail),
+    text: unwrapPlainTextDetail(key, detail),
     markdown: false,
   };
 }
@@ -39,10 +39,15 @@ function hashText(text: string): number {
   return (hash >>> 0) % 100000;
 }
 
-function unwrapSystemPromptDetail(detail: string): string {
-  const legacy = /^# SYS_PROMPT_FALLBACK_CHARS\n\n字符数: \d+\n\n```text\n([\s\S]*)\n```$/.exec(detail);
+function unwrapPlainTextDetail(key: CalibrationDetailKey, detail: string): string {
+  const title = escapeRegExp(key);
+  const legacy = new RegExp(`^# ${title}\\n\\n字符数: \\d+\\n\\n\`\`\`text\\n([\\s\\S]*)\\n\`\`\`$`).exec(detail);
   if (legacy) return legacy[1]!;
 
-  const current = /^# SYS_PROMPT_FALLBACK_CHARS\n\n字符数: \d+\n\n([\s\S]*)$/.exec(detail);
+  const current = new RegExp(`^# ${title}\\n\\n字符数: \\d+\\n\\n([\\s\\S]*)$`).exec(detail);
   return current?.[1] ?? detail;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

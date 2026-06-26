@@ -28,6 +28,9 @@ test('extracts markdown-viewable details for calibrated constants', () => {
               text: [
                 '<system-reminder>',
                 'Intro wrapper',
+                '```bash',
+                'echo hello',
+                '```',
                 'Contents of /Users/link/.claude/CLAUDE.md',
                 '',
                 'global memory',
@@ -51,8 +54,9 @@ test('extracts markdown-viewable details for calibrated constants', () => {
     assert.match(extracted.details.SYS_PROMPT_FALLBACK_CHARS, /```json\n\{"example":true\}\n```/);
     assert.match(extracted.details.TOOL_DEFS_FALLBACK_CHARS, /```json/);
     assert.match(extracted.details.TOOL_DEFS_FALLBACK_CHARS, /"name": "Read"/);
-    assert.match(extracted.details.SYSTEM_REMINDER_CHROME_CHARS, /```text/);
+    assert.doesNotMatch(extracted.details.SYSTEM_REMINDER_CHROME_CHARS, /```text/);
     assert.match(extracted.details.SYSTEM_REMINDER_CHROME_CHARS, /Intro wrapper/);
+    assert.match(extracted.details.SYSTEM_REMINDER_CHROME_CHARS, /```bash\necho hello\n```/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

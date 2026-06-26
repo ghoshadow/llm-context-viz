@@ -46,6 +46,27 @@ test('renders system prompt detail as plain text and unwraps legacy text fence',
   });
 });
 
+test('renders system reminder detail as plain text and unwraps legacy text fence', () => {
+  const legacy = [
+    '# SYSTEM_REMINDER_CHROME_CHARS',
+    '',
+    '字符数: 42',
+    '',
+    '```text',
+    'wrapper before',
+    '```bash',
+    'echo hello',
+    '```',
+    'wrapper after',
+    '```',
+  ].join('\n');
+
+  assert.deepEqual(getCalibrationDetailDisplay('SYSTEM_REMINDER_CHROME_CHARS', legacy), {
+    text: ['wrapper before', '```bash', 'echo hello', '```', 'wrapper after'].join('\n'),
+    markdown: false,
+  });
+});
+
 test('keeps tool detail as markdown for json code rendering', () => {
   const detail = ['# TOOL_DEFS_FALLBACK_CHARS', '', '```json', '{"name":"Read"}', '```'].join('\n');
 

@@ -272,9 +272,7 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
           '',
           `字符数: ${up.chrome}`,
           '',
-          '```text',
           chromeText,
-          '```',
         ].join('\n'),
       },
     };
