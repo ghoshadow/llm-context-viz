@@ -8,7 +8,7 @@ import type Database from 'better-sqlite3';
 
 // ============================================================================
 // Shared pipeline service — eliminates duplicated import/refresh logic across
-// POST /upload, POST /scanner/import, and POST /sessions/:id/refresh.
+// POST /scanner/import and POST /sessions/:id/refresh.
 // ============================================================================
 
 /**
@@ -113,7 +113,7 @@ export interface ImportSessionResult {
 /**
  * Insert a new session record and its turns inside a single transaction.
  *
- * Used by POST /upload and POST /scanner/import to create a fresh session.
+ * Used by POST /scanner/import to create a fresh session.
  * The caller is responsible for dedup checking.
  */
 export function createSession(opts: {

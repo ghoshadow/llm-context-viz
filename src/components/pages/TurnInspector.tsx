@@ -23,7 +23,7 @@ import { MarkdownBlock } from '../shared/MarkdownBlock';
 import { DiffView } from '../shared/DiffView';
 import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
-import type { TurnDetail, TimelineSegment, SegmentDetail } from '../../types/session';
+import type { TurnDetail, TurnSummary, TimelineSegment, SegmentDetail } from '../../types/session';
 
 // ============================================================================
 // Helpers
@@ -1408,13 +1408,22 @@ export default function TurnInspector() {
   }, [currentTurnIndex, setSelectedStepIndex]);
 
   const prevSegLen = useRef(0);
+  const prevTurnIds = useRef('');
 
-  // Auto-refresh: re-parse JSONL (reads from disk) then update if changed
+  // Auto-refresh: re-parse JSONL, then silently update turn list + detail
   useEffect(() => {
     if (!currentSessionId || currentTurnIndex === null) return;
     const timer = setInterval(async () => {
       try {
         await post(`/sessions/${currentSessionId}/refresh`);
+        // Silent turn list refresh — only update if changed
+        const turns = await get<TurnSummary[]>(`/sessions/${currentSessionId}/turns`);
+        const fp = turns.map(t => `${t.turn_index}:${t.asst_reqs}:${t.max_input}`).join(',');
+        if (fp !== prevTurnIds.current) {
+          prevTurnIds.current = fp;
+          useSessionStore.setState({ turns });
+        }
+        // Current turn detail — only update if segments changed
         const t = await get<TurnDetail>(`/sessions/${currentSessionId}/turns/${currentTurnIndex}`);
         const newLen = (t.segs ?? []).length;
         if (newLen !== prevSegLen.current) {
@@ -1423,7 +1432,11 @@ export default function TurnInspector() {
         }
       } catch { /* silently skip */ }
     }, 3000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      prevSegLen.current = 0;
+      prevTurnIds.current = '';
+    };
   }, [currentSessionId, currentTurnIndex]);
 
   const handleCompEnter = useCallback((key: string) => {

@@ -46,10 +46,10 @@ const s = {
     maxWidth: 540,
     margin: '0 auto 28px',
   },
-  uploadBtn: {
+  scanBtn: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     padding: '10px 24px',
     fontSize: 15,
     fontWeight: 600,
@@ -59,21 +59,6 @@ const s = {
     borderRadius: 8,
     cursor: 'pointer',
     letterSpacing: '-0.01em',
-    transition: 'background 0.15s',
-  } as React.CSSProperties,
-
-  scanBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '10px 20px',
-    fontSize: 14,
-    fontWeight: 500,
-    color: SEMANTIC.textAccent2,
-    background: 'oklch(0.74 0.13 60 / 0.12)',
-    border: `1px solid oklch(0.50 0.10 60 / 0.4)`,
-    borderRadius: 8,
-    cursor: 'pointer',
     transition: 'background 0.15s',
   } as React.CSSProperties,
 
@@ -287,7 +272,7 @@ function SessionList({ sessions, onSelect, onDelete }: {
     return (
       <div style={s.grid}>
         <div style={s.empty}>
-          暂无会话，上传一个 JSONL 文件开始分析
+          暂无会话，扫描本地会话目录开始分析
         </div>
       </div>
     );
@@ -315,7 +300,6 @@ export default function HomePage() {
   const fetchSessions = useSessionStore((st) => st.fetchSessions);
   const selectSession = useSessionStore((st) => st.selectSession);
   const deleteSession = useSessionStore((st) => st.deleteSession);
-  const openUpload = useSessionStore((st) => st.openUpload);
   const openScanner = useSessionStore((st) => st.openScanner);
   const setPage = useUIStore((st) => st.setPage);
 
@@ -344,24 +328,18 @@ export default function HomePage() {
         </div>
         <h1 style={s.h1}>LLM 上下文可视化</h1>
         <p style={s.desc}>
-          上传 Claude Code 会话 JSONL 文件，查看上下文窗口增长、分类 Token 构成，
+          扫描本地 Claude Code 会话 JSONL 文件，查看上下文窗口增长、分类 Token 构成，
           并逐轮检查推理与工具调用细节。
         </p>
         <button
-          style={s.uploadBtn}
-          onClick={openUpload}
+          style={s.scanBtn}
+          onClick={openScanner}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = 'oklch(0.78 0.14 60)';
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'oklch(0.74 0.13 60)';
           }}
-        >
-          上传新会话
-        </button>
-        <button
-          style={s.scanBtn}
-          onClick={openScanner}
         >
           📂 扫描本地
         </button>

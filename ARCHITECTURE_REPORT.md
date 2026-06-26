@@ -81,7 +81,6 @@ compute-deltas    │                      │                  │
 server/index.ts
     ├── db.ts (SQLite singleton + schema)
     ├── routes/sessions.ts
-    │     ├── POST /upload (multer → runPipeline → INSERT)
     │     ├── GET / (list)
     │     ├── GET /:id (detail + JSON parse)
     │     ├── GET /:id/turns (summary)
@@ -99,7 +98,6 @@ server/index.ts
 App.tsx (page router + modal overlays)
     ├── HomePage
     │     ├── SessionCard[] (grid)
-    │     ├── UploadModal (drag-drop)
     │     └── ScannerModal (local scan + import)
     ├── ContextAssembly (peak view)
     │     ├── WindowBar (context window bar)
@@ -191,7 +189,6 @@ last_seen
 
 | Method | Path | 请求 | 响应 |
 |--------|------|------|------|
-| POST | `/api/sessions/upload` | multipart(file) | `{ id, filename, model, total_requests, peak_tokens, turn_count }` |
 | GET | `/api/sessions` | — | `SessionListItem[]` |
 | GET | `/api/sessions/:id` | — | `SessionDetail` (含已解析 JSON 数组) |
 | GET | `/api/sessions/:id/turns` | — | `TurnSummary[]` (不含 JSON 大字段) |
@@ -212,10 +209,10 @@ del(path): Promise<void>     // DELETE
 
 ### 4.3 状态管理 (Zustand)
 
-**sessionStore:** 会话 CRUD、上传、扫描、轮次数据、modal 开关
+**sessionStore:** 会话 CRUD、扫描、轮次数据、modal 开关
 - `sessions[]`, `currentSession`, `turns[]`, `currentTurn`
-- `uploadOpen`, `scannerOpen`, `scanFiles[]`, `scanStatus`
-- Actions: fetch/select/upload/delete + open/close modal
+- `scannerOpen`, `scanFiles[]`, `scanStatus`
+- Actions: fetch/select/delete + open/close scanner modal
 
 **uiStore:** 跨组件 UI 状态
 - `page: 'home' | 'assembly' | 'inspector'`

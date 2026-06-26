@@ -75,11 +75,11 @@ ToolDrilldown.tsx 的私有版本在 `>= 100000` 时用 `Math.round(n/1000)+'K'`
 
 ---
 
-## 5. upload 路由缺 sub-agent enrichment
+## 5. 已过期：文件选择导入缺 sub-agent enrichment
 
-**现状:** `server/routes/sessions.ts` 的 POST /upload 没有调用 `enrichWithSubAgents`，因为上传没有源文件路径。
+**现状:** 首页文件选择导入入口已删除；会话导入保留本地扫描路径 `POST /scanner/import`，该路径仍会调用 `enrichWithSubAgents`。
 
-**方案:**
+**原方案（保留作历史记录，不再执行）:**
 1. 上传时，将文件内容写入临时目录（`/tmp/llm-viz-upload-{uuid}.jsonl`）
 2. 管线跑完后，用临时路径调用 `enrichWithSubAgents(turns, tmpDir)`
 3. 成功后删除临时文件

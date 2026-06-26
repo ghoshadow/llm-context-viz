@@ -23,11 +23,7 @@ export interface SessionStore {
   currentTurn: TurnDetail | null;
   currentTurnLoading: boolean;
 
-  uploadOpen: boolean;
   scannerOpen: boolean;
-  uploading: boolean;
-  uploadProgress: string | null;
-  uploadError: string | null;
 
   // Scan result cache
   scanFiles: { path: string; name: string; size: number; modified: string; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number }[];
@@ -38,11 +34,8 @@ export interface SessionStore {
   selectSession: (id: string) => Promise<void>;
   fetchTurns: (sessionId: string) => Promise<void>;
   selectTurn: (turnIndex: number) => Promise<void>;
-  openUpload: () => void;
-  closeUpload: () => void;
   openScanner: () => void;
   closeScanner: () => void;
-  uploadFile: (file: File) => Promise<string | null>;
   deleteSession: (id: string) => Promise<void>;
   fetchOntology: () => Promise<void>;
   buildOntology: (body: { candidates: unknown[]; relations: unknown[]; config?: Record<string, unknown> }) => Promise<boolean>;
@@ -78,11 +71,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   currentTurn: null,
   currentTurnLoading: false,
 
-  uploadOpen: false,
   scannerOpen: false,
-  uploading: false,
-  uploadProgress: null,
-  uploadError: null,
 
   ontologyData: null,
   ontologyMaxTurn: 0,
@@ -145,34 +134,12 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
     }
   },
 
-  openUpload: () => set({ uploadOpen: true }),
-  closeUpload: () => set({ uploadOpen: false }),
   openScanner: () => set({ scannerOpen: true }),
   closeScanner: () => set({ scannerOpen: false }),
 
   scanFiles: [],
   scanStatus: '',
   setScanFiles: (files, status) => set({ scanFiles: files, scanStatus: status }),
-
-  uploadFile: async (file: File) => {
-    set({ uploading: true, uploadProgress: null, uploadError: null });
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const result = await post<{ id: string }>('/sessions/upload', formData);
-      set({ uploading: false, uploadProgress: 'Upload complete', uploadOpen: false });
-
-      await getState().fetchSessions();
-      return result.id;
-    } catch (err) {
-      set({
-        uploading: false,
-        uploadError: err instanceof Error ? err.message : 'Upload failed',
-      });
-      return null;
-    }
-  },
 
   fetchOntology: async () => {
     const { currentSessionId } = getState();

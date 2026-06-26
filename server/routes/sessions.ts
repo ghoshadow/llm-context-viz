@@ -1,13 +1,9 @@
 import { Router } from 'express';
-import multer from 'multer';
-import crypto from 'crypto';
 import { getDb } from '../db';
 import { callLLM } from '../llm/client';
-import { createSession, refreshSession } from '../services/pipeline-service';
+import { refreshSession } from '../services/pipeline-service';
 import { enrichWithSubAgents } from './scanner';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { readFileSync } from 'fs';
 
 import { findJsonlFile } from './shared';
 import ontologyRouter from './ontology';
@@ -19,66 +15,6 @@ const router = Router();
 // ============================================================================
 
 router.use('/:id/ontology', ontologyRouter);
-
-// ============================================================================
-// Multer setup: accept single file upload, max 50 MB
-// ============================================================================
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
-});
-
-// ============================================================================
-// POST /upload
-// ============================================================================
-
-router.post('/upload', upload.single('file'), (req, res) => {
-  try {
-    const file = req.file;
-    if (!file) {
-      return res.status(400).json({ error: '未上传文件' });
-    }
-
-    const content = file.buffer.toString('utf-8');
-    const hash = crypto.createHash('sha256').update(content).digest('hex');
-    const filename = file.originalname;
-
-    // Check for duplicate
-    const db = getDb();
-    const existing = db.prepare('SELECT id FROM sessions WHERE file_hash = ?').get(hash) as
-      | { id: string }
-      | undefined;
-    if (existing) {
-      return res.status(409).json({ error: '文件已存在', sessionId: existing.id });
-    }
-
-    const { sessionId, summary, turns } = createSession({
-      jsonlContent: content, filename, hash, rawJsonl: content,
-    });
-
-    // Enrich with sub-agent data via temp file (best-effort)
-    try {
-      const tmpDir = mkdtempSync(join(tmpdir(), 'llm-viz-upload-'));
-      writeFileSync(join(tmpDir, sessionId + '.jsonl'), content);
-      enrichWithSubAgents(turns as any, tmpDir);
-      rmSync(tmpDir, { recursive: true, force: true });
-    } catch { /* enrichment is best-effort */ }
-
-    return res.status(201).json({
-      id: sessionId,
-      filename,
-      model: summary.session.model,
-      version: summary.session.version,
-      total_requests: summary.session.requests,
-      peak_tokens: summary.session.peakTokens,
-      turn_count: turns.length,
-    });
-  } catch (err) {
-    console.error('POST /upload error:', err);
-    return res.status(500).json({ error: '处理上传文件时出错' });
-  }
-});
 
 // ============================================================================
 // GET /

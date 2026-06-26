@@ -5,13 +5,11 @@ import ContextAssembly from './components/pages/ContextAssembly';
 import TurnInspector from './components/pages/TurnInspector';
 import OntologyPage from './components/ontology/OntologyPage';
 import CalibratePage from './components/pages/CalibratePage';
-import UploadModal from './components/upload/UploadModal';
 import ScannerModal from './components/upload/ScannerModal';
 
 function App() {
   const page = useUIStore(s => s.page);
   const currentSessionId = useSessionStore(s => s.currentSessionId);
-  const uploadOpen = useSessionStore(s => s.uploadOpen);
   const scannerOpen = useSessionStore(s => s.scannerOpen);
 
   return (
@@ -21,7 +19,6 @@ function App() {
       {page === 'inspector' && currentSessionId && <TurnInspector />}
       {page === 'ontology' && currentSessionId && <OntologyPage />}
       {page === 'calibrate' && <CalibratePage />}
-      {uploadOpen && <UploadModal />}
       {scannerOpen && <ScannerModal />}
     </div>
   );
