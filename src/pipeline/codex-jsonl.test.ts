@@ -172,6 +172,75 @@ test('parses Codex turns into the data required by the turn inspector', () => {
   assert.equal((turn as any).cumTools.exec_command.calls, 1);
 });
 
+test('seeds Codex core context from recorded session metadata', () => {
+  const metadataSample = [
+    {
+      timestamp: '2026-06-26T01:00:00.000Z',
+      type: 'session_meta',
+      payload: {
+        session_id: 'sess_1',
+        cwd: '/repo',
+        cli_version: '0.99.0',
+        base_instructions: { text: 'System instruction text for Codex.' },
+        dynamic_tools: [
+          {
+            type: 'mcp',
+            name: 'codex_app',
+            description: 'Desktop integration tools.',
+            tools: [{ name: 'exec_command', description: 'Run a command.' }],
+          },
+        ],
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:01.000Z',
+      type: 'event_msg',
+      payload: { type: 'task_started', turn_id: 'turn_1' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:01.010Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'developer',
+        content: [
+          { type: 'input_text', text: '<permissions instructions>filesystem access</permissions instructions>' },
+          { type: 'input_text', text: '<skills_instructions>available skills</skills_instructions>' },
+          { type: 'input_text', text: '<plugins_instructions>installed plugins</plugins_instructions>' },
+        ],
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:01.100Z',
+      type: 'event_msg',
+      payload: { type: 'user_message', message: '检查 Codex 常量' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: 500,
+            output_tokens: 20,
+          },
+        },
+      },
+    },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const { summary, turns } = runCodexPipeline(metadataSample, 'metadata.jsonl');
+  const turn = turns[0]!;
+
+  assert.ok((turn.comp.sysPrompt ?? 0) > 0);
+  assert.ok((turn.comp.tool_defs ?? 0) > 0);
+  assert.ok((turn.comp.skills ?? 0) > 0);
+  assert.ok((turn.comp.mcp ?? 0) > 0);
+  assert.ok((turn.comp.reminders ?? 0) > 0);
+  assert.equal(summary.categories.find((cat) => cat.key === 'sysPrompt')?.tokens, turn.comp.sysPrompt);
+});
+
 test('uses readable Codex reasoning summaries when present', () => {
   const summarySample = [
     {

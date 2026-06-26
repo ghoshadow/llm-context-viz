@@ -110,7 +110,7 @@ export function runCodexPipeline(jsonlText: string, filename: string): {
   const { lines, errors } = parseCodexLines(jsonlText);
   const sessionMeta = firstPayload(lines, 'session_meta');
   const turns = buildCodexTurns(lines);
-  const turnData = assembleTurns(turns);
+  const turnData = assembleTurns(turns, sessionMeta);
   const summary = aggregateCodexSession(sessionMeta, turns, turnData, filename);
   return { summary, turns: turnData, errors };
 }
@@ -217,11 +217,12 @@ function finalizeTurn(turn: CodexTurn, fallbackEndTs: string): void {
   if (!turn.prompt) turn.prompt = '(Codex 日志未记录用户输入)';
 }
 
-function assembleTurns(turns: CodexTurn[]): TurnData[] {
+function assembleTurns(turns: CodexTurn[], sessionMeta: JsonObject | null): TurnData[] {
   const results: TurnData[] = [];
-  const runningComp = initComp();
+  const coreComp = buildCodexCoreComp(sessionMeta, turns);
+  const runningComp = initComp(coreComp);
   const cumTools: Record<string, { calls: number; resultTokens: number; task: boolean }> = {};
-  let prevComp = initComp();
+  let prevComp = initComp(coreComp);
   let runningCumTotal = 0;
 
   for (let i = 0; i < turns.length; i++) {
@@ -653,9 +654,9 @@ function aggregateCodexSession(
   };
 }
 
-function initComp(): Record<string, number> {
+function initComp(seed?: Record<string, number>): Record<string, number> {
   const comp: Record<string, number> = {};
-  for (const key of EMPTY_COMP_KEYS) comp[key] = 0;
+  for (const key of EMPTY_COMP_KEYS) comp[key] = seed?.[key] ?? 0;
   return comp;
 }
 
@@ -680,6 +681,59 @@ function deltaBetween(prev: Record<string, number>, curr: Record<string, number>
 
 function sumComp(comp: Record<string, number>): number {
   return Math.round(Object.values(comp).reduce((sum, value) => sum + value, 0));
+}
+
+function buildCodexCoreComp(sessionMeta: JsonObject | null, turns: CodexTurn[]): Record<string, number> {
+  const comp = initComp();
+  addTokens(comp, 'sysPrompt', codexInstructionText(sessionMeta?.base_instructions));
+
+  if (sessionMeta?.dynamic_tools != null) {
+    addTokens(comp, 'tool_defs', stringifyInput(sessionMeta.dynamic_tools));
+  }
+
+  const seenDeveloperBlocks = new Set<string>();
+  for (const turn of turns) {
+    for (const event of turn.events) {
+      const payload = event.payload;
+      if (event.type !== 'response_item' || payload.type !== 'message' || payload.role !== 'developer') continue;
+      if (!Array.isArray(payload.content)) {
+        const text = textFromCodexContent(payload.content).trim();
+        if (text && !seenDeveloperBlocks.has(text)) {
+          seenDeveloperBlocks.add(text);
+          addTokens(comp, codexDeveloperCategory(text), text);
+        }
+        continue;
+      }
+
+      for (const block of payload.content) {
+        const text = textFromCodexContentBlock(block).trim();
+        if (!text || seenDeveloperBlocks.has(text)) continue;
+        seenDeveloperBlocks.add(text);
+        addTokens(comp, codexDeveloperCategory(text), text);
+      }
+    }
+  }
+
+  return comp;
+}
+
+function codexInstructionText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (isObject(value) && typeof value.text === 'string') return value.text;
+  return '';
+}
+
+function codexDeveloperCategory(text: string): string {
+  if (text.includes('<skills_instructions>')) return 'skills';
+  if (text.includes('<plugins_instructions>')) return 'mcp';
+  if (
+    text.includes('<permissions instructions>') ||
+    text.includes('<collaboration_mode>') ||
+    text.includes('<app-context>')
+  ) {
+    return 'reminders';
+  }
+  return 'sysPrompt';
 }
 
 function nearestInputTokens(turn: CodexTurn, order: number): number {
@@ -803,13 +857,15 @@ function outputToText(output: unknown): string {
 function textFromCodexContent(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
-  return content.map((block) => {
-    if (!isObject(block)) return '';
-    if ((block.type === 'input_text' || block.type === 'output_text' || block.type === 'text') && typeof block.text === 'string') {
-      return block.text;
-    }
-    return '';
-  }).filter(Boolean).join('\n');
+  return content.map(textFromCodexContentBlock).filter(Boolean).join('\n');
+}
+
+function textFromCodexContentBlock(block: unknown): string {
+  if (!isObject(block)) return '';
+  if ((block.type === 'input_text' || block.type === 'output_text' || block.type === 'text') && typeof block.text === 'string') {
+    return block.text;
+  }
+  return '';
 }
 
 function textFromCodexReasoningSummary(summary: unknown): string {
