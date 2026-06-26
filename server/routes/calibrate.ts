@@ -4,6 +4,11 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { extractConstants, type ExtractedConstants } from '../../src/pipeline/extract-constants';
+import {
+  cancelCalibrationJob,
+  getCalibrationJob,
+  startCalibrationJob,
+} from '../services/calibration-job';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = join(__filename, '..'); // server/routes/
@@ -73,6 +78,33 @@ router.get('/current', (_req, res) => {
   } catch (err) {
     return res.status(500).json({ error: '读取失败: ' + (err as Error).message });
   }
+});
+
+// ── POST /auto/start — launch no-sudo calibration proxy and Claude Code ──
+
+router.post('/auto/start', async (req, res) => {
+  try {
+    const job = await startCalibrationJob(req.body || {});
+    return res.json({ jobId: job.jobId, ...job });
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// ── GET /auto/:jobId — poll automatic calibration job ──
+
+router.get('/auto/:jobId', (req, res) => {
+  const job = getCalibrationJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: '校准任务不存在' });
+  return res.json(job);
+});
+
+// ── POST /auto/:jobId/cancel — cancel automatic calibration job ──
+
+router.post('/auto/:jobId/cancel', (req, res) => {
+  const job = cancelCalibrationJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: '校准任务不存在' });
+  return res.json(job);
 });
 
 export default router;

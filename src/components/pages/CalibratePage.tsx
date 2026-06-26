@@ -52,6 +52,30 @@ interface CurrentConstants {
   model?: string;
 }
 
+type AutoCalibrationStatus =
+  | 'starting'
+  | 'running'
+  | 'captured'
+  | 'extracting'
+  | 'ready'
+  | 'failed'
+  | 'cancelled';
+
+interface AutoCalibrationJob {
+  jobId: string;
+  status: AutoCalibrationStatus;
+  cwd: string;
+  targetHost: string;
+  port: number;
+  startedAt: string;
+  completedAt?: string;
+  logFile?: string;
+  message: string;
+  output: string[];
+  result: ExtractedResult | null;
+  error: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -111,11 +135,70 @@ export default function CalibratePage() {
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [currentConstants, setCurrentConstants] = useState<CurrentConstants | null>(null);
+  const [autoPrompt, setAutoPrompt] = useState('say hi');
+  const [autoTargetHost, setAutoTargetHost] = useState('api.deepseek.com');
+  const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
+  const [autoRunning, setAutoRunning] = useState(false);
 
   // Load current constants on mount
   useEffect(() => {
     get<CurrentConstants>('/calibrate/current').then(setCurrentConstants).catch(() => {});
   }, []);
+
+  const handleAutoStart = useCallback(async () => {
+    if (!sessionCwd) {
+      setError('请先打开一个会话，以便自动检测项目目录。');
+      return;
+    }
+    setError(null);
+    setApplied(false);
+    setAutoRunning(true);
+    setResult(null);
+    try {
+      const job = await post<AutoCalibrationJob>('/calibrate/auto/start', {
+        cwd: sessionCwd,
+        prompt: autoPrompt.trim() || 'say hi',
+        targetHost: autoTargetHost.trim() || 'api.deepseek.com',
+        timeoutMs: 45000,
+      });
+      setAutoJob(job);
+    } catch (err) {
+      setError((err as Error).message);
+      setAutoRunning(false);
+    }
+  }, [autoPrompt, autoTargetHost, sessionCwd]);
+
+  useEffect(() => {
+    if (!autoJob?.jobId) return;
+    if (autoJob.status === 'ready' || autoJob.status === 'failed' || autoJob.status === 'cancelled') {
+      setAutoRunning(false);
+      if (autoJob.status === 'ready' && autoJob.result) {
+        setResult(autoJob.result);
+      }
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        const next = await get<AutoCalibrationJob>(`/calibrate/auto/${autoJob.jobId}`);
+        setAutoJob(next);
+      } catch (err) {
+        setError((err as Error).message);
+        setAutoRunning(false);
+      }
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [autoJob]);
+
+  const handleAutoCancel = useCallback(async () => {
+    if (!autoJob?.jobId) return;
+    try {
+      const next = await post<AutoCalibrationJob>(`/calibrate/auto/${autoJob.jobId}/cancel`);
+      setAutoJob(next);
+      setAutoRunning(false);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [autoJob?.jobId]);
 
   // Handle file drop
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -178,7 +261,7 @@ export default function CalibratePage() {
           </div>
           <h1>更新系统级上下文常量</h1>
           <p className="subtitle">
-            Claude Code 版本更新后，系统提示词、工具定义等上下文常量可能变化。使用代理截获一次请求，上传日志自动提取并应用新常量。
+            Claude Code 版本更新后，系统提示词、工具定义等上下文常量可能变化。优先用无 sudo 本地代理自动截获一次请求，必要时仍可上传日志兜底。
           </p>
         </div>
         <div style={{ display: 'flex', gap: 9, fontFamily: MONO, fontSize: 12 }}>
@@ -192,11 +275,96 @@ export default function CalibratePage() {
         </div>
       </header>
 
-      {/* Step 1: Upload */}
+      {/* Step 1: Automatic capture */}
       <section style={{ marginTop: 28 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>1. 上传截获的 API 日志</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>1. 自动截获 API 请求</h2>
         <p style={{ fontSize: 13, color: S.textDesc3, marginBottom: 16, lineHeight: 1.6 }}>
-          在终端运行以下命令截获一次请求（{sessionCwd ? '已自动填入当前会话的项目目录' : '请先打开一个会话以启用自动检测'}），然后上传生成的 <code style={{ fontFamily: MONO, background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4 }}>.claude-trace/api-log-*.jsonl</code> 文件。
+          使用无 sudo 本地代理启动一次 Claude Code，请求成功后会自动解析捕获日志。不会修改 /etc/hosts，也不会监听 443 端口。
+        </p>
+        <div style={{
+          border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '16px 18px',
+          background: 'oklch(0.185 0.009 265)', display: 'grid', gap: 12,
+        }}>
+          <div style={{ fontSize: 12, color: S.textMuted, fontFamily: MONO, wordBreak: 'break-all' }}>
+            cwd: {sessionCwd || '未选择会话'}
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 340px', minWidth: 0 }}>
+              Prompt
+              <input
+                value={autoPrompt}
+                onChange={(e) => setAutoPrompt(e.target.value)}
+                disabled={autoRunning}
+                style={{
+                  border: `1px solid ${S.borderColor}`, borderRadius: 8, padding: '10px 12px',
+                  background: 'oklch(0.16 0.01 265)', color: S.textPrimary3, fontFamily: MONO,
+                }}
+                aria-label="校准 prompt"
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 220px', minWidth: 0 }}>
+              Target Host
+              <input
+                value={autoTargetHost}
+                onChange={(e) => setAutoTargetHost(e.target.value)}
+                disabled={autoRunning}
+                style={{
+                  border: `1px solid ${S.borderColor}`, borderRadius: 8, padding: '10px 12px',
+                  background: 'oklch(0.16 0.01 265)', color: S.textPrimary3, fontFamily: MONO,
+                }}
+                aria-label="目标 API host"
+              />
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              disabled={!sessionCwd || autoRunning}
+              onClick={handleAutoStart}
+              style={{
+                border: 'none', borderRadius: 10, padding: '12px 24px',
+                fontSize: 14, fontWeight: 600, fontFamily: SANS,
+                cursor: (!sessionCwd || autoRunning) ? 'not-allowed' : 'pointer',
+                background: (!sessionCwd || autoRunning) ? 'oklch(0.28 0.01 265)' : 'oklch(0.74 0.13 60)',
+                color: (!sessionCwd || autoRunning) ? S.textMuted : 'oklch(0.12 0.01 265)',
+              }}
+            >
+              {autoRunning ? '截获中...' : '自动截获并提取'}
+            </button>
+            {autoRunning && (
+              <button
+                onClick={handleAutoCancel}
+                style={{
+                  border: `1px solid ${S.borderColor}`, borderRadius: 10, padding: '11px 18px',
+                  background: 'transparent', color: S.textSecondary, fontFamily: SANS, cursor: 'pointer',
+                }}
+              >
+                取消
+              </button>
+            )}
+            {autoJob && (
+              <span style={{ fontSize: 12, color: autoJob.status === 'failed' ? 'oklch(0.72 0.14 25)' : S.textDesc3 }}>
+                {autoJob.message}
+              </span>
+            )}
+          </div>
+          {autoJob?.logFile && (
+            <div style={{ fontSize: 11, color: S.textMuted, fontFamily: MONO, wordBreak: 'break-all' }}>
+              log: {autoJob.logFile}
+            </div>
+          )}
+          {autoJob?.error && (
+            <div style={{ fontSize: 12, color: 'oklch(0.72 0.14 25)' }}>
+              {autoJob.error}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Manual fallback */}
+      <section style={{ marginTop: 28 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>备用：上传截获的 API 日志</h2>
+        <p style={{ fontSize: 13, color: S.textDesc3, marginBottom: 16, lineHeight: 1.6 }}>
+          如果自动代理没有捕获到 Claude Code 流量，可以继续使用透明代理生成 <code style={{ fontFamily: MONO, background: 'oklch(0.24 0.01 265)', padding: '2px 6px', borderRadius: 4 }}>.claude-trace/api-log-*.jsonl</code> 文件后上传。
         </p>
 
         {/* Drop zone */}
@@ -347,7 +515,7 @@ export default function CalibratePage() {
 
       {/* Step 3: Current constants */}
       <section style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 22 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>2. 当前生效的常量</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>3. 当前生效的常量</h2>
         <div style={{
           border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
           background: 'oklch(0.185 0.009 265)',
@@ -384,7 +552,7 @@ export default function CalibratePage() {
 
       {/* Footer: proxy usage */}
       <footer style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 18 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>3. 如何截获 API 请求？</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>4. 手动兜底命令</h2>
         <div style={{
           border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
           background: 'oklch(0.185 0.009 265)',
