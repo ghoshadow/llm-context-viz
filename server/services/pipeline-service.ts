@@ -6,6 +6,7 @@ import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/
 import { isCodexJsonl, runCodexPipeline } from '../../src/pipeline/codex-jsonl';
 import type { SessionSummary, TurnData } from '../../src/types/session';
 import type Database from 'better-sqlite3';
+import { readProjectConstants } from './calibration-constants';
 
 // ============================================================================
 // Shared pipeline service — eliminates duplicated import/refresh logic across
@@ -26,25 +27,34 @@ export function computeMemoryChars(jsonlContent?: string): number {
     if (existsSync(globalMd)) memChars += readFileSync(globalMd, 'utf-8').length;
   } catch { /* keep default */ }
 
-  // Project-level CLAUDE.md via cwd from the first line
-  if (jsonlContent) {
+  const cwd = extractCwdFromJsonl(jsonlContent);
+  if (cwd) {
     try {
-      const firstLine = JSON.parse(jsonlContent.split('\n')[0]!);
-      const cwd = firstLine.cwd;
-      if (cwd) {
-        const projMd = join(cwd, '.claude', 'CLAUDE.md');
-        if (existsSync(projMd)) memChars += readFileSync(projMd, 'utf-8').length;
-      }
-    } catch { /* ignore parse errors */ }
+      const projMd = join(cwd, '.claude', 'CLAUDE.md');
+      if (existsSync(projMd)) memChars += readFileSync(projMd, 'utf-8').length;
+    } catch { /* ignore fs errors */ }
   }
   return memChars;
+}
+
+export function extractCwdFromJsonl(jsonlContent?: string): string {
+  if (!jsonlContent) return '';
+  for (const line of jsonlContent.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (typeof parsed.cwd === 'string' && parsed.cwd) return parsed.cwd;
+      if (parsed.type === 'session_meta' && typeof parsed.payload?.cwd === 'string') return parsed.payload.cwd;
+    } catch { /* ignore parse errors */ }
+  }
+  return '';
 }
 
 /**
  * Run the full pipeline on raw JSONL content.
  *
  * Side effects:
- * - Reloads calibrated system constants from disk (system-constants.json)
+ * - Applies project-scoped calibrated constants from `<cwd>/.claude-trace/system-constants.json`
  * - Sets the global memory character count for context estimation
  */
 export function runPipelineOnContent(
@@ -55,7 +65,9 @@ export function runPipelineOnContent(
     return runCodexPipeline(jsonlContent, filename);
   }
 
-  loadCalibratedConstants();
+  const cwd = extractCwdFromJsonl(jsonlContent);
+  const constants = cwd ? readProjectConstants(cwd) : null;
+  loadCalibratedConstants(constants);
   setMemoryChars(computeMemoryChars(jsonlContent));
   return runPipeline(jsonlContent, filename);
 }

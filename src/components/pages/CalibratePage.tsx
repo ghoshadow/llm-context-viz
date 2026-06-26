@@ -45,6 +45,10 @@ interface ExtractedResult {
 }
 
 interface CurrentConstants {
+  source?: 'project' | 'defaults';
+  path?: string;
+  cwd?: string;
+  note?: string;
   SYS_PROMPT_FALLBACK_CHARS: number;
   TOOL_DEFS_FALLBACK_CHARS: number;
   SYSTEM_REMINDER_CHROME_CHARS: number;
@@ -134,8 +138,14 @@ export default function CalibratePage() {
 
   // Load current constants on mount
   useEffect(() => {
-    get<CurrentConstants>('/calibrate/current').then(setCurrentConstants).catch(() => {});
-  }, []);
+    if (!sessionCwd) {
+      setCurrentConstants(null);
+      return;
+    }
+    get<CurrentConstants>(`/calibrate/current?cwd=${encodeURIComponent(sessionCwd)}`)
+      .then(setCurrentConstants)
+      .catch((err) => setError((err as Error).message));
+  }, [sessionCwd]);
 
   const handleAutoStart = useCallback(async () => {
     if (!sessionCwd) {
@@ -195,20 +205,30 @@ export default function CalibratePage() {
   // Apply constants
   const handleApply = useCallback(async () => {
     if (!result) return;
+    if (!sessionCwd) {
+      setError('请先打开一个会话，以便确定项目 cwd。');
+      return;
+    }
     setApplying(true);
     try {
       await put('/calibrate/apply', {
+        cwd: sessionCwd,
         summary: result.summary,
         ccVersion: result.ccVersion,
         model: result.model,
       });
       setApplied(true);
+      if (sessionCwd) {
+        get<CurrentConstants>(`/calibrate/current?cwd=${encodeURIComponent(sessionCwd)}`)
+          .then(setCurrentConstants)
+          .catch(() => {});
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setApplying(false);
     }
-  }, [result]);
+  }, [result, sessionCwd]);
 
   // Token estimate
   const estTok = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
@@ -438,7 +458,7 @@ export default function CalibratePage() {
             </button>
             {!applied && (
               <span style={{ fontSize: 12, color: S.textDesc3 }}>
-                将 system-constants.json 写入 src/pipeline/ 目录
+                将常量写入当前项目的 .claude-trace/ 目录
               </span>
             )}
           </div>
@@ -447,18 +467,33 @@ export default function CalibratePage() {
 
       {/* Step 3: Current constants */}
       <section style={{ marginTop: 30, borderTop: `1px solid ${S.borderSubtle2}`, paddingTop: 22 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>3. 当前生效的常量</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>3. 当前项目生效的常量</h2>
         <div style={{
           border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
           background: 'oklch(0.185 0.009 265)',
         }}>
-          {currentConstants?.appliedAt ? (
+          {!sessionCwd ? (
+            <div style={{ fontSize: 13, color: S.textDesc3 }}>
+              请先打开一个会话，以便确定项目 cwd。
+            </div>
+          ) : currentConstants ? (
             <>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
-                <StatCard label="校准时间" value={new Date(currentConstants.appliedAt).toLocaleString()} />
+                <StatCard label="来源" value={currentConstants.source === 'project' ? '项目校准' : '内置默认'} />
+                {currentConstants.appliedAt && (
+                  <StatCard label="校准时间" value={new Date(currentConstants.appliedAt).toLocaleString()} />
+                )}
                 <StatCard label="CC 版本" value={currentConstants.ccVersion || '-'} />
                 <StatCard label="模型" value={currentConstants.model || '-'} />
               </div>
+              <div style={{ fontSize: 11, color: S.textMuted, fontFamily: MONO, wordBreak: 'break-all', marginBottom: 14 }}>
+                {currentConstants.path ? `path: ${currentConstants.path}` : `cwd: ${sessionCwd}`}
+              </div>
+              {currentConstants.note && (
+                <div style={{ fontSize: 12, color: S.textDesc3, marginBottom: 14 }}>
+                  {currentConstants.note}
+                </div>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                 <div>
                   <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYS_PROMPT_FALLBACK_CHARS</div>

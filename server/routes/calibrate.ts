@@ -1,40 +1,35 @@
 import { Router } from 'express';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { fileURLToPath } from 'url';
 import type { ExtractedConstants } from '../../src/pipeline/extract-constants';
+import {
+  readProjectConstants,
+  writeProjectConstants,
+} from '../services/calibration-constants';
 import {
   cancelCalibrationJob,
   getCalibrationJob,
   startCalibrationJob,
 } from '../services/calibration-job';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = join(__filename, '..'); // server/routes/
-
 const router = Router();
-
-// Constants file path (next to compute-context.ts)
-const CONSTANTS_FILE = join(__dirname, '..', '..', 'src', 'pipeline', 'system-constants.json');
 
 // ── PUT /apply — save extracted constants to disk ──
 
 router.put('/apply', (req, res) => {
   try {
-    const body = req.body as { summary?: ExtractedConstants['summary']; ccVersion?: string; model?: string };
+    const body = req.body as { cwd?: string; summary?: ExtractedConstants['summary']; ccVersion?: string; model?: string };
+    if (!body.cwd) {
+      return res.status(400).json({ error: '缺少 cwd 字段，无法确定当前项目。' });
+    }
     if (!body.summary) {
       return res.status(400).json({ error: '缺少 summary 字段' });
     }
 
-    const data = {
-      appliedAt: new Date().toISOString(),
-      ccVersion: body.ccVersion || 'unknown',
-      model: body.model || 'unknown',
-      ...body.summary,
-    };
-
-    writeFileSync(CONSTANTS_FILE, JSON.stringify(data, null, 2) + '\n');
-    return res.json({ ok: true, path: CONSTANTS_FILE });
+    const data = writeProjectConstants(body.cwd, {
+      summary: body.summary,
+      ccVersion: body.ccVersion,
+      model: body.model,
+    });
+    return res.json({ ok: true, path: data.path, ...data });
   } catch (err) {
     return res.status(500).json({ error: '保存失败: ' + (err as Error).message });
   }
@@ -44,16 +39,11 @@ router.put('/apply', (req, res) => {
 
 router.get('/current', (_req, res) => {
   try {
-    if (existsSync(CONSTANTS_FILE)) {
-      const data = JSON.parse(readFileSync(CONSTANTS_FILE, 'utf-8'));
-      return res.json(data);
+    const cwd = typeof _req.query.cwd === 'string' ? _req.query.cwd : '';
+    if (!cwd) {
+      return res.status(400).json({ error: '缺少 cwd 参数，无法确定当前项目。' });
     }
-    return res.json({
-      note: '尚未校准。使用 compute-context.ts 中的硬编码常量。',
-      SYS_PROMPT_FALLBACK_CHARS: 5768,
-      TOOL_DEFS_FALLBACK_CHARS: 98949,
-      SYSTEM_REMINDER_CHROME_CHARS: 612,
-    });
+    return res.json(readProjectConstants(cwd));
   } catch (err) {
     return res.status(500).json({ error: '读取失败: ' + (err as Error).message });
   }

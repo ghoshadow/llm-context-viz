@@ -46,39 +46,47 @@ export interface CategoryMetrics {
 // ---------------------------------------------------------------------------
 // Defaults calibrated from a real API request capture (Claude Code v2.1.170,
 // deepseek-v4-pro). These can be overridden by running automatic calibration
-// from the UI, which writes system-constants.json.
+// from the UI, which writes <cwd>/.claude-trace/system-constants.json.
 //
 // Measured from proxy capture:
 //   system blocks:  5,768 chars (billing 85 + agent 62 + harness 5,621)
 //   tools JSON:    98,949 chars (full JSON Schema for all ~50 tools)
 
-let SYS_PROMPT_FALLBACK_CHARS  = 5768;
-let TOOL_DEFS_FALLBACK_CHARS   = 98949;
+const DEFAULT_SYS_PROMPT_FALLBACK_CHARS = 5768;
+const DEFAULT_TOOL_DEFS_FALLBACK_CHARS = 98949;
+const DEFAULT_SYSTEM_REMINDER_CHROME_CHARS = 612;
+
+let SYS_PROMPT_FALLBACK_CHARS  = DEFAULT_SYS_PROMPT_FALLBACK_CHARS;
+let TOOL_DEFS_FALLBACK_CHARS   = DEFAULT_TOOL_DEFS_FALLBACK_CHARS;
 const SKILLS_FALLBACK_CHARS      = 9122;
 const MCP_FALLBACK_CHARS         = 222;
 const REMINDERS_FALLBACK_CHARS   = 409;
-let SYSTEM_REMINDER_CHROME_CHARS = 612;
+let SYSTEM_REMINDER_CHROME_CHARS = DEFAULT_SYSTEM_REMINDER_CHROME_CHARS;
 
 // MEMORY is set at runtime from actual CLAUDE.md files on disk.
 let MEMORY_FALLBACK_CHARS = 2474;
 
-// Load calibrated constants from disk. Called at module load AND on every
-// pipeline run so that applying new constants via the UI takes effect immediately.
-export function loadCalibratedConstants() {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require('fs');
-    const path = require('path');
-    const constantsPath = path.join(__dirname, 'system-constants.json');
-    if (fs.existsSync(constantsPath)) {
-      const data = JSON.parse(fs.readFileSync(constantsPath, 'utf-8'));
-      if (data.SYS_PROMPT_FALLBACK_CHARS) SYS_PROMPT_FALLBACK_CHARS = data.SYS_PROMPT_FALLBACK_CHARS;
-      if (data.TOOL_DEFS_FALLBACK_CHARS) TOOL_DEFS_FALLBACK_CHARS = data.TOOL_DEFS_FALLBACK_CHARS;
-      if (data.SYSTEM_REMINDER_CHROME_CHARS) SYSTEM_REMINDER_CHROME_CHARS = data.SYSTEM_REMINDER_CHROME_CHARS;
-    }
-  } catch { /* browser-side or file not found — use defaults */ }
+export function resetCalibratedConstants() {
+  SYS_PROMPT_FALLBACK_CHARS = DEFAULT_SYS_PROMPT_FALLBACK_CHARS;
+  TOOL_DEFS_FALLBACK_CHARS = DEFAULT_TOOL_DEFS_FALLBACK_CHARS;
+  SYSTEM_REMINDER_CHROME_CHARS = DEFAULT_SYSTEM_REMINDER_CHROME_CHARS;
 }
-loadCalibratedConstants();
+
+interface CalibratedConstantsInput {
+  SYS_PROMPT_FALLBACK_CHARS?: number;
+  TOOL_DEFS_FALLBACK_CHARS?: number;
+  SYSTEM_REMINDER_CHROME_CHARS?: number;
+}
+
+// Apply project-scoped calibrated constants. Called on every pipeline run with
+// constants already resolved by the server-side pipeline service.
+export function loadCalibratedConstants(constants?: CalibratedConstantsInput | null) {
+  resetCalibratedConstants();
+  if (!constants) return;
+  if (constants.SYS_PROMPT_FALLBACK_CHARS) SYS_PROMPT_FALLBACK_CHARS = constants.SYS_PROMPT_FALLBACK_CHARS;
+  if (constants.TOOL_DEFS_FALLBACK_CHARS) TOOL_DEFS_FALLBACK_CHARS = constants.TOOL_DEFS_FALLBACK_CHARS;
+  if (constants.SYSTEM_REMINDER_CHROME_CHARS) SYSTEM_REMINDER_CHROME_CHARS = constants.SYSTEM_REMINDER_CHROME_CHARS;
+}
 
 export function setMemoryChars(chars: number): void {
   if (chars > 0) MEMORY_FALLBACK_CHARS = chars;
