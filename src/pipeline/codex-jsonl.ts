@@ -296,13 +296,14 @@ function buildSegments(
     const payload = event.payload;
     if (event.type === 'response_item' && payload.type === 'reasoning') {
       const reasoningTok = nearestReasoningTokens(turn, event.order);
+      const summaryText = textFromCodexReasoningSummary(payload.summary);
       segments.push({
         k: 'm',
         n: '模型生成',
         ms: 0,
         ts: event.timestamp,
         det: {
-          think: '（Codex 推理内容已加密或不可读；仅保留 reasoning token 统计。）',
+          think: summaryText || '（Codex 推理内容已加密或不可读；仅保留 reasoning token 统计。）',
           thinkTok: reasoningTok,
           inTok: nearestInputTokens(turn, event.order),
           outTok: nearestOutputTokens(turn, event.order),
@@ -809,6 +810,18 @@ function textFromCodexContent(content: unknown): string {
     }
     return '';
   }).filter(Boolean).join('\n');
+}
+
+function textFromCodexReasoningSummary(summary: unknown): string {
+  if (typeof summary === 'string') return summary.trim();
+  if (!Array.isArray(summary)) return '';
+  return summary.map((item) => {
+    if (typeof item === 'string') return item.trim();
+    if (!isObject(item)) return '';
+    if (typeof item.text === 'string') return item.text.trim();
+    if (typeof item.content === 'string') return item.content.trim();
+    return '';
+  }).filter(Boolean).join('\n\n');
 }
 
 function durationToMs(duration: unknown): number | undefined {

@@ -264,6 +264,7 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
     try {
       return (
         <SyntaxHighlighter
+          className="thin-scrollbar"
           language={lang}
           style={atomOneDark}
           customStyle={{
@@ -285,7 +286,7 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
 
   // Plain code block — no syntax highlighting.
   return (
-    <pre style={{ ...CODE_BLOCK_STYLE, padding: '9px 10px', background: 'oklch(0.15 0.008 265)', color: 'oklch(0.82 0.01 265)', fontFamily: "'IBM Plex Mono', monospace" }}>
+    <pre className="thin-scrollbar" style={{ ...CODE_BLOCK_STYLE, padding: '9px 10px', background: 'oklch(0.15 0.008 265)', color: 'oklch(0.82 0.01 265)', fontFamily: "'IBM Plex Mono', monospace" }}>
       <code>{code}</code>
     </pre>
   );
@@ -333,7 +334,7 @@ function DiffFileBlock({ text }: { text: string }) {
   if (!parsed) {
     return (
       <div style={DIFF_FILE_STYLE}>
-        <div style={DIFF_FILE_INNER_STYLE}>
+        <div className="thin-scrollbar" style={DIFF_FILE_INNER_STYLE}>
           <MarkdownBlock text={text} variant="markdown" />
         </div>
       </div>
@@ -345,7 +346,7 @@ function DiffFileBlock({ text }: { text: string }) {
       <div style={{ padding: '8px 12px', borderBottom: '1px solid oklch(0.28 0.012 265)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: 'oklch(0.72 0.04 220)', background: 'oklch(0.19 0.01 265)' }}>
         {parsed.title}
       </div>
-      <div style={DIFF_FILE_INNER_STYLE}>
+      <div className="thin-scrollbar" style={DIFF_FILE_INNER_STYLE}>
         <div style={SIDE_BY_SIDE_GRID_STYLE}>
           <div style={{ ...SIDE_HEADER_STYLE, borderRight: '1px solid oklch(0.25 0.012 265)' }}>{parsed.oldPath}</div>
           <div style={SIDE_HEADER_STYLE}>{parsed.newPath}</div>
@@ -470,7 +471,7 @@ export function MarkdownBlock({ text, fontSize = 12.5, preserveNewlines = false,
     while (alignments.length < headerCells.length) alignments.push('left');
 
     blocks.push(
-      <div key={`table-wrap-${blocks.length}`} style={{ overflowX: 'auto', marginBottom: 12 }}>
+      <div key={`table-wrap-${blocks.length}`} className="thin-scrollbar" style={{ overflowX: 'auto', marginBottom: 12 }}>
         <table style={TABLE_STYLE}>
           <thead>
             <tr>

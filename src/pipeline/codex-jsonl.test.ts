@@ -172,6 +172,54 @@ test('parses Codex turns into the data required by the turn inspector', () => {
   assert.equal((turn as any).cumTools.exec_command.calls, 1);
 });
 
+test('uses readable Codex reasoning summaries when present', () => {
+  const summarySample = [
+    {
+      timestamp: '2026-06-26T01:00:00.000Z',
+      type: 'event_msg',
+      payload: { type: 'task_started', turn_id: 'turn_1' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:00.100Z',
+      type: 'event_msg',
+      payload: { type: 'user_message', message: '检查 summary' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:01.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'reasoning',
+        id: 'rs_1',
+        summary: [
+          { type: 'summary_text', text: '我会先定位配置来源。' },
+          { type: 'summary_text', text: '然后验证日志里是否写入摘要。' },
+        ],
+        encrypted_content: 'encrypted',
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+            reasoning_output_tokens: 8,
+          },
+        },
+      },
+    },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const { turns } = runCodexPipeline(summarySample, 'summary.jsonl');
+  const thinking = turns[0]!.segs.find((seg) => seg.k === 'm' && seg.det.think);
+
+  assert.equal(thinking?.det.think, '我会先定位配置来源。\n\n然后验证日志里是否写入摘要。');
+  assert.equal(thinking?.det.thinkTok, 8);
+});
+
 test('keeps unmatched Codex tool calls visible with a missing-result marker', () => {
   const missingResultSample = [
     {
