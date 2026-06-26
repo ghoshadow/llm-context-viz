@@ -7,6 +7,7 @@ import { fmt } from '../../utils/format';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { getCalibrationFailureNotice } from './calibrationFailureNotice';
 import { MarkdownBlock } from '../shared/MarkdownBlock';
+import { getCalibrationDetailLayout, getCalibrationDetailSectionIndex } from './calibrationDetailModal';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -156,6 +157,8 @@ function DetailButton({ disabled, onClick }: { disabled?: boolean; onClick: () =
 export default function CalibratePage() {
   const setPage = useUIStore((s) => s.setPage);
   const sessionCwd = useSessionStore((s) => s.currentSession?.cwd);
+  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const currentTurnIndex = useSessionStore((s) => s.currentTurnIndex);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ExtractedResult | null>(null);
   const [applying, setApplying] = useState(false);
@@ -166,6 +169,10 @@ export default function CalibratePage() {
   const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
   const [detailModal, setDetailModal] = useState<{ key: ConstantKey; title: string; text: string } | null>(null);
+  const [detailTranslations, setDetailTranslations] = useState<ConstantDetails>({});
+  const [detailTranslating, setDetailTranslating] = useState(false);
+  const [detailTranslateError, setDetailTranslateError] = useState<string | null>(null);
+  const [detailCopied, setDetailCopied] = useState(false);
   const permissionNotice = getCalibrationFailureNotice(autoJob);
 
   // Load current constants on mount
@@ -270,7 +277,50 @@ export default function CalibratePage() {
     const text = details?.[key];
     if (!text) return;
     setDetailModal({ key, title, text });
+    setDetailCopied(false);
+    setDetailTranslateError(null);
   }, []);
+
+  const detailTranslatedText = detailModal ? detailTranslations[detailModal.key] : undefined;
+  const detailLayout = getCalibrationDetailLayout(detailTranslatedText);
+
+  const handleDetailCopy = useCallback(async () => {
+    if (!detailModal) return;
+    const text = detailTranslatedText
+      ? `原文\n\n${detailModal.text}\n\n译文\n\n${detailTranslatedText}`
+      : detailModal.text;
+    try {
+      await navigator.clipboard.writeText(text);
+      setDetailCopied(true);
+      window.setTimeout(() => setDetailCopied(false), 2000);
+    } catch {
+      setDetailTranslateError('复制失败：浏览器剪贴板不可用。');
+    }
+  }, [detailModal, detailTranslatedText]);
+
+  const handleDetailTranslate = useCallback(async () => {
+    if (!detailModal || detailTranslating) return;
+    if (detailTranslations[detailModal.key]) return;
+    if (!currentSessionId || currentTurnIndex == null) {
+      setDetailTranslateError('请先打开一个会话和轮次，再使用翻译。');
+      return;
+    }
+    setDetailTranslateError(null);
+    setDetailTranslating(true);
+    try {
+      const res = await post<{ translated: string }>(`/sessions/${currentSessionId}/translate`, {
+        text: detailModal.text,
+        turnIndex: currentTurnIndex,
+        stepIndex: -100,
+        sectionIndex: getCalibrationDetailSectionIndex(detailModal.key, detailModal.text),
+      });
+      setDetailTranslations((prev) => ({ ...prev, [detailModal.key]: res.translated }));
+    } catch (err) {
+      setDetailTranslateError((err as Error).message);
+    } finally {
+      setDetailTranslating(false);
+    }
+  }, [currentSessionId, currentTurnIndex, detailModal, detailTranslating, detailTranslations]);
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 0', fontFamily: SANS, color: 'oklch(0.93 0.006 265)' }}>
@@ -298,15 +348,73 @@ export default function CalibratePage() {
                 <div style={{ fontSize: 14, fontWeight: 650, color: S.textPrimary3 }}>{detailModal.title}</div>
                 <div style={{ fontSize: 11, color: S.textMuted, fontFamily: MONO }}>{detailModal.key}</div>
               </div>
-              <button
-                onClick={() => setDetailModal(null)}
-                style={{ border: `1px solid ${S.borderColor}`, borderRadius: 8, width: 30, height: 30, background: 'oklch(0.22 0.01 265)', color: S.textSecondary, cursor: 'pointer', fontSize: 14 }}
-              >
-                x
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                <button
+                  onClick={handleDetailCopy}
+                  style={{
+                    border: `1px solid ${detailCopied ? 'oklch(0.45 0.08 150 / 0.42)' : S.borderColor}`,
+                    borderRadius: 7,
+                    padding: '5px 10px',
+                    background: detailCopied ? 'oklch(0.55 0.08 150 / 0.12)' : 'oklch(0.22 0.01 265)',
+                    color: detailCopied ? S.textGreen : S.textSecondary,
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontFamily: SANS,
+                  }}
+                >
+                  {detailCopied ? '已复制' : '复制'}
+                </button>
+                <button
+                  onClick={handleDetailTranslate}
+                  disabled={detailTranslating || Boolean(detailTranslatedText)}
+                  style={{
+                    border: `1px solid ${detailTranslatedText ? 'oklch(0.45 0.08 150 / 0.35)' : 'oklch(0.45 0.10 60 / 0.18)'}`,
+                    borderRadius: 7,
+                    padding: '5px 10px',
+                    background: detailTranslatedText ? 'oklch(0.55 0.08 150 / 0.10)' : 'oklch(0.45 0.10 60 / 0.08)',
+                    color: detailTranslatedText ? S.textGreen : S.textAccent2,
+                    cursor: detailTranslating ? 'wait' : detailTranslatedText ? 'default' : 'pointer',
+                    opacity: detailTranslating ? 0.65 : 1,
+                    fontSize: 12,
+                    fontFamily: SANS,
+                  }}
+                >
+                  {detailTranslating ? '翻译中...' : detailTranslatedText ? '已翻译' : '翻译'}
+                </button>
+                <button
+                  onClick={() => setDetailModal(null)}
+                  style={{ border: `1px solid ${S.borderColor}`, borderRadius: 8, width: 30, height: 30, background: 'oklch(0.22 0.01 265)', color: S.textSecondary, cursor: 'pointer', fontSize: 14 }}
+                >
+                  x
+                </button>
+              </div>
             </div>
+            {detailTranslateError && (
+              <div style={{ padding: '10px 18px 0', fontSize: 12, color: 'oklch(0.72 0.14 25)' }}>
+                {detailTranslateError}
+              </div>
+            )}
             <div style={{ padding: '16px 18px', overflow: 'auto' }}>
-              <MarkdownBlock text={detailModal.text} variant="markdown" preserveNewlines />
+              {detailLayout === 'side-by-side' ? (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                  gap: 14,
+                  minWidth: 760,
+                  alignItems: 'start',
+                }}>
+                  <div>
+                    <div style={{ marginBottom: 8, fontSize: 11, color: S.textMuted, fontFamily: MONO }}>原文</div>
+                    <MarkdownBlock text={detailModal.text} variant="markdown" preserveNewlines />
+                  </div>
+                  <div>
+                    <div style={{ marginBottom: 8, fontSize: 11, color: S.textMuted, fontFamily: MONO }}>译文</div>
+                    <MarkdownBlock text={detailTranslatedText || ''} variant="markdown" preserveNewlines />
+                  </div>
+                </div>
+              ) : (
+                <MarkdownBlock text={detailModal.text} variant="markdown" preserveNewlines />
+              )}
             </div>
           </div>
         </div>
