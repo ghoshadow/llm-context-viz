@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getDb } from '../db';
-import { callLLM } from '../llm/client';
+import { callTranslationLLM } from '../llm/translation-client';
 import { refreshSession } from '../services/pipeline-service';
 import { reassembleTranslatedSegments } from '../services/translation-reassembly';
 import { enrichWithSubAgents } from './scanner';
@@ -12,7 +12,6 @@ import ontologyRouter from './ontology';
 import { parseTurnListPagination } from './pagination';
 
 const router = Router();
-const TRANSLATION_MODEL = 'deepseek-v4-flash';
 
 // ============================================================================
 // Mount ontology sub-router
@@ -348,7 +347,7 @@ ${items}`;
 
     let response: string;
     try {
-      response = await callLLM(prompt, { model: TRANSLATION_MODEL });
+      response = await callTranslationLLM(prompt);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: '翻译失败: ' + message });
