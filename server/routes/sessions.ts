@@ -1,9 +1,7 @@
 import { Router } from 'express';
 import { getDb } from '../db';
 import { refreshSession } from '../services/pipeline-service';
-import { reassembleTranslatedSegments } from '../services/translation-reassembly';
-import { buildTranslationWorkload, mergeTranslatedWorkload } from '../services/translation-workload';
-import { translateWorkloadInBatches } from '../services/translation-batch';
+import { callTranslationLLM } from '../llm/translation-client';
 import { enrichWithSubAgents } from './scanner';
 import { readFileSync } from 'fs';
 import { getSessionSource } from '../../src/utils/sessionSource';
@@ -238,67 +236,11 @@ router.delete('/:id', (req, res) => {
 // POST /:id/translate — translate thinking / reply text to Chinese
 // ============================================================================
 
-/** Split text into segments, separating Chinese from non-Chinese content.
- *  Code blocks are preserved as-is. Uses a simple scanner to avoid regex
- *  catastrophic backtracking on large inputs. */
-function segmentForTranslation(text: string): Array<{ zh: boolean; text: string }> {
-  const segments: Array<{ zh: boolean; text: string }> = [];
-  let i = 0;
-  const len = text.length;
-
-  while (i < len) {
-    // Detect ```...``` code fences
-    if (text.startsWith('```', i)) {
-      const end = text.indexOf('```', i + 3);
-      if (end === -1) {
-        // Unclosed fence — treat the rest as code
-        segments.push({ zh: true, text: text.slice(i) });
-        break;
-      }
-      // Include the closing ``` and following newline if present
-      const close = text[end + 3] === '\n' ? end + 4 : end + 3;
-      segments.push({ zh: true, text: text.slice(i, close) });
-      i = close;
-      continue;
-    }
-
-    // Detect inline `...` code spans (single line only)
-    if (text[i] === '`') {
-      const end = text.indexOf('`', i + 1);
-      if (end !== -1 && text.slice(i + 1, end).indexOf('\n') === -1) {
-        segments.push({ zh: true, text: text.slice(i, end + 1) });
-        i = end + 1;
-        continue;
-      }
-    }
-
-    // Scan ahead: split by Chinese / non-Chinese runs
-    // Find the next Chinese character or non-Chinese character boundary
-    const isZh = isCJK(text.charCodeAt(i));
-    let j = i + 1;
-    while (j < len && isCJK(text.charCodeAt(j)) === isZh && text[j] !== '`') {
-      j++;
-    }
-    const chunk = text.slice(i, j);
-    if (chunk.trim()) {
-      segments.push({ zh: isZh, text: chunk });
-    } else {
-      // Whitespace-only — include as-is
-      segments.push({ zh: true, text: chunk });
-    }
-    i = j;
-  }
-  return segments;
-}
-
-function isCJK(code: number): boolean {
-  return (code >= 0x4E00 && code <= 0x9FFF)   // CJK Unified
-      || (code >= 0x3400 && code <= 0x4DBF)   // CJK Extension A
-      || (code >= 0x20000 && code <= 0x2A6DF) // CJK Extension B
-      || (code >= 0xF900 && code <= 0xFAFF)   // CJK Compatibility
-      || (code >= 0x3000 && code <= 0x303F)   // CJK Punctuation
-      || (code >= 0xFF00 && code <= 0xFFEF)   // Fullwidth forms
-      || (code >= 0x2F800 && code <= 0x2FA1F); // CJK Compatibility Supplement
+export async function translateRequestText(
+  text: string,
+  callLLM: (prompt: string) => Promise<string> = callTranslationLLM,
+): Promise<string> {
+  return callLLM(text);
 }
 
 router.post('/:id/translate', async (req, res) => {
@@ -322,29 +264,14 @@ router.post('/:id/translate', async (req, res) => {
       if (cached) return res.json({ translated: cached.translated_text });
     }
 
-    const segments = segmentForTranslation(text);
-    const workload = buildTranslationWorkload(segments);
-    const toTranslate = workload.requestItems;
-
-    if (toTranslate.length === 0) {
-      db.prepare(
-        'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
-      ).run(sessionId, turnIndex, stepIndex, sectionIndex, text);
-      return res.json({ translated: text });
-    }
-
-    let translatedMap: Map<number, string>;
+    let translated: string;
     try {
-      translatedMap = await translateWorkloadInBatches(toTranslate);
+      translated = await translateRequestText(text);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: '翻译失败: ' + message });
     }
 
-    const translated = reassembleTranslatedSegments(
-      segments,
-      mergeTranslatedWorkload(workload, translatedMap),
-    );
     db.prepare(
       'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
     ).run(sessionId, turnIndex, stepIndex, sectionIndex, translated);
