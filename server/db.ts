@@ -184,6 +184,16 @@ export function initDb(): void {
       created_at TEXT DEFAULT (datetime('now')),
       PRIMARY KEY (session_id, turn_index, step_index, section_index)
     );
+
+    CREATE TABLE IF NOT EXISTS project_constant_translations (
+      project_cwd TEXT NOT NULL,
+      source TEXT NOT NULL,
+      section_index INTEGER NOT NULL,
+      translated_text TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (project_cwd, source, section_index)
+    );
   `);
 }
 
@@ -338,5 +348,21 @@ export function migrate(): void {
         ON turns(session_id, turn_index DESC);
     `);
     conn.pragma('user_version = 5');
+  }
+
+  // v5 → v6: share calibration constant translations across sessions in the same project.
+  if (userVersion < 6) {
+    conn.exec(`
+      CREATE TABLE IF NOT EXISTS project_constant_translations (
+        project_cwd TEXT NOT NULL,
+        source TEXT NOT NULL,
+        section_index INTEGER NOT NULL,
+        translated_text TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (project_cwd, source, section_index)
+      );
+    `);
+    conn.pragma('user_version = 6');
   }
 }

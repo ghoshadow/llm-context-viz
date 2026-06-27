@@ -9,6 +9,7 @@ import { getSessionSource } from '../../src/utils/sessionSource';
 import { findJsonlFile } from './shared';
 import ontologyRouter from './ontology';
 import { parseTurnListPagination } from './pagination';
+import type { SessionSource } from '../../src/utils/sessionSource';
 
 const router = Router();
 
@@ -243,6 +244,20 @@ export async function translateRequestText(
   return callLLM(text);
 }
 
+export function isConstantTranslationSlot(stepIndex: number): boolean {
+  return stepIndex === -100;
+}
+
+export function normalizeTranslationProjectKey(
+  cwd: string,
+  source: SessionSource | string,
+): { project_cwd: string; source: string } {
+  return {
+    project_cwd: cwd.replace(/\/+$/, ''),
+    source: String(source || 'claude'),
+  };
+}
+
 router.post('/:id/translate', async (req, res) => {
   try {
     const { text, turnIndex, stepIndex, sectionIndex } = req.body || {};
@@ -255,9 +270,31 @@ router.post('/:id/translate', async (req, res) => {
 
     const sessionId = req.params.id!;
     const db = getDb();
+    const session = db.prepare('SELECT id, cwd, model, filename, version FROM sessions WHERE id = ?').get(sessionId) as
+      | { id: string; cwd?: string | null; model?: string | null; filename?: string | null; version?: string | null }
+      | undefined;
+    const projectKey = session?.cwd && isConstantTranslationSlot(stepIndex)
+      ? normalizeTranslationProjectKey(session.cwd, getSessionSource(session))
+      : null;
+
+    if (!session) {
+      return res.status(404).json({ error: '会话不存在' });
+    }
 
     // Check cache (skip when force=true)
     if (!req.body?.force) {
+      if (projectKey) {
+        const projectCached = db.prepare(
+          'SELECT translated_text FROM project_constant_translations WHERE project_cwd = ? AND source = ? AND section_index = ?'
+        ).get(projectKey.project_cwd, projectKey.source, sectionIndex) as { translated_text: string } | undefined;
+        if (projectCached) {
+          db.prepare(
+            'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
+          ).run(sessionId, turnIndex, stepIndex, sectionIndex, projectCached.translated_text);
+          return res.json({ translated: projectCached.translated_text });
+        }
+      }
+
       const cached = db.prepare(
         'SELECT translated_text FROM turn_translations WHERE session_id = ? AND turn_index = ? AND step_index = ? AND section_index = ?'
       ).get(sessionId, turnIndex, stepIndex, sectionIndex) as { translated_text: string } | undefined;
@@ -275,6 +312,14 @@ router.post('/:id/translate', async (req, res) => {
     db.prepare(
       'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
     ).run(sessionId, turnIndex, stepIndex, sectionIndex, translated);
+    if (projectKey) {
+      db.prepare(
+        `INSERT INTO project_constant_translations (project_cwd, source, section_index, translated_text, updated_at)
+         VALUES (?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(project_cwd, source, section_index)
+         DO UPDATE SET translated_text = excluded.translated_text, updated_at = datetime('now')`
+      ).run(projectKey.project_cwd, projectKey.source, sectionIndex, translated);
+    }
 
     return res.json({ translated });
   } catch (err) {
