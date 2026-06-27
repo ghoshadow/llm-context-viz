@@ -28,7 +28,7 @@ router.get('/', (_req, res) => {
     const db = getDb();
     const rows = db
       .prepare(
-        `SELECT id, filename, model, version, ai_title, total_requests, peak_tokens, turn_count, created_at
+        `SELECT id, filename, cwd, model, version, ai_title, total_requests, peak_tokens, turn_count, created_at
          FROM sessions
          ORDER BY created_at DESC`,
       )

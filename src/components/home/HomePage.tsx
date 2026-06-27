@@ -5,6 +5,7 @@ import type { SessionListItem } from '../../types/session';
 import { SEMANTIC } from '../../styles/theme';
 import { fmtK, fmtDateOnly } from '../../utils/format';
 import { getSessionSource, type SessionSource } from '../../utils/sessionSource';
+import { getSessionProjectPathText } from './sessionProjectPath';
 
 // ─── Styles (inline objects) ────────────────────────────────────────────
 
@@ -157,6 +158,15 @@ const cardS = {
     fontFamily: "'IBM Plex Mono', monospace",
   },
 
+  projectPath: {
+    fontSize: 12,
+    color: 'oklch(0.62 0.012 265)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+    fontFamily: "'IBM Plex Mono', monospace",
+  },
+
   stats: {
     display: 'flex',
     gap: 20,
@@ -224,6 +234,8 @@ function SessionCard({ session, onSelect, onDelete }: {
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const projectPath = getSessionProjectPathText(session);
+
   return (
     <div
       style={cardS.card}
@@ -264,6 +276,10 @@ function SessionCard({ session, onSelect, onDelete }: {
       {/* Filename */}
       <div style={cardS.filename} title={session.filename}>
         {session.filename}
+      </div>
+
+      <div style={cardS.projectPath} title={projectPath}>
+        项目目录 · {projectPath}
       </div>
 
       {/* Stats row */}
