@@ -78,6 +78,7 @@ router.get('/:id', (req, res) => {
 
     const detail = {
       ...rest,
+      source: getSessionSource(rest),
       categories: categories_json ? JSON.parse(categories_json) : [],
       tools: tools_json ? JSON.parse(tools_json) : [],
       series: series_json ? JSON.parse(series_json) : [],

@@ -27,6 +27,7 @@ import {
   defaultCalibrationPromptInput,
   defaultCalibrationTargetInput,
 } from './calibrationAutoStart';
+import { calibrationSourceFromSession, calibrationSourceLabel } from './calibrationSource';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -193,7 +194,8 @@ function DetailContent({ text, markdown }: { text: string; markdown: boolean }) 
 
 export default function CalibratePage() {
   const setPage = useUIStore((s) => s.setPage);
-  const sessionCwd = useSessionStore((s) => s.currentSession?.cwd);
+  const currentSession = useSessionStore((s) => s.currentSession);
+  const sessionCwd = currentSession?.cwd;
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const currentTurnIndex = useSessionStore((s) => s.currentTurnIndex);
   const [error, setError] = useState<string | null>(null);
@@ -212,6 +214,7 @@ export default function CalibratePage() {
   const [detailTranslateError, setDetailTranslateError] = useState<string | null>(null);
   const [detailCopied, setDetailCopied] = useState(false);
   const permissionNotice = getCalibrationFailureNotice(autoJob);
+  const sessionCalibrationSource = useMemo(() => calibrationSourceFromSession(currentSession), [currentSession]);
   const resultSummary = useMemo(() => getNormalizedCalibrationSummary(result), [result]);
   const resultRows = useMemo(
     () => buildCalibrationCategoryRows(resultSummary.categories, result?.details),
@@ -223,6 +226,16 @@ export default function CalibratePage() {
     () => buildCalibrationCategoryRows(currentSummary.categories, currentConstants?.details),
     [currentConstants?.details, currentSummary.categories],
   );
+
+  useEffect(() => {
+    setCalibrationSource(sessionCalibrationSource);
+    setAutoPrompt(defaultCalibrationPromptInput(sessionCalibrationSource));
+    setAutoTargetHost(defaultCalibrationTargetInput(sessionCalibrationSource));
+    setResult(null);
+    setApplied(false);
+    setAutoJob(null);
+    setError(null);
+  }, [sessionCalibrationSource, currentSessionId]);
 
   // Load current constants on mount
   useEffect(() => {
@@ -536,29 +549,20 @@ export default function CalibratePage() {
             cwd: {sessionCwd || '未选择会话'}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            {(['claude', 'codex'] as const).map((source) => (
-              <button
-                key={source}
-                onClick={() => {
-                  setCalibrationSource(source);
-                  setAutoPrompt(defaultCalibrationPromptInput(source));
-                  setAutoTargetHost(defaultCalibrationTargetInput(source));
-                }}
-                disabled={autoRunning}
-                style={{
-                  border: `1px solid ${calibrationSource === source ? S.borderAccent : S.borderColor}`,
-                  borderRadius: 7,
-                  padding: '6px 10px',
-                  background: calibrationSource === source ? 'oklch(0.24 0.04 245)' : 'oklch(0.20 0.01 265)',
-                  color: calibrationSource === source ? S.textPrimary3 : S.textSecondary,
-                  cursor: autoRunning ? 'not-allowed' : 'pointer',
-                  fontFamily: SANS,
-                  fontSize: 12,
-                }}
-              >
-                {source === 'claude' ? 'Claude Code' : 'Codex'}
-              </button>
-            ))}
+            <span style={{
+              border: `1px solid ${S.borderAccent}`,
+              borderRadius: 7,
+              padding: '6px 10px',
+              background: 'oklch(0.24 0.04 245)',
+              color: S.textPrimary3,
+              fontFamily: SANS,
+              fontSize: 12,
+            }}>
+              {calibrationSourceLabel(calibrationSource)}
+            </span>
+            <span style={{ fontSize: 12, color: S.textMuted }}>
+              跟随当前会话类型
+            </span>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 340px', minWidth: 0 }}>
