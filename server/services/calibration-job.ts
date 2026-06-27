@@ -5,7 +5,12 @@ import type { Readable } from 'stream';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
-import { extractConstants, type ExtractedConstants } from '../../src/pipeline/extract-constants';
+import type { AgentSource, NormalizedCalibration } from '../../src/pipeline/calibration-types';
+import { normalizeAgentSource } from '../../src/pipeline/calibration-types';
+import { extractConstants } from '../../src/pipeline/extract-constants';
+import { extractCodexConstants } from '../../src/pipeline/extract-codex-constants';
+import { buildCalibrationProxyArgs } from './calibration-launchers';
+import { readCodexBaseUrl } from './codex-config';
 
 type ProxyUtils = {
   pickPort: (host?: string) => Promise<number>;
@@ -26,6 +31,7 @@ export type CalibrationJobStatus =
 
 export interface CalibrationJobSnapshot {
   jobId: string;
+  source: AgentSource;
   status: CalibrationJobStatus;
   cwd: string;
   targetHost: string;
@@ -35,7 +41,7 @@ export interface CalibrationJobSnapshot {
   logFile?: string;
   message: string;
   output: string[];
-  result: ExtractedConstants | null;
+  result: NormalizedCalibration | null;
   error: string | null;
 }
 
@@ -46,6 +52,7 @@ interface CalibrationJob extends CalibrationJobSnapshot {
 
 export interface StartCalibrationJobOptions {
   cwd: string;
+  source?: AgentSource;
   prompt?: string;
   targetHost?: string;
   timeoutMs?: number;
@@ -107,7 +114,16 @@ async function choosePort(preferred?: number): Promise<number> {
   return pickPort('127.0.0.1');
 }
 
+export function defaultCalibrationPrompt(source: AgentSource): string {
+  return source === 'codex' ? 'Calibration probe: reply with "ok".' : 'say hi';
+}
+
+export function defaultCalibrationTarget(source: AgentSource, readBaseUrl = readCodexBaseUrl): string {
+  return source === 'codex' ? readBaseUrl() : 'api.deepseek.com';
+}
+
 export async function startCalibrationJob(options: StartCalibrationJobOptions): Promise<CalibrationJobSnapshot> {
+  const source = normalizeAgentSource(options.source);
   const cwd = resolve(options.cwd || '');
   if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
     throw new Error('cwd must be an existing absolute directory');
@@ -117,13 +133,14 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
   }
 
   const jobId = randomUUID();
-  const targetHost = options.targetHost || 'api.deepseek.com';
+  const targetHost = options.targetHost || defaultCalibrationTarget(source);
   const timeoutMs = Math.max(5000, Math.min(options.timeoutMs || 45000, 180000));
   const port = await choosePort(options.port);
-  const prompt = options.prompt || 'say hi';
+  const prompt = options.prompt || defaultCalibrationPrompt(source);
 
   const job: CalibrationJob = {
     jobId,
+    source,
     status: 'starting',
     cwd,
     targetHost,
@@ -137,15 +154,15 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
   };
   jobs.set(jobId, job);
 
-  const args = [
-    SCRIPT_PATH,
-    '--cwd', cwd,
-    '--target-host', targetHost,
-    '--port', String(port),
-    '--timeout-ms', String(timeoutMs),
-    '--',
-    '-p', prompt,
-  ];
+  const args = buildCalibrationProxyArgs({
+    source,
+    scriptPath: SCRIPT_PATH,
+    cwd,
+    targetHost,
+    port,
+    timeoutMs,
+    prompt,
+  });
 
   const child = spawn(process.execPath, args, {
     cwd: PROJECT_ROOT,
@@ -191,9 +208,26 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
     job.status = 'extracting';
     job.message = 'extracting constants from capture';
     try {
-      const result = extractConstants(job.logFile);
-      if (!result) throw new Error('capture log did not contain a valid API request');
-      job.result = result;
+      const extracted = source === 'codex'
+        ? extractCodexConstants(job.logFile)
+        : extractConstants(job.logFile);
+      if (!extracted) throw new Error('capture log did not contain a valid API request');
+      job.result = {
+        schemaVersion: 1,
+        source,
+        constantsSource: 'project',
+        cwd: job.cwd,
+        rawLogPath: job.logFile,
+        cliVersion: 'cliVersion' in extracted ? extracted.cliVersion : undefined,
+        ccVersion: 'ccVersion' in extracted ? extracted.ccVersion : undefined,
+        model: extracted.model,
+        wireApi: 'wireApi' in extracted ? extracted.wireApi : undefined,
+        categories: extracted.summary.categories,
+        usage: extracted.summary.usage,
+        toolNames: extracted.summary.toolNames,
+        hashes: extracted.summary.hashes,
+        details: extracted.details,
+      };
       job.status = 'ready';
       job.message = 'calibration constants ready';
     } catch (err) {
