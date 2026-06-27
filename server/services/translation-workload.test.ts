@@ -36,3 +36,11 @@ test('builds request items and merges them back per original non-Chinese segment
 
   assert.deepEqual(translated, ['甲\n\n乙', '丙']);
 });
+
+test('keeps medium sized prompts in one request item by default', () => {
+  const text = 'alpha\n\n'.repeat(1000);
+  const workload = buildTranslationWorkload([{ zh: false, text }]);
+
+  assert.deepEqual(workload.requestItems, [text]);
+  assert.deepEqual(workload.segmentItemIndexes, [[0]]);
+});

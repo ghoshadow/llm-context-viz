@@ -7,7 +7,7 @@ export interface TranslationWorkload {
 
 export function buildTranslationWorkload(
   segments: TranslationSegment[],
-  maxChunkChars = 1800,
+  maxChunkChars = 20_000,
 ): TranslationWorkload {
   const requestItems: string[] = [];
   const segmentItemIndexes: number[][] = [];
