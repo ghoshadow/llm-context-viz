@@ -31,29 +31,71 @@ function group(cwd: string): TurnGroup {
   };
 }
 
-test('loads project constants and resets when missing for next project', () => {
+test('loads normalized project constants and resets when missing for next project', () => {
   const projectA = mkdtempSync(join(tmpdir(), 'cal-project-a-'));
   const projectB = mkdtempSync(join(tmpdir(), 'cal-project-b-'));
   try {
     loadCalibratedConstants({
-      SYS_PROMPT_FALLBACK_CHARS: 111,
-      TOOL_DEFS_FALLBACK_CHARS: 222,
-      SYSTEM_REMINDER_CHROME_CHARS: 333,
+      schemaVersion: 1,
+      source: 'claude',
+      categories: {
+        sysPrompt: { chars: 111 },
+        tool_defs: { chars: 222 },
+        userMsgs: { chars: 333 },
+      },
     });
 
     const a = computeContext([group(projectA)], estimator)[0]!;
     assert.equal(a.sysPrompt, 111);
     assert.equal(a.tool_defs, 222);
-    assert.equal(a.userMsgs, 333 + 2);
+    assert.equal(a.userWrapper, 333);
+    assert.equal(a.userMsgs, 2);
 
     loadCalibratedConstants(null);
     const b = computeContext([group(projectB)], estimator)[0]!;
     assert.equal(b.sysPrompt, 5768);
     assert.equal(b.tool_defs, 98949);
-    assert.equal(b.userMsgs, 612 + 2);
+    assert.equal(b.userWrapper, 612);
+    assert.equal(b.userMsgs, 2);
   } finally {
     resetCalibratedConstants();
     rmSync(projectA, { recursive: true, force: true });
     rmSync(projectB, { recursive: true, force: true });
+  }
+});
+
+test('keeps legacy calibrated constant input compatible during migration', () => {
+  try {
+    loadCalibratedConstants({
+      SYS_PROMPT_FALLBACK_CHARS: 10,
+      TOOL_DEFS_FALLBACK_CHARS: 20,
+      SYSTEM_REMINDER_CHROME_CHARS: 30,
+    });
+
+    const comp = computeContext([group('/tmp')], estimator)[0]!;
+    assert.equal(comp.sysPrompt, 10);
+    assert.equal(comp.tool_defs, 20);
+    assert.equal(comp.userWrapper, 30);
+    assert.equal(comp.userMsgs, 2);
+  } finally {
+    resetCalibratedConstants();
+  }
+});
+
+test('uses split Claude memory categories as the memory fallback', () => {
+  try {
+    loadCalibratedConstants({
+      schemaVersion: 1,
+      source: 'claude',
+      categories: {
+        memoryGlobal: { chars: 40 },
+        memoryProject: { chars: 50 },
+      },
+    });
+
+    const comp = computeContext([group('/tmp')], estimator)[0]!;
+    assert.equal(comp.memory, 90);
+  } finally {
+    resetCalibratedConstants();
   }
 });

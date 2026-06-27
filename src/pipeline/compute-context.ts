@@ -8,6 +8,12 @@ import type {
   ContentBlock,
 } from '../types/session';
 import { isSubAgentTool, extractContentText } from './utils';
+import {
+  type NormalizedCalibration,
+  type NormalizedCalibrationSummary,
+  categoryChars,
+  memoryCategoryChars,
+} from './calibration-types';
 
 // ---------------------------------------------------------------------------
 // Token estimator interface
@@ -55,6 +61,7 @@ export interface CategoryMetrics {
 const DEFAULT_SYS_PROMPT_FALLBACK_CHARS = 5768;
 const DEFAULT_TOOL_DEFS_FALLBACK_CHARS = 98949;
 const DEFAULT_SYSTEM_REMINDER_CHROME_CHARS = 612;
+const DEFAULT_MEMORY_FALLBACK_CHARS = 2474;
 
 let SYS_PROMPT_FALLBACK_CHARS  = DEFAULT_SYS_PROMPT_FALLBACK_CHARS;
 let TOOL_DEFS_FALLBACK_CHARS   = DEFAULT_TOOL_DEFS_FALLBACK_CHARS;
@@ -64,25 +71,41 @@ const REMINDERS_FALLBACK_CHARS   = 409;
 let SYSTEM_REMINDER_CHROME_CHARS = DEFAULT_SYSTEM_REMINDER_CHROME_CHARS;
 
 // MEMORY is set at runtime from actual CLAUDE.md files on disk.
-let MEMORY_FALLBACK_CHARS = 2474;
+let MEMORY_FALLBACK_CHARS = DEFAULT_MEMORY_FALLBACK_CHARS;
 
 export function resetCalibratedConstants() {
   SYS_PROMPT_FALLBACK_CHARS = DEFAULT_SYS_PROMPT_FALLBACK_CHARS;
   TOOL_DEFS_FALLBACK_CHARS = DEFAULT_TOOL_DEFS_FALLBACK_CHARS;
   SYSTEM_REMINDER_CHROME_CHARS = DEFAULT_SYSTEM_REMINDER_CHROME_CHARS;
+  MEMORY_FALLBACK_CHARS = DEFAULT_MEMORY_FALLBACK_CHARS;
 }
 
-interface CalibratedConstantsInput {
+interface LegacyCalibratedConstantsInput {
   SYS_PROMPT_FALLBACK_CHARS?: number;
   TOOL_DEFS_FALLBACK_CHARS?: number;
   SYSTEM_REMINDER_CHROME_CHARS?: number;
 }
+
+type CalibratedConstantsInput = NormalizedCalibration | NormalizedCalibrationSummary | LegacyCalibratedConstantsInput;
 
 // Apply project-scoped calibrated constants. Called on every pipeline run with
 // constants already resolved by the server-side pipeline service.
 export function loadCalibratedConstants(constants?: CalibratedConstantsInput | null) {
   resetCalibratedConstants();
   if (!constants) return;
+
+  if ('categories' in constants) {
+    const sysPrompt = categoryChars(constants, 'sysPrompt');
+    const toolDefs = categoryChars(constants, 'tool_defs');
+    const userChrome = categoryChars(constants, 'userMsgs');
+    const memory = memoryCategoryChars(constants);
+    if (sysPrompt) SYS_PROMPT_FALLBACK_CHARS = sysPrompt;
+    if (toolDefs) TOOL_DEFS_FALLBACK_CHARS = toolDefs;
+    if (userChrome) SYSTEM_REMINDER_CHROME_CHARS = userChrome;
+    if (memory) MEMORY_FALLBACK_CHARS = memory;
+    return;
+  }
+
   if (constants.SYS_PROMPT_FALLBACK_CHARS) SYS_PROMPT_FALLBACK_CHARS = constants.SYS_PROMPT_FALLBACK_CHARS;
   if (constants.TOOL_DEFS_FALLBACK_CHARS) TOOL_DEFS_FALLBACK_CHARS = constants.TOOL_DEFS_FALLBACK_CHARS;
   if (constants.SYSTEM_REMINDER_CHROME_CHARS) SYSTEM_REMINDER_CHROME_CHARS = constants.SYSTEM_REMINDER_CHROME_CHARS;
@@ -174,6 +197,7 @@ const CORE_CATEGORIES = [
   'memory',
   'mcp',
   'reminders',
+  'userWrapper',
 ] as const;
 
 const CONVO_CATEGORIES = [
@@ -210,7 +234,7 @@ function seedCoreScaffolding(
   addPadding(cum.memory!,     MEMORY_FALLBACK_CHARS,      est);
   addPadding(cum.mcp!,        MCP_FALLBACK_CHARS,         est);
   addPadding(cum.reminders!,  REMINDERS_FALLBACK_CHARS,   est);
-  addPadding(cum.userMsgs!,   SYSTEM_REMINDER_CHROME_CHARS, est);
+  addPadding(cum.userWrapper!, SYSTEM_REMINDER_CHROME_CHARS, est);
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +395,7 @@ function processGroup(
  *   | memory      | nested_memory system lines          |
  *   | mcp         | MCP instructions (constant)         |
  *   | reminders   | task_reminder system lines          |
+ *   | userWrapper | Claude user message wrapper (const) |
  *   | toolResults | Tool result content (non-Task)      |
  *   | thinking    | Assistant thinking blocks           |
  *   | toolCalls   | Tool use blocks (name + input JSON) |

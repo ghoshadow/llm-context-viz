@@ -1,4 +1,4 @@
-export type SessionSource = 'claude' | 'codex';
+export type SessionSource = 'claude' | 'codex' | 'opencode' | 'openclaw';
 
 export interface SessionSourceLike {
   source?: SessionSource | string | null;
@@ -8,7 +8,14 @@ export interface SessionSourceLike {
 }
 
 export function getSessionSource(session: SessionSourceLike): SessionSource {
-  if (session.source === 'codex' || session.source === 'claude') return session.source;
+  if (
+    session.source === 'codex' ||
+    session.source === 'claude' ||
+    session.source === 'opencode' ||
+    session.source === 'openclaw'
+  ) {
+    return session.source;
+  }
 
   const model = (session.model || '').toLowerCase();
   const filename = (session.filename || '').toLowerCase();

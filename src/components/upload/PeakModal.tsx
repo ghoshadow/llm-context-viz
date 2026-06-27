@@ -98,10 +98,12 @@ export function buildCategories(comp: Record<string, number>, fullCtx: number, c
   const CAT_META: Record<string, { label: string; group: ContextCategory['group'] }> = {
     sysPrompt: { label: '系统提示', group: 'core' },
     tools: { label: '工具定义', group: 'core' },
+    tool_defs: { label: '工具定义', group: 'core' },
     skills: { label: '技能定义', group: 'core' },
     memory: { label: '记忆文件', group: 'core' },
     mcp: { label: 'MCP 配置', group: 'core' },
     reminders: { label: '周期提醒', group: 'core' },
+    userWrapper: { label: '用户消息包装', group: 'core' },
     thinking: { label: '思考过程', group: 'io' },
     asstText: { label: '助手输出', group: 'io' },
     toolCalls: { label: '工具调用', group: 'io' },
@@ -109,7 +111,7 @@ export function buildCategories(comp: Record<string, number>, fullCtx: number, c
     userMsgs: { label: '用户消息', group: 'convo' },
     subagent: { label: '子代理', group: 'convo' },
   };
-  const EST = new Set(['sysPrompt', 'tool_defs']);
+  const EST = new Set(['sysPrompt', 'tool_defs', 'userWrapper']);
   const cats: ContextCategory[] = [];
   for (const [key, tokens] of Object.entries(comp)) {
     const t = Math.round(tokens * scaleF);

@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import type { ExtractedConstants } from '../../src/pipeline/extract-constants';
+import { normalizeAgentSource } from '../../src/pipeline/calibration-types';
 import {
-  readProjectConstants,
-  writeProjectConstants,
+  readCalibrationConstants,
+  writeCalibrationConstants,
 } from '../services/calibration-constants';
 import {
   cancelCalibrationJob,
@@ -16,7 +16,18 @@ const router = Router();
 
 router.put('/apply', (req, res) => {
   try {
-    const body = req.body as { cwd?: string; summary?: ExtractedConstants['summary']; details?: ExtractedConstants['details']; ccVersion?: string; model?: string };
+    const body = req.body as {
+      source?: string;
+      cwd?: string;
+      summary?: any;
+      details?: Record<string, string>;
+      ccVersion?: string;
+      cliVersion?: string;
+      model?: string;
+      wireApi?: string;
+      rawLogPath?: string;
+    };
+    const source = normalizeAgentSource(body.source);
     if (!body.cwd) {
       return res.status(400).json({ error: '缺少 cwd 字段，无法确定当前项目。' });
     }
@@ -24,11 +35,15 @@ router.put('/apply', (req, res) => {
       return res.status(400).json({ error: '缺少 summary 字段' });
     }
 
-    const data = writeProjectConstants(body.cwd, {
+    const data = writeCalibrationConstants(body.cwd, {
+      source,
       summary: body.summary,
       details: body.details,
       ccVersion: body.ccVersion,
+      cliVersion: body.cliVersion,
       model: body.model,
+      wireApi: body.wireApi,
+      rawLogPath: body.rawLogPath,
     });
     return res.json({ ...data, ok: true, path: data.path });
   } catch (err) {
@@ -44,7 +59,8 @@ router.get('/current', (_req, res) => {
     if (!cwd) {
       return res.status(400).json({ error: '缺少 cwd 参数，无法确定当前项目。' });
     }
-    return res.json(readProjectConstants(cwd));
+    const source = normalizeAgentSource(_req.query.source);
+    return res.json(readCalibrationConstants(cwd, source));
   } catch (err) {
     return res.status(500).json({ error: '读取失败: ' + (err as Error).message });
   }

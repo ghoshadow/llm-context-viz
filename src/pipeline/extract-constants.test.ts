@@ -34,6 +34,9 @@ test('extracts markdown-viewable details for calibrated constants', () => {
                 'Contents of /Users/link/.claude/CLAUDE.md',
                 '',
                 'global memory',
+                'Contents of /Users/link/project/.claude/CLAUDE.md',
+                '',
+                'project memory',
                 '# currentDate',
                 '2026-06-26',
                 '</system-reminder>',
@@ -48,15 +51,34 @@ test('extracts markdown-viewable details for calibrated constants', () => {
 
     const extracted = extractConstants(logPath);
 
+    assert.equal(extracted?.source, 'claude');
+    assert.equal(extracted?.summary.categories.sysPrompt?.chars, extracted?.systemBlocks.total);
+    assert.equal(extracted?.summary.categories.tool_defs?.chars, extracted?.toolsChars);
+    assert.equal(extracted?.summary.categories.userMsgs?.chars, extracted?.userMessage.chrome);
+    assert.equal(extracted?.summary.categories.memoryGlobal?.chars, 'global memory'.length);
+    assert.equal(extracted?.summary.categories.memoryProject?.chars, 'project memory'.length);
+
     assert.ok(extracted?.details);
-    assert.doesNotMatch(extracted.details.SYS_PROMPT_FALLBACK_CHARS, /```text/);
-    assert.match(extracted.details.SYS_PROMPT_FALLBACK_CHARS, /Harness prompt text/);
-    assert.match(extracted.details.SYS_PROMPT_FALLBACK_CHARS, /```json\n\{"example":true\}\n```/);
-    assert.match(extracted.details.TOOL_DEFS_FALLBACK_CHARS, /```json/);
-    assert.match(extracted.details.TOOL_DEFS_FALLBACK_CHARS, /"name": "Read"/);
-    assert.doesNotMatch(extracted.details.SYSTEM_REMINDER_CHROME_CHARS, /```text/);
-    assert.match(extracted.details.SYSTEM_REMINDER_CHROME_CHARS, /Intro wrapper/);
-    assert.match(extracted.details.SYSTEM_REMINDER_CHROME_CHARS, /```bash\necho hello\n```/);
+    const sysPrompt = extracted.details['claude.sysPrompt'];
+    const toolDefs = extracted.details['claude.tool_defs'];
+    const userMsgs = extracted.details['claude.userMsgs'];
+    const memoryGlobal = extracted.details['claude.memory.global'];
+    const memoryProject = extracted.details['claude.memory.project'];
+    assert.ok(sysPrompt);
+    assert.ok(toolDefs);
+    assert.ok(userMsgs);
+    assert.ok(memoryGlobal);
+    assert.ok(memoryProject);
+    assert.doesNotMatch(sysPrompt, /```text/);
+    assert.match(sysPrompt, /Harness prompt text/);
+    assert.match(sysPrompt, /```json\n\{"example":true\}\n```/);
+    assert.match(toolDefs, /```json/);
+    assert.match(toolDefs, /"name": "Read"/);
+    assert.doesNotMatch(userMsgs, /```text/);
+    assert.match(userMsgs, /Intro wrapper/);
+    assert.match(userMsgs, /```bash\necho hello\n```/);
+    assert.match(memoryGlobal, /global memory/);
+    assert.match(memoryProject, /project memory/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -7,6 +7,11 @@ test('uses explicit imported session source when present', () => {
   assert.equal(getSessionSource({ source: 'claude', model: 'gpt-5.5', filename: 'rollout-x.jsonl' }), 'claude');
 });
 
+test('round-trips explicit future agent sources', () => {
+  assert.equal(getSessionSource({ source: 'opencode', model: 'gpt-5.5', filename: 'x.jsonl' }), 'opencode');
+  assert.equal(getSessionSource({ source: 'openclaw', model: 'gpt-5.5', filename: 'rollout-x.jsonl' }), 'openclaw');
+});
+
 test('infers imported session source from model and filename', () => {
   assert.equal(getSessionSource({ model: 'gpt-5.5', filename: 'session.jsonl' }), 'codex');
   assert.equal(getSessionSource({ model: 'codex', filename: 'session.jsonl' }), 'codex');

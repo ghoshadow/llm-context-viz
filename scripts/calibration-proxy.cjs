@@ -14,8 +14,10 @@ const {
   redactHeaders,
   cleanForwardHeaders,
   tryParse,
+  ensureDir,
   getProjectLogFilePath,
   resolveCaptureTarget,
+  resolveCliPath,
 } = require("./calibration-proxy-utils.cjs");
 
 const DEFAULT_TARGET_HOST = "api.deepseek.com";
@@ -36,19 +38,30 @@ function parseArgs(argv) {
   const preArgs = dashDashIdx >= 0 ? args.slice(0, dashDashIdx) : args;
   const claudeArgs = dashDashIdx >= 0 ? args.slice(dashDashIdx + 1) : ["-p", "say hi"];
   const opts = {
+    source: "claude",
     cwd: process.cwd(),
     targetHost: DEFAULT_TARGET_HOST,
     port: DEFAULT_PORT,
     timeoutMs: 45000,
+    traceDirName: ".claude-trace",
+    logPrefix: "api-log",
     claudeArgs,
   };
   for (let i = 0; i < preArgs.length; i += 1) {
     const key = preArgs[i];
     const value = preArgs[i + 1];
     if (key === "--cwd" && value) { opts.cwd = path.resolve(value); i += 1; }
+    else if (key === "--source" && value) {
+      opts.source = value;
+      opts.traceDirName = value === "codex" ? ".codex-trace" : `.${value}-trace`;
+      opts.logPrefix = value === "codex" ? "codex-api-log" : "api-log";
+      i += 1;
+    }
     else if (key === "--target-host" && value) { opts.targetHost = value; i += 1; }
     else if (key === "--port" && value) { opts.port = Number(value); i += 1; }
     else if (key === "--timeout-ms" && value) { opts.timeoutMs = Number(value); i += 1; }
+    else if (key === "--trace-dir" && value) { opts.traceDirName = value; i += 1; }
+    else if (key === "--log-prefix" && value) { opts.logPrefix = value; i += 1; }
   }
   return opts;
 }
@@ -251,7 +264,10 @@ async function main() {
   if (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0) throw new Error("Invalid --timeout-ms");
   if (!fs.existsSync(opts.cwd) || !fs.statSync(opts.cwd).isDirectory()) throw new Error(`Invalid cwd: ${opts.cwd}`);
 
-  const logFile = getProjectLogFilePath(opts.cwd);
+  const logFile = getProjectLogFilePath(opts.cwd, new Date(), {
+    traceDirName: opts.traceDirName,
+    logPrefix: opts.logPrefix,
+  });
 
   let captured = false;
   let timedOut = false;
@@ -294,12 +310,24 @@ async function main() {
 
   const proxyUrl = `http://127.0.0.1:${opts.port}`;
   captureBaseUrl = captureTarget.mode === "base-url" ? proxyUrl : undefined;
-  const claudePath = execSync("which claude", { encoding: "utf8" }).trim();
+  const cliName = opts.source === "codex" ? "codex" : "claude";
+  const cliPath = resolveCliPath(cliName);
+  const childArgs = opts.source === "codex"
+    ? [
+        "exec",
+        "--ephemeral",
+        "--json",
+        "-c", `model_providers.OpenAI.base_url="${proxyUrl}"`,
+        "-s", "read-only",
+        "-C", opts.cwd,
+        ...(opts.claudeArgs.length ? opts.claudeArgs : ['Calibration probe: reply with "ok".']),
+      ]
+    : opts.claudeArgs;
   const modeLabel = captureTarget.mode === "base-url"
     ? `mode=base-url upstream=${captureTarget.upstreamBaseUrl}`
     : `mode=connect target=${opts.targetHost}`;
-  log(`READY port=${opts.port} ${modeLabel} log=${logFile}`);
-  log(`Launching: ${claudePath} ${opts.claudeArgs.join(" ")}`);
+  log(`READY source=${opts.source} port=${opts.port} ${modeLabel} log=${logFile}`);
+  log(`Launching: ${cliPath} ${childArgs.join(" ")}`);
 
   const childEnv = {
     ...process.env,
@@ -316,7 +344,7 @@ async function main() {
     childEnv.NODE_TLS_REJECT_UNAUTHORIZED = "0";
   }
 
-  const child = spawn(claudePath, opts.claudeArgs, {
+  const child = spawn(cliPath, childArgs, {
     cwd: opts.cwd,
     env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],

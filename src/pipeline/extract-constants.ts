@@ -17,6 +17,7 @@
 // ============================================================================
 
 import { readFileSync } from 'fs';
+import type { NormalizedCalibrationSummary } from './calibration-types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +42,8 @@ export interface UserMessageParts {
 }
 
 export interface ExtractedConstants {
+  /** Agent source. */
+  source: 'claude';
   /** Source log file name. */
   sourceFile: string;
   /** Claude Code version string from headers. */
@@ -55,14 +58,10 @@ export interface ExtractedConstants {
   userMessage: UserMessageParts;
   /** Total input_tokens reported by the API for the first request. */
   firstRequestTokens: number;
-  /** Summary: the key constants for compute-context.ts. */
-  summary: {
-    SYS_PROMPT_FALLBACK_CHARS: number;
-    TOOL_DEFS_FALLBACK_CHARS: number;
-    SYSTEM_REMINDER_CHROME_CHARS: number;
-  };
+  /** Summary in normalized calibration schema. */
+  summary: NormalizedCalibrationSummary;
   /** Markdown-viewable source content for each calibrated constant. */
-  details?: Record<keyof ExtractedConstants['summary'], string>;
+  details?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +125,8 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
       currentDate: 0,
       sessionGuidance: 0,
     };
+    let globalClaudeMdText = '';
+    let projectClaudeMdText = '';
 
     // Chrome measurement: split the user message into sections.
     // Chrome = everything that is NOT actual file content (CLAUDE.md,
@@ -162,8 +163,7 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
       // Walk back from pos to find the last non-blank content line
       let p = pos - 1;
       while (p > 0 && userText[p] === '\n') p--;
-      const nl = userText.lastIndexOf('\n', p);
-      return nl >= 0 ? nl + 1 : pos;
+      return p + 1;
     }
 
     let contentTotal = 0;
@@ -179,7 +179,12 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
         : currentDateStart > globalStart ? currentDateStart
         : endOfText
       );
-      if (ce > cs) { up.globalClaudeMd = ce - cs; contentTotal += up.globalClaudeMd; contentRanges.push([cs, ce]); }
+      if (ce > cs) {
+        globalClaudeMdText = userText.slice(cs, ce);
+        up.globalClaudeMd = globalClaudeMdText.length;
+        contentTotal += up.globalClaudeMd;
+        contentRanges.push([cs, ce]);
+      }
     }
 
     // Project CLAUDE.md content
@@ -191,7 +196,12 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
         : currentDateStart > projStart ? currentDateStart
         : endOfText
       );
-      if (ce > cs) { up.projectClaudeMd = ce - cs; contentTotal += up.projectClaudeMd; contentRanges.push([cs, ce]); }
+      if (ce > cs) {
+        projectClaudeMdText = userText.slice(cs, ce);
+        up.projectClaudeMd = projectClaudeMdText.length;
+        contentTotal += up.projectClaudeMd;
+        contentRanges.push([cs, ce]);
+      }
     }
 
     // MCP instructions content
@@ -238,6 +248,7 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
     const model = body.model || 'unknown';
 
     return {
+      source: 'claude',
       sourceFile: logPath.split('/').pop() || logPath,
       ccVersion,
       model,
@@ -246,20 +257,27 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
       userMessage: up,
       firstRequestTokens,
       summary: {
-        SYS_PROMPT_FALLBACK_CHARS: systemBlocks.total,
-        TOOL_DEFS_FALLBACK_CHARS: toolsChars,
-        SYSTEM_REMINDER_CHROME_CHARS: up.chrome,
+        categories: {
+          sysPrompt: { chars: systemBlocks.total, detailKey: 'claude.sysPrompt', origin: 'capture' },
+          tool_defs: { chars: toolsChars, detailKey: 'claude.tool_defs', origin: 'capture' },
+          memoryGlobal: { chars: up.globalClaudeMd, detailKey: 'claude.memory.global', origin: 'capture' },
+          memoryProject: { chars: up.projectClaudeMd, detailKey: 'claude.memory.project', origin: 'capture' },
+          userMsgs: { chars: up.chrome, detailKey: 'claude.userMsgs', origin: 'capture' },
+        },
+        usage: {
+          firstRequestInputTokens: firstRequestTokens,
+        },
       },
       details: {
-        SYS_PROMPT_FALLBACK_CHARS: [
-          '# SYS_PROMPT_FALLBACK_CHARS',
+        'claude.sysPrompt': [
+          '# claude.sysPrompt',
           '',
           `字符数: ${systemBlocks.total}`,
           '',
           systemTexts.join('\n\n--- system block ---\n\n'),
         ].join('\n'),
-        TOOL_DEFS_FALLBACK_CHARS: [
-          '# TOOL_DEFS_FALLBACK_CHARS',
+        'claude.tool_defs': [
+          '# claude.tool_defs',
           '',
           `字符数: ${toolsChars}`,
           '',
@@ -267,12 +285,26 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
           toolsJson,
           '```',
         ].join('\n'),
-        SYSTEM_REMINDER_CHROME_CHARS: [
-          '# SYSTEM_REMINDER_CHROME_CHARS',
+        'claude.userMsgs': [
+          '# claude.userMsgs',
           '',
           `字符数: ${up.chrome}`,
           '',
           chromeText,
+        ].join('\n'),
+        'claude.memory.global': [
+          '# claude.memory.global',
+          '',
+          `字符数: ${up.globalClaudeMd}`,
+          '',
+          globalClaudeMdText,
+        ].join('\n'),
+        'claude.memory.project': [
+          '# claude.memory.project',
+          '',
+          `字符数: ${up.projectClaudeMd}`,
+          '',
+          projectClaudeMdText,
         ].join('\n'),
       },
     };
