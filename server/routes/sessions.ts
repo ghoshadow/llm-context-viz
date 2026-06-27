@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { getDb } from '../db';
-import { callTranslationLLM } from '../llm/translation-client';
 import { refreshSession } from '../services/pipeline-service';
 import { reassembleTranslatedSegments } from '../services/translation-reassembly';
+import { buildTranslationWorkload, mergeTranslatedWorkload } from '../services/translation-workload';
+import { translateWorkloadInBatches } from '../services/translation-batch';
 import { enrichWithSubAgents } from './scanner';
 import { readFileSync } from 'fs';
 import { getSessionSource } from '../../src/utils/sessionSource';
@@ -322,10 +323,8 @@ router.post('/:id/translate', async (req, res) => {
     }
 
     const segments = segmentForTranslation(text);
-    const toTranslate: string[] = [];
-    for (const seg of segments) {
-      if (!seg.zh) toTranslate.push(seg.text);
-    }
+    const workload = buildTranslationWorkload(segments);
+    const toTranslate = workload.requestItems;
 
     if (toTranslate.length === 0) {
       db.prepare(
@@ -334,64 +333,17 @@ router.post('/:id/translate', async (req, res) => {
       return res.json({ translated: text });
     }
 
-    // Build a numbered list of segments to translate
-    const items = toTranslate.map((t, i) => `[${i}] ${t}`).join('\n%%%\n');
-    const prompt = `请将以下 ${toTranslate.length} 段非中文内容逐段翻译为中文。
-要求：
-- 每段翻译保持编号 [N] 标记
-- 段之间用 %%% 分隔
-- 代码、命令、文件名、URL、技术术语等保留原文不翻译
-- 只输出翻译结果，不要解释
-
-${items}`;
-
-    let response: string;
+    let translatedMap: Map<number, string>;
     try {
-      response = await callTranslationLLM(prompt);
+      translatedMap = await translateWorkloadInBatches(toTranslate);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: '翻译失败: ' + message });
     }
 
-    if (!response) return res.status(500).json({ error: '翻译失败: LLM 未返回翻译结果' });
-
-    // Parse numbered segments — line-based, using %%% as segment delimiter.
-    // [N] markers are only recognized after a %%% separator (or at the start),
-    // never inside a segment's content.
-    const translatedMap = new Map<number, string>();
-    const lines = response.split('\n');
-    let currentIdx: number | null = null;
-    let currentLines: string[] = [];
-    for (const line of lines) {
-      const marker = currentIdx === null ? /^\[(\d+)\]\s*/.exec(line) : null;
-      if (marker) {
-        if (currentIdx !== null && currentLines.length > 0) {
-          translatedMap.set(currentIdx, currentLines.join('\n').trim());
-        }
-        currentIdx = parseInt(marker[1]!, 10);
-        currentLines = [line.slice(marker[0].length)];
-      } else if (line.trim() === '%%%') {
-        if (currentIdx !== null && currentLines.length > 0) {
-          translatedMap.set(currentIdx, currentLines.join('\n').trim());
-          currentIdx = null;
-          currentLines = [];
-        }
-      } else if (currentIdx !== null) {
-        currentLines.push(line);
-      }
-    }
-    if (currentIdx !== null && currentLines.length > 0) {
-      translatedMap.set(currentIdx, currentLines.join('\n').trim());
-    }
-
-    // Fallback: if parsing fails, use the raw response as a single translation
-    if (translatedMap.size === 0 && toTranslate.length === 1) {
-      translatedMap.set(0, response);
-    }
-
     const translated = reassembleTranslatedSegments(
       segments,
-      toTranslate.map((source, index) => translatedMap.get(index) ?? source),
+      mergeTranslatedWorkload(workload, translatedMap),
     );
     db.prepare(
       'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'

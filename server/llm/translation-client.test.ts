@@ -49,7 +49,7 @@ test('posts Anthropic messages request and returns concatenated text', async () 
 
   const body = JSON.parse(String(calls[0]!.init.body));
   assert.equal(body.model, 'deepseek-v4-flash');
-  assert.equal(body.max_tokens, 4096);
+  assert.equal(body.max_tokens, 8192);
   assert.deepEqual(body.messages, [{ role: 'user', content: 'Translate me' }]);
 });
 
@@ -60,5 +60,18 @@ test('surfaces direct translation API errors', async () => {
       fetchImpl: async () => new Response(JSON.stringify({ error: { message: 'bad model' } }), { status: 400 }),
     }),
     /翻译 API 请求失败 \(400\): bad model/,
+  );
+});
+
+test('rejects truncated translation responses instead of caching partial text', async () => {
+  await assert.rejects(
+    () => callTranslationLLM('Translate me', {
+      env: { LLM_API_KEY: 'test-key' },
+      fetchImpl: async () => new Response(JSON.stringify({
+        stop_reason: 'max_tokens',
+        content: [{ type: 'text', text: '[0] partial' }],
+      }), { status: 200 }),
+    }),
+    /翻译 API 返回被截断: max_tokens/,
   );
 });

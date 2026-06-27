@@ -1,5 +1,6 @@
 const DEFAULT_TRANSLATION_MODEL = 'deepseek-v4-flash';
 const DEFAULT_TRANSLATION_BASE_URL = 'https://api.deepseek.com/anthropic';
+const TRANSLATION_MAX_TOKENS = 8192;
 const ANTHROPIC_VERSION = '2023-06-01';
 
 interface TranslationEnv {
@@ -47,7 +48,7 @@ export async function callTranslationLLM(
     },
     body: JSON.stringify({
       model: config.model,
-      max_tokens: 4096,
+      max_tokens: TRANSLATION_MAX_TOKENS,
       messages: [
         { role: 'user', content: prompt },
       ],
@@ -65,6 +66,10 @@ export async function callTranslationLLM(
   if (!response.ok) {
     const message = body?.error?.message || body?.message || raw || response.statusText;
     throw new Error(`翻译 API 请求失败 (${response.status}): ${message}`);
+  }
+
+  if (body?.stop_reason === 'max_tokens') {
+    throw new Error('翻译 API 返回被截断: max_tokens');
   }
 
   const result = extractAnthropicText(body);
