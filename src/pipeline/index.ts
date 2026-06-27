@@ -49,6 +49,7 @@ export { estimateTokens, CHARS_PER_TOKEN, isSubAgentTool, isTaskTool } from './u
 export type { ParseError } from './parse-jsonl';
 export type { TurnContextComposition, TokenEstimator } from './compute-context';
 export type { TimelineResult } from './compute-timeline';
+export type { NormalizedCalibration, NormalizedCalibrationSummary } from './calibration-types';
 
 // ---------------------------------------------------------------------------
 // Primary pipeline function (synchronous)

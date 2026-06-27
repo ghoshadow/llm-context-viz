@@ -8,6 +8,11 @@ import type {
   ContentBlock,
 } from '../types/session';
 import { isSubAgentTool, extractContentText } from './utils';
+import {
+  type NormalizedCalibration,
+  type NormalizedCalibrationSummary,
+  categoryChars,
+} from './calibration-types';
 
 // ---------------------------------------------------------------------------
 // Token estimator interface
@@ -72,17 +77,30 @@ export function resetCalibratedConstants() {
   SYSTEM_REMINDER_CHROME_CHARS = DEFAULT_SYSTEM_REMINDER_CHROME_CHARS;
 }
 
-interface CalibratedConstantsInput {
+interface LegacyCalibratedConstantsInput {
   SYS_PROMPT_FALLBACK_CHARS?: number;
   TOOL_DEFS_FALLBACK_CHARS?: number;
   SYSTEM_REMINDER_CHROME_CHARS?: number;
 }
+
+type CalibratedConstantsInput = NormalizedCalibration | NormalizedCalibrationSummary | LegacyCalibratedConstantsInput;
 
 // Apply project-scoped calibrated constants. Called on every pipeline run with
 // constants already resolved by the server-side pipeline service.
 export function loadCalibratedConstants(constants?: CalibratedConstantsInput | null) {
   resetCalibratedConstants();
   if (!constants) return;
+
+  if ('categories' in constants) {
+    const sysPrompt = categoryChars(constants, 'sysPrompt');
+    const toolDefs = categoryChars(constants, 'tool_defs');
+    const userChrome = categoryChars(constants, 'userMsgs');
+    if (sysPrompt) SYS_PROMPT_FALLBACK_CHARS = sysPrompt;
+    if (toolDefs) TOOL_DEFS_FALLBACK_CHARS = toolDefs;
+    if (userChrome) SYSTEM_REMINDER_CHROME_CHARS = userChrome;
+    return;
+  }
+
   if (constants.SYS_PROMPT_FALLBACK_CHARS) SYS_PROMPT_FALLBACK_CHARS = constants.SYS_PROMPT_FALLBACK_CHARS;
   if (constants.TOOL_DEFS_FALLBACK_CHARS) TOOL_DEFS_FALLBACK_CHARS = constants.TOOL_DEFS_FALLBACK_CHARS;
   if (constants.SYSTEM_REMINDER_CHROME_CHARS) SYSTEM_REMINDER_CHROME_CHARS = constants.SYSTEM_REMINDER_CHROME_CHARS;

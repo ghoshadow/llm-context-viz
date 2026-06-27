@@ -31,14 +31,18 @@ function group(cwd: string): TurnGroup {
   };
 }
 
-test('loads project constants and resets when missing for next project', () => {
+test('loads normalized project constants and resets when missing for next project', () => {
   const projectA = mkdtempSync(join(tmpdir(), 'cal-project-a-'));
   const projectB = mkdtempSync(join(tmpdir(), 'cal-project-b-'));
   try {
     loadCalibratedConstants({
-      SYS_PROMPT_FALLBACK_CHARS: 111,
-      TOOL_DEFS_FALLBACK_CHARS: 222,
-      SYSTEM_REMINDER_CHROME_CHARS: 333,
+      schemaVersion: 1,
+      source: 'claude',
+      categories: {
+        sysPrompt: { chars: 111 },
+        tool_defs: { chars: 222 },
+        userMsgs: { chars: 333 },
+      },
     });
 
     const a = computeContext([group(projectA)], estimator)[0]!;
@@ -55,5 +59,22 @@ test('loads project constants and resets when missing for next project', () => {
     resetCalibratedConstants();
     rmSync(projectA, { recursive: true, force: true });
     rmSync(projectB, { recursive: true, force: true });
+  }
+});
+
+test('keeps legacy calibrated constant input compatible during migration', () => {
+  try {
+    loadCalibratedConstants({
+      SYS_PROMPT_FALLBACK_CHARS: 10,
+      TOOL_DEFS_FALLBACK_CHARS: 20,
+      SYSTEM_REMINDER_CHROME_CHARS: 30,
+    });
+
+    const comp = computeContext([group('/tmp')], estimator)[0]!;
+    assert.equal(comp.sysPrompt, 10);
+    assert.equal(comp.tool_defs, 20);
+    assert.equal(comp.userMsgs, 30 + 2);
+  } finally {
+    resetCalibratedConstants();
   }
 });
