@@ -35,9 +35,16 @@ function preserveTrailingStructuralNewlines(
   nextSourceText?: string,
 ): string {
   if (text.endsWith('\n')) return text;
+  const listMarker = trailingMarkdownListMarker(sourceText);
+  if (listMarker && !text.trimEnd().endsWith(listMarker.trimEnd())) return text.trimEnd() + listMarker;
   if (sourceText.endsWith('\n\n') && startsWithMarkdownList(nextSourceText)) return text.trimEnd() + '\n\n';
   if (sourceText.endsWith('\n')) return text.trimEnd() + '\n';
   return text;
+}
+
+function trailingMarkdownListMarker(text: string): string | null {
+  const marker = /(\n{1,2}\s*(?:[-*+]|\d+[.)])\s+)$/.exec(text);
+  return marker?.[1] ?? null;
 }
 
 function startsWithMarkdownList(text?: string): boolean {
