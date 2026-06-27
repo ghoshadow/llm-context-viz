@@ -188,6 +188,7 @@ export default function CalibratePage() {
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [currentConstants, setCurrentConstants] = useState<CurrentConstants | null>(null);
+  const [calibrationSource, setCalibrationSource] = useState<'claude' | 'codex'>('claude');
   const [autoPrompt, setAutoPrompt] = useState('say hi');
   const [autoTargetHost, setAutoTargetHost] = useState('http://127.0.0.1:15721');
   const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
@@ -205,10 +206,10 @@ export default function CalibratePage() {
       setCurrentConstants(null);
       return;
     }
-    get<CurrentConstants>(`/calibrate/current?cwd=${encodeURIComponent(sessionCwd)}`)
+    get<CurrentConstants>(`/calibrate/current?cwd=${encodeURIComponent(sessionCwd)}&source=${calibrationSource}`)
       .then(setCurrentConstants)
       .catch((err) => setError((err as Error).message));
-  }, [sessionCwd]);
+  }, [calibrationSource, sessionCwd]);
 
   const handleAutoStart = useCallback(async () => {
     if (!sessionCwd) {
@@ -221,6 +222,7 @@ export default function CalibratePage() {
     setResult(null);
     try {
       const job = await post<AutoCalibrationJob>('/calibrate/auto/start', {
+        source: calibrationSource,
         cwd: sessionCwd,
         prompt: autoPrompt.trim() || 'say hi',
         targetHost: autoTargetHost.trim() || 'api.deepseek.com',
@@ -231,7 +233,7 @@ export default function CalibratePage() {
       setError((err as Error).message);
       setAutoRunning(false);
     }
-  }, [autoPrompt, autoTargetHost, sessionCwd]);
+  }, [autoPrompt, autoTargetHost, calibrationSource, sessionCwd]);
 
   useEffect(() => {
     if (!autoJob?.jobId) return;
@@ -275,6 +277,7 @@ export default function CalibratePage() {
     setApplying(true);
     try {
       await put('/calibrate/apply', {
+        source: calibrationSource,
         cwd: sessionCwd,
         summary: result.summary,
         details: result.details,
@@ -283,7 +286,7 @@ export default function CalibratePage() {
       });
       setApplied(true);
       if (sessionCwd) {
-        get<CurrentConstants>(`/calibrate/current?cwd=${encodeURIComponent(sessionCwd)}`)
+        get<CurrentConstants>(`/calibrate/current?cwd=${encodeURIComponent(sessionCwd)}&source=${calibrationSource}`)
           .then(setCurrentConstants)
           .catch(() => {});
       }
@@ -292,7 +295,7 @@ export default function CalibratePage() {
     } finally {
       setApplying(false);
     }
-  }, [result, sessionCwd]);
+  }, [calibrationSource, result, sessionCwd]);
 
   // Token estimate
   const estTok = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
@@ -508,6 +511,27 @@ export default function CalibratePage() {
           </div>
           <div style={{ fontSize: 12, color: S.textDesc3, lineHeight: 1.5 }}>
             Capture Target 可填完整 Base URL（如 cc_switch 的 http://127.0.0.1:15721），也可填裸 host（如 api.deepseek.com）。
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {(['claude', 'codex'] as const).map((source) => (
+              <button
+                key={source}
+                onClick={() => setCalibrationSource(source)}
+                disabled={autoRunning}
+                style={{
+                  border: `1px solid ${calibrationSource === source ? S.borderAccent : S.borderColor}`,
+                  borderRadius: 7,
+                  padding: '6px 10px',
+                  background: calibrationSource === source ? 'oklch(0.24 0.04 245)' : 'oklch(0.20 0.01 265)',
+                  color: calibrationSource === source ? S.textPrimary3 : S.textSecondary,
+                  cursor: autoRunning ? 'not-allowed' : 'pointer',
+                  fontFamily: SANS,
+                  fontSize: 12,
+                }}
+              >
+                {source === 'claude' ? 'Claude Code' : 'Codex'}
+              </button>
+            ))}
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 340px', minWidth: 0 }}>
