@@ -5,6 +5,7 @@ import type {
   SessionListItem,
   SessionDetail,
   TurnSummary,
+  TurnListPage,
   TurnDetail,
 } from '../types/session';
 import type { OntologyData } from '../types/ontology';
@@ -18,6 +19,9 @@ export interface SessionStore {
 
   turns: TurnSummary[];
   turnsLoading: boolean;
+  turnsTotal: number;
+  turnsHasMore: boolean;
+  turnsPageSize: number;
 
   currentTurnIndex: number | null;
   currentTurn: TurnDetail | null;
@@ -33,6 +37,7 @@ export interface SessionStore {
   fetchSessions: () => Promise<void>;
   selectSession: (id: string) => Promise<void>;
   fetchTurns: (sessionId: string) => Promise<void>;
+  fetchMoreTurns: () => Promise<void>;
   selectTurn: (turnIndex: number) => Promise<void>;
   openScanner: () => void;
   closeScanner: () => void;
@@ -65,6 +70,9 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
 
   turns: [],
   turnsLoading: false,
+  turnsTotal: 0,
+  turnsHasMore: false,
+  turnsPageSize: 200,
 
   currentTurnIndex: null,
   currentTurn: null,
@@ -97,7 +105,17 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   },
 
   selectSession: async (id: string) => {
-    set({ currentSessionId: id, ontologyData: null, ontologyError: null, ontologyFetched: false });
+    set({
+      currentSessionId: id,
+      turns: [],
+      turnsTotal: 0,
+      turnsHasMore: false,
+      currentTurnIndex: null,
+      currentTurn: null,
+      ontologyData: null,
+      ontologyError: null,
+      ontologyFetched: false,
+    });
     try {
       const currentSession = await get<SessionDetail>(`/sessions/${id}`);
       set({ currentSession });
@@ -111,8 +129,34 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   fetchTurns: async (sessionId: string) => {
     set({ turnsLoading: true });
     try {
-      const turns = await get<TurnSummary[]>(`/sessions/${sessionId}/turns`);
-      set({ turns, turnsLoading: false });
+      const { turnsPageSize } = getState();
+      const page = await get<TurnListPage>(`/sessions/${sessionId}/turns?limit=${turnsPageSize}&offset=0`);
+      set({
+        turns: page.items,
+        turnsTotal: page.total,
+        turnsHasMore: page.hasMore,
+        turnsLoading: false,
+      });
+    } catch {
+      set({ turnsLoading: false });
+    }
+  },
+
+  fetchMoreTurns: async () => {
+    const { currentSessionId, turns, turnsLoading, turnsHasMore, turnsPageSize } = getState();
+    if (!currentSessionId || turnsLoading || !turnsHasMore) return;
+
+    set({ turnsLoading: true });
+    try {
+      const page = await get<TurnListPage>(
+        `/sessions/${currentSessionId}/turns?limit=${turnsPageSize}&offset=${turns.length}`,
+      );
+      set({
+        turns: [...turns, ...page.items],
+        turnsTotal: page.total,
+        turnsHasMore: page.hasMore,
+        turnsLoading: false,
+      });
     } catch {
       set({ turnsLoading: false });
     }
@@ -169,6 +213,8 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
           currentSessionId: wasCurrent ? null : state.currentSessionId,
           currentSession: wasCurrent ? null : state.currentSession,
           turns: wasCurrent ? [] : state.turns,
+          turnsTotal: wasCurrent ? 0 : state.turnsTotal,
+          turnsHasMore: wasCurrent ? false : state.turnsHasMore,
           currentTurnIndex: wasCurrent ? null : state.currentTurnIndex,
           currentTurn: wasCurrent ? null : state.currentTurn,
         };

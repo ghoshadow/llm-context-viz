@@ -347,6 +347,14 @@ export interface TurnSummary {
   compression_reset?: boolean;
 }
 
+export interface TurnListPage {
+  items: TurnSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 export interface TurnDetail extends TurnSummary {
   model_ms: number;
   tool_ms: number;

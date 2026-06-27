@@ -1268,9 +1268,12 @@ export default function TurnInspector() {
   const {
     currentSessionId,
     fetchTurns,
+    fetchMoreTurns,
     selectTurn,
     turns,
     turnsLoading,
+    turnsTotal,
+    turnsHasMore,
     currentTurnIndex,
     currentTurn,
     currentTurnLoading,
@@ -1321,7 +1324,7 @@ export default function TurnInspector() {
       try {
         await post(`/sessions/${currentSessionId}/refresh`);
         // Silent turn list refresh — only update if changed
-        const turns = await get<TurnSummary[]>(`/sessions/${currentSessionId}/turns`);
+        const turns = await get<TurnSummary[]>(`/sessions/${currentSessionId}/turns?all=1`);
         const fp = turns.map(t => `${t.turn_index}:${t.asst_reqs}:${t.max_input}`).join(',');
         if (fp !== prevTurnIds.current) {
           prevTurnIds.current = fp;
@@ -1499,7 +1502,7 @@ export default function TurnInspector() {
             <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>对话轮次</h2>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: SEMANTIC.textMuted }}>
-                共 {turns.length} 轮
+                共 {turns.length}{turnsTotal > turns.length ? ` / ${turnsTotal}` : ''} 轮
               </span>
               <button
                 onClick={(e) => { e.preventDefault(); setPage('calibrate'); }}
@@ -1569,6 +1572,26 @@ export default function TurnInspector() {
                   />
                 );
               })}
+              {turnsHasMore && (
+                <button
+                  onClick={() => { void fetchMoreTurns(); }}
+                  disabled={turnsLoading}
+                  style={{
+                    border: `1px solid ${SEMANTIC.borderColor}`,
+                    borderRadius: 9,
+                    padding: '9px 12px',
+                    marginTop: 4,
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 11,
+                    cursor: turnsLoading ? 'not-allowed' : 'pointer',
+                    background: 'oklch(0.20 0.01 265 / 0.6)',
+                    color: SEMANTIC.textSecondary,
+                    opacity: turnsLoading ? 0.5 : 1,
+                  }}
+                >
+                  加载更多
+                </button>
+              )}
             </div>
           )}
         </div>

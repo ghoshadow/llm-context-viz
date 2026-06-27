@@ -1,6 +1,7 @@
 import { existsSync, statSync } from 'fs';
 import { join, resolve } from 'path';
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import { spawn, type ChildProcessByStdio } from 'child_process';
+import type { Readable } from 'stream';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -39,7 +40,7 @@ export interface CalibrationJobSnapshot {
 }
 
 interface CalibrationJob extends CalibrationJobSnapshot {
-  child: ChildProcessWithoutNullStreams | null;
+  child: ChildProcessByStdio<null, Readable, Readable> | null;
   cleanupTimer?: NodeJS.Timeout;
 }
 

@@ -9,6 +9,7 @@ import { getSessionSource } from '../../src/utils/sessionSource';
 
 import { findJsonlFile } from './shared';
 import ontologyRouter from './ontology';
+import { parseTurnListPagination } from './pagination';
 
 const router = Router();
 
@@ -47,7 +48,15 @@ router.get('/', (_req, res) => {
 router.get('/:id', (req, res) => {
   try {
     const db = getDb();
-    const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id) as
+    const row = db.prepare(
+      `SELECT id, filename, file_hash, model, version, ai_title, cwd,
+              total_requests, peak_index, peak_tokens, peak_cache_hit,
+              peak_turn_idx, peak_step, total_output, context_limit,
+              turn_count, raw_size, categories_json, tools_json, series_json,
+              created_at, updated_at
+       FROM sessions
+       WHERE id = ?`,
+    ).get(req.params.id) as
       | Record<string, unknown>
       | undefined;
 
@@ -60,13 +69,11 @@ router.get('/:id', (req, res) => {
       categories_json,
       tools_json,
       series_json,
-      raw_jsonl,
       ...rest
     } = row as Record<string, unknown> & {
       categories_json?: string;
       tools_json?: string;
       series_json?: string;
-      raw_jsonl?: string;
     };
 
     const detail = {
@@ -127,16 +134,26 @@ router.post('/:id/refresh', (req, res) => {
 router.get('/:id/turns', (req, res) => {
   try {
     const db = getDb();
-    const rows = db
-      .prepare(
-        `SELECT id, turn_index, prompt, timestamp, asst_reqs, max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, compression_reset, dur_ms, step_count
-         FROM turns
-         WHERE session_id = ?
-         ORDER BY turn_index DESC`,
-      )
-      .all(req.params.id);
+    const page = parseTurnListPagination(req.query);
+    const selectSql = `SELECT id, turn_index, prompt, timestamp, asst_reqs, max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, compression_reset, dur_ms, step_count
+       FROM turns
+       WHERE session_id = ?
+       ORDER BY turn_index DESC`;
+    const rows = page.all
+      ? db.prepare(selectSql).all(req.params.id)
+      : db.prepare(`${selectSql} LIMIT ? OFFSET ?`).all(req.params.id, page.limit, page.offset);
 
-    return res.json(rows);
+    if (page.all) return res.json(rows);
+
+    const totalRow = db.prepare('SELECT COUNT(*) AS total FROM turns WHERE session_id = ?').get(req.params.id) as { total: number };
+
+    return res.json({
+      items: rows,
+      total: totalRow.total,
+      limit: page.limit,
+      offset: page.offset,
+      hasMore: page.offset + rows.length < totalRow.total,
+    });
   } catch (err) {
     console.error('GET /:id/turns error:', err);
     return res.status(500).json({ error: '获取轮次列表时出错' });

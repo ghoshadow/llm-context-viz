@@ -30,7 +30,7 @@ router.put('/apply', (req, res) => {
       ccVersion: body.ccVersion,
       model: body.model,
     });
-    return res.json({ ok: true, path: data.path, ...data });
+    return res.json({ ...data, ok: true, path: data.path });
   } catch (err) {
     return res.status(500).json({ error: '保存失败: ' + (err as Error).message });
   }
@@ -55,7 +55,7 @@ router.get('/current', (_req, res) => {
 router.post('/auto/start', async (req, res) => {
   try {
     const job = await startCalibrationJob(req.body || {});
-    return res.json({ jobId: job.jobId, ...job });
+    return res.json(job);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }

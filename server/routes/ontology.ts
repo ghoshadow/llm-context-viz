@@ -198,7 +198,7 @@ router.put('/summarize-card/:topicId', (req, res) => {
     if (!topic) return res.status(400).json({ error: '主题节点不存在' });
     if (topic.type !== 'topic') return res.status(400).json({ error: '只有问题/主题节点可以保存知识总结' });
 
-    db.prepare(`INSERT INTO ontology_card_summaries (session_id, topic_id, status, summary, error, model, prompt_hash, completed_at, updated_at)
+    getDb().prepare(`INSERT INTO ontology_card_summaries (session_id, topic_id, status, summary, error, model, prompt_hash, completed_at, updated_at)
       VALUES (?, ?, 'done', ?, NULL, 'manual_edit', NULL, datetime('now'), datetime('now'))
       ON CONFLICT(session_id, topic_id) DO UPDATE SET status = 'done', summary = excluded.summary, error = NULL,
         model = COALESCE(ontology_card_summaries.model, excluded.model), completed_at = datetime('now'), updated_at = datetime('now')`)
@@ -377,7 +377,11 @@ router.post('/extract', async (req, res) => {
   const send = (event: string, data: Record<string, unknown>) => {
     const requestShardSize = Number(req.body?.shardSize);
     const requestMaxShardChars = Number(req.body?.maxShardChars);
-    const eventData = {
+    const eventData: Record<string, unknown> & {
+      extractionDepth: 'refined' | 'deep';
+      shardSize: number;
+      maxShardChars: number;
+    } = {
       ...data,
       extractionDepth: data.extractionDepth === 'deep' || req.body?.extractionDepth === 'deep' ? 'deep' : 'refined',
       shardSize: typeof data.shardSize === 'number' ? data.shardSize : Number.isFinite(requestShardSize) ? requestShardSize : 30,

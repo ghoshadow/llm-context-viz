@@ -10,6 +10,14 @@ const router = Router();
 
 type SessionSource = 'claude' | 'codex';
 
+interface ScannedFile {
+  path: string;
+  name: string;
+  size: number;
+  modified: string;
+  source: SessionSource;
+}
+
 // Default scan paths — Claude Code and Codex store transcripts in different homes.
 const DEFAULT_SCAN_PATHS = [
   join(homedir(), '.claude', 'projects'),
@@ -25,8 +33,8 @@ function inferSource(filePath: string): SessionSource {
   return filePath.includes(`${join(homedir(), '.codex')}/`) ? 'codex' : 'claude';
 }
 
-function scanDir(dir: string, maxDepth = 3): FoundFile[] {
-  const results: FoundFile[] = [];
+function scanDir(dir: string, maxDepth = 3): ScannedFile[] {
+  const results: ScannedFile[] = [];
   if (!existsSync(dir)) return results;
 
   try {
@@ -57,12 +65,7 @@ function scanDir(dir: string, maxDepth = 3): FoundFile[] {
   return results;
 }
 
-interface FoundFile {
-  path: string;
-  name: string;
-  size: number;
-  modified: string;
-  source: SessionSource;
+interface FoundFile extends ScannedFile {
   title?: string;
   model?: string;
   requests?: number;
@@ -98,11 +101,11 @@ function textFromOpenAiContent(content: unknown): string {
     .join('\n');
 }
 
-function quickMeta(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
-  return inferSource(filePath) === 'codex' ? quickMetaCodex(filePath) : quickMetaClaude(filePath);
+function quickMeta(filePath: string, raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+  return inferSource(filePath) === 'codex' ? quickMetaCodex(raw) : quickMetaClaude(raw);
 }
 
-function quickMetaClaude(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+function quickMetaClaude(raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
   let title: string | undefined;
   let model: string | undefined;
   let requests = 0;
@@ -110,7 +113,6 @@ function quickMetaClaude(filePath: string): { title?: string; model?: string; re
   let turnCount = 0;
 
   try {
-    const raw = readFileSync(filePath, 'utf-8');
     const lines = raw.split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -145,7 +147,7 @@ function quickMetaClaude(filePath: string): { title?: string; model?: string; re
   return { title, model, requests, peakTokens, turnCount };
 }
 
-function quickMetaCodex(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+function quickMetaCodex(raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
   let title: string | undefined;
   let fallbackTitle: string | undefined;
   let model: string | undefined;
@@ -155,7 +157,6 @@ function quickMetaCodex(filePath: string): { title?: string; model?: string; req
   const seenTurns = new Set<string>();
 
   try {
-    const raw = readFileSync(filePath, 'utf-8');
     const lines = raw.split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -206,7 +207,7 @@ router.get('/scan', (_req, res) => {
     const maxDepth = parseInt((_req.query.depth as string) || '3', 10);
     const force = _req.query.force === '1';
 
-    const allFiles: FoundFile[] = [];
+    const allFiles: ScannedFile[] = [];
     for (const dir of dirs) {
       allFiles.push(...scanDir(dir, maxDepth));
     }
@@ -264,7 +265,7 @@ router.get('/scan', (_req, res) => {
         try {
           const content = readFileSync(f.path, 'utf-8');
           hash = crypto.createHash('sha256').update(content).digest('hex');
-          meta = quickMeta(f.path);
+          meta = quickMeta(f.path, content);
         } catch { /* can't read */ }
         try {
           upsertStmt.run(f.path, f.name, f.size, f.modified, hash, meta.title || null, meta.model || null, meta.requests, meta.peakTokens, meta.turnCount);
