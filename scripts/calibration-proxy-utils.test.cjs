@@ -9,6 +9,7 @@ const {
   makeLogFilePath,
   getProjectLogFilePath,
   resolveCaptureTarget,
+  resolveCliPath,
   cleanForwardHeaders,
   tryParse,
 } = require('./calibration-proxy-utils.cjs');
@@ -117,4 +118,42 @@ test('resolveCaptureTarget treats bare host as connect mode', () => {
     upstreamBaseUrl: null,
     targetHost: 'api.deepseek.com',
   });
+});
+
+test('resolveCliPath finds Codex from macOS app bundle when PATH misses it', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'cal-cli-'));
+  const codexPath = path.join(tmpRoot, 'Applications', 'Codex.app', 'Contents', 'Resources', 'codex');
+  fs.mkdirSync(path.dirname(codexPath), { recursive: true });
+  fs.writeFileSync(codexPath, '#!/bin/sh\n');
+  fs.chmodSync(codexPath, 0o755);
+  try {
+    assert.equal(resolveCliPath('codex', {
+      env: { PATH: '' },
+      defaultCandidates: [codexPath],
+    }), codexPath);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolveCliPath honors source-specific environment override', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'cal-cli-'));
+  const codexPath = path.join(tmpRoot, 'my-codex');
+  fs.writeFileSync(codexPath, '#!/bin/sh\n');
+  fs.chmodSync(codexPath, 0o755);
+  try {
+    assert.equal(resolveCliPath('codex', {
+      env: { CODEX_CLI_PATH: codexPath, PATH: '' },
+      defaultCandidates: [],
+    }), codexPath);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolveCliPath throws a helpful error when CLI cannot be found', () => {
+  assert.throws(
+    () => resolveCliPath('codex', { env: { PATH: '' }, defaultCandidates: [] }),
+    /Unable to find codex CLI/,
+  );
 });

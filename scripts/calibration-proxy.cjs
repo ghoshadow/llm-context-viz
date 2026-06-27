@@ -17,6 +17,7 @@ const {
   ensureDir,
   getProjectLogFilePath,
   resolveCaptureTarget,
+  resolveCliPath,
 } = require("./calibration-proxy-utils.cjs");
 
 const DEFAULT_TARGET_HOST = "api.deepseek.com";
@@ -310,7 +311,7 @@ async function main() {
   const proxyUrl = `http://127.0.0.1:${opts.port}`;
   captureBaseUrl = captureTarget.mode === "base-url" ? proxyUrl : undefined;
   const cliName = opts.source === "codex" ? "codex" : "claude";
-  const cliPath = execSync(`which ${cliName}`, { encoding: "utf8" }).trim();
+  const cliPath = resolveCliPath(cliName);
   const childArgs = opts.source === "codex"
     ? [
         "exec",

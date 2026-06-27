@@ -137,6 +137,49 @@ function pickPort(host = "127.0.0.1") {
   });
 }
 
+function isExecutableFile(filePath) {
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function resolveCliPath(cliName, options = {}) {
+  const env = options.env || process.env;
+  const upper = String(cliName || "").toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const override = env[`${upper}_CLI_PATH`];
+  const defaultCandidates = options.defaultCandidates || builtinCliCandidates(cliName);
+  const candidates = [];
+
+  if (override) candidates.push(override);
+  for (const dir of String(env.PATH || "").split(path.delimiter)) {
+    if (dir) candidates.push(path.join(dir, cliName));
+  }
+  candidates.push(...(options.extraCandidates || []));
+  candidates.push(...defaultCandidates);
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    if (isExecutableFile(resolved)) return resolved;
+  }
+
+  const envName = `${upper}_CLI_PATH`;
+  throw new Error(
+    `Unable to find ${cliName} CLI. Set ${envName} to the executable path, or add ${cliName} to PATH.`,
+  );
+}
+
+function builtinCliCandidates(cliName) {
+  if (cliName === "codex") return ["/Applications/Codex.app/Contents/Resources/codex"];
+  if (cliName === "claude") return ["/Applications/Claude.app/Contents/Resources/app/bin/claude"];
+  return [];
+}
+
 module.exports = {
   parseConnectAuthority,
   isSensitiveHeader,
@@ -148,5 +191,6 @@ module.exports = {
   makeLogFilePath,
   getProjectLogFilePath,
   resolveCaptureTarget,
+  resolveCliPath,
   pickPort,
 };
