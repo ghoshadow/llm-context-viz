@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildAutoCalibrationStartBody,
+  captureTargetHelpText,
   defaultCalibrationPromptInput,
   defaultCalibrationTargetInput,
 } from './calibrationAutoStart';
@@ -14,6 +15,17 @@ test('uses Claude UI defaults for the existing proxy workflow', () => {
 test('leaves Codex target empty so the server can read config.toml', () => {
   assert.equal(defaultCalibrationPromptInput('codex'), 'Calibration probe: reply with "ok".');
   assert.equal(defaultCalibrationTargetInput('codex'), '');
+});
+
+test('explains empty Codex capture target behavior', () => {
+  assert.match(captureTargetHelpText('codex'), /留空/);
+  assert.equal(captureTargetHelpText('codex').includes('~/.codex/config.toml'), true);
+  assert.match(captureTargetHelpText('codex'), /覆盖/);
+});
+
+test('keeps Claude capture target help focused on proxy targets', () => {
+  assert.match(captureTargetHelpText('claude'), /完整 Base URL/);
+  assert.match(captureTargetHelpText('claude'), /裸 host/);
 });
 
 test('omits Codex targetHost when the input is empty', () => {

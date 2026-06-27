@@ -23,6 +23,7 @@ import {
 } from './calibrationCategories';
 import {
   buildAutoCalibrationStartBody,
+  captureTargetHelpText,
   defaultCalibrationPromptInput,
   defaultCalibrationTargetInput,
 } from './calibrationAutoStart';
@@ -535,7 +536,7 @@ export default function CalibratePage() {
             cwd: {sessionCwd || '未选择会话'}
           </div>
           <div style={{ fontSize: 12, color: S.textDesc3, lineHeight: 1.5 }}>
-            Capture Target 可填完整 Base URL（如 cc_switch 的 http://127.0.0.1:15721），也可填裸 host（如 api.deepseek.com）。
+            {captureTargetHelpText(calibrationSource)}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             {(['claude', 'codex'] as const).map((source) => (
@@ -588,6 +589,9 @@ export default function CalibratePage() {
                 }}
                 aria-label="捕获目标 host 或 base url"
               />
+              <span style={{ fontSize: 11, color: S.textMuted2, lineHeight: 1.45 }}>
+                {captureTargetHelpText(calibrationSource)}
+              </span>
             </label>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
