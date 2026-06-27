@@ -5,6 +5,7 @@ import type {
   SessionListItem,
   SessionDetail,
   TurnSummary,
+  TurnListPage,
   TurnDetail,
 } from '../types/session';
 import type { OntologyData } from '../types/ontology';
@@ -18,34 +19,30 @@ export interface SessionStore {
 
   turns: TurnSummary[];
   turnsLoading: boolean;
+  turnsTotal: number;
+  turnsHasMore: boolean;
+  turnsPageSize: number;
 
   currentTurnIndex: number | null;
   currentTurn: TurnDetail | null;
   currentTurnLoading: boolean;
 
-  uploadOpen: boolean;
   scannerOpen: boolean;
-  uploading: boolean;
-  uploadProgress: string | null;
-  uploadError: string | null;
 
   // Scan result cache
-  scanFiles: { path: string; name: string; size: number; modified: string; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number }[];
+  scanFiles: { path: string; name: string; size: number; modified: string; source?: 'claude' | 'codex'; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number }[];
   scanStatus: string;
-  setScanFiles: (files: { path: string; name: string; size: number; modified: string; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number }[], status: string) => void;
+  setScanFiles: (files: { path: string; name: string; size: number; modified: string; source?: 'claude' | 'codex'; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number }[], status: string) => void;
 
   fetchSessions: () => Promise<void>;
   selectSession: (id: string) => Promise<void>;
   fetchTurns: (sessionId: string) => Promise<void>;
+  fetchMoreTurns: () => Promise<void>;
   selectTurn: (turnIndex: number) => Promise<void>;
-  openUpload: () => void;
-  closeUpload: () => void;
   openScanner: () => void;
   closeScanner: () => void;
-  uploadFile: (file: File) => Promise<string | null>;
   deleteSession: (id: string) => Promise<void>;
   fetchOntology: () => Promise<void>;
-  buildOntology: (body: { candidates: unknown[]; relations: unknown[]; config?: Record<string, unknown> }) => Promise<boolean>;
   extractOntology: (options?: { shardSize?: number; maxShardChars?: number; force?: boolean; incremental?: boolean; retryFailedOnly?: boolean; extractionDepth?: 'refined' | 'deep' }) => Promise<boolean>;
   fetchExtractStatus: () => Promise<void>;
 
@@ -73,16 +70,15 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
 
   turns: [],
   turnsLoading: false,
+  turnsTotal: 0,
+  turnsHasMore: false,
+  turnsPageSize: 200,
 
   currentTurnIndex: null,
   currentTurn: null,
   currentTurnLoading: false,
 
-  uploadOpen: false,
   scannerOpen: false,
-  uploading: false,
-  uploadProgress: null,
-  uploadError: null,
 
   ontologyData: null,
   ontologyMaxTurn: 0,
@@ -109,7 +105,17 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   },
 
   selectSession: async (id: string) => {
-    set({ currentSessionId: id, ontologyData: null, ontologyError: null, ontologyFetched: false });
+    set({
+      currentSessionId: id,
+      turns: [],
+      turnsTotal: 0,
+      turnsHasMore: false,
+      currentTurnIndex: null,
+      currentTurn: null,
+      ontologyData: null,
+      ontologyError: null,
+      ontologyFetched: false,
+    });
     try {
       const currentSession = await get<SessionDetail>(`/sessions/${id}`);
       set({ currentSession });
@@ -123,8 +129,34 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   fetchTurns: async (sessionId: string) => {
     set({ turnsLoading: true });
     try {
-      const turns = await get<TurnSummary[]>(`/sessions/${sessionId}/turns`);
-      set({ turns, turnsLoading: false });
+      const { turnsPageSize } = getState();
+      const page = await get<TurnListPage>(`/sessions/${sessionId}/turns?limit=${turnsPageSize}&offset=0`);
+      set({
+        turns: page.items,
+        turnsTotal: page.total,
+        turnsHasMore: page.hasMore,
+        turnsLoading: false,
+      });
+    } catch {
+      set({ turnsLoading: false });
+    }
+  },
+
+  fetchMoreTurns: async () => {
+    const { currentSessionId, turns, turnsLoading, turnsHasMore, turnsPageSize } = getState();
+    if (!currentSessionId || turnsLoading || !turnsHasMore) return;
+
+    set({ turnsLoading: true });
+    try {
+      const page = await get<TurnListPage>(
+        `/sessions/${currentSessionId}/turns?limit=${turnsPageSize}&offset=${turns.length}`,
+      );
+      set({
+        turns: [...turns, ...page.items],
+        turnsTotal: page.total,
+        turnsHasMore: page.hasMore,
+        turnsLoading: false,
+      });
     } catch {
       set({ turnsLoading: false });
     }
@@ -145,34 +177,12 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
     }
   },
 
-  openUpload: () => set({ uploadOpen: true }),
-  closeUpload: () => set({ uploadOpen: false }),
   openScanner: () => set({ scannerOpen: true }),
   closeScanner: () => set({ scannerOpen: false }),
 
   scanFiles: [],
   scanStatus: '',
   setScanFiles: (files, status) => set({ scanFiles: files, scanStatus: status }),
-
-  uploadFile: async (file: File) => {
-    set({ uploading: true, uploadProgress: null, uploadError: null });
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const result = await post<{ id: string }>('/sessions/upload', formData);
-      set({ uploading: false, uploadProgress: 'Upload complete', uploadOpen: false });
-
-      await getState().fetchSessions();
-      return result.id;
-    } catch (err) {
-      set({
-        uploading: false,
-        uploadError: err instanceof Error ? err.message : 'Upload failed',
-      });
-      return null;
-    }
-  },
 
   fetchOntology: async () => {
     const { currentSessionId } = getState();
@@ -203,30 +213,14 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
           currentSessionId: wasCurrent ? null : state.currentSessionId,
           currentSession: wasCurrent ? null : state.currentSession,
           turns: wasCurrent ? [] : state.turns,
+          turnsTotal: wasCurrent ? 0 : state.turnsTotal,
+          turnsHasMore: wasCurrent ? false : state.turnsHasMore,
           currentTurnIndex: wasCurrent ? null : state.currentTurnIndex,
           currentTurn: wasCurrent ? null : state.currentTurn,
         };
       });
     } catch {
       // deletion failure is silent in store; caller can handle
-    }
-  },
-
-  buildOntology: async (body) => {
-    const { currentSessionId } = getState();
-    if (!currentSessionId) return false;
-    set({ ontologyLoading: true, ontologyError: null });
-    try {
-      await post('/sessions/' + currentSessionId + '/ontology/build', body);
-      // Reload the built ontology
-      await getState().fetchOntology();
-      return true;
-    } catch (err) {
-      set({
-        ontologyLoading: false,
-        ontologyError: err instanceof Error ? err.message : 'Build failed',
-      });
-      return false;
     }
   },
 

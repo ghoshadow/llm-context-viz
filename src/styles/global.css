@@ -55,9 +55,36 @@ body {
    5. Scrollbar Styling
    -------------------------------------------------------------------------- */
 
-.thin-scrollbar::-webkit-scrollbar { width: 9px; }
-.thin-scrollbar::-webkit-scrollbar-thumb { background: oklch(0.34 0.014 265); border-radius: 6px; }
-.thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
+:root {
+  --app-scrollbar-size: 9px;
+  --app-scrollbar-thumb: oklch(0.34 0.014 265);
+  --app-scrollbar-track: transparent;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: var(--app-scrollbar-size);
+  height: var(--app-scrollbar-size);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--app-scrollbar-thumb);
+  border-radius: 6px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: var(--app-scrollbar-track);
+}
+
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+}
 
 /* --------------------------------------------------------------------------
    6. Panel / Card Styles (used in TurnInspector, ContextStructure)

@@ -8,17 +8,33 @@ import { createSession } from '../services/pipeline-service';
 
 const router = Router();
 
-// Default scan paths — Claude Code stores transcripts under ~/.claude/projects/
+type SessionSource = 'claude' | 'codex';
+
+interface ScannedFile {
+  path: string;
+  name: string;
+  size: number;
+  modified: string;
+  source: SessionSource;
+}
+
+// Default scan paths — Claude Code and Codex store transcripts in different homes.
 const DEFAULT_SCAN_PATHS = [
   join(homedir(), '.claude', 'projects'),
+  join(homedir(), '.codex', 'sessions'),
+  join(homedir(), '.codex', 'archived_sessions'),
 ];
 
 /**
  * Recursively scan a directory for .jsonl files.
  * Returns an array of { path, name, size, modified } for each file found.
  */
-function scanDir(dir: string, maxDepth = 3): FoundFile[] {
-  const results: FoundFile[] = [];
+function inferSource(filePath: string): SessionSource {
+  return filePath.includes(`${join(homedir(), '.codex')}/`) ? 'codex' : 'claude';
+}
+
+function scanDir(dir: string, maxDepth = 3): ScannedFile[] {
+  const results: ScannedFile[] = [];
   if (!existsSync(dir)) return results;
 
   try {
@@ -35,6 +51,7 @@ function scanDir(dir: string, maxDepth = 3): FoundFile[] {
             name: entry,
             size: st.size,
             modified: st.mtime.toISOString(),
+            source: inferSource(full),
           });
         }
       } catch {
@@ -48,11 +65,7 @@ function scanDir(dir: string, maxDepth = 3): FoundFile[] {
   return results;
 }
 
-interface FoundFile {
-  path: string;
-  name: string;
-  size: number;
-  modified: string;
+interface FoundFile extends ScannedFile {
   title?: string;
   model?: string;
   requests?: number;
@@ -73,7 +86,26 @@ function isQuickToolResult(obj: any): boolean {
   return false;
 }
 
-function quickMeta(filePath: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+function textFromOpenAiContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((block) => {
+      if (!block || typeof block !== 'object') return '';
+      const b = block as { type?: string; text?: string };
+      return (b.type === 'input_text' || b.type === 'output_text') && typeof b.text === 'string'
+        ? b.text
+        : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function quickMeta(filePath: string, raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+  return inferSource(filePath) === 'codex' ? quickMetaCodex(raw) : quickMetaClaude(raw);
+}
+
+function quickMetaClaude(raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
   let title: string | undefined;
   let model: string | undefined;
   let requests = 0;
@@ -81,7 +113,6 @@ function quickMeta(filePath: string): { title?: string; model?: string; requests
   let turnCount = 0;
 
   try {
-    const raw = readFileSync(filePath, 'utf-8');
     const lines = raw.split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -116,6 +147,51 @@ function quickMeta(filePath: string): { title?: string; model?: string; requests
   return { title, model, requests, peakTokens, turnCount };
 }
 
+function quickMetaCodex(raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+  let title: string | undefined;
+  let fallbackTitle: string | undefined;
+  let model: string | undefined;
+  let requests = 0;
+  let peakTokens = 0;
+  let turnCount = 0;
+  const seenTurns = new Set<string>();
+
+  try {
+    const lines = raw.split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const payload = obj.payload || {};
+
+        if (obj.type === 'session_meta') {
+          if (!fallbackTitle && typeof payload.id === 'string') fallbackTitle = payload.id;
+          if (!model && typeof payload.model === 'string') model = payload.model;
+        } else if (obj.type === 'turn_context') {
+          if (!model && typeof payload.model === 'string') model = payload.model;
+        }
+
+        if (payload.type === 'task_started' && typeof payload.turn_id === 'string') {
+          seenTurns.add(payload.turn_id);
+          turnCount = seenTurns.size;
+        } else if (payload.type === 'user_message' && !title && typeof payload.message === 'string') {
+          title = payload.message.trim().slice(0, 120);
+        } else if (obj.type === 'response_item' && payload.type === 'message' && payload.role === 'user' && !title) {
+          const text = textFromOpenAiContent(payload.content).trim();
+          if (text && !text.startsWith('<environment_context>')) title = text.slice(0, 120);
+        } else if (obj.type === 'event_msg' && payload.type === 'token_count') {
+          requests++;
+          const usage = payload.info?.last_token_usage;
+          const input = usage?.input_tokens;
+          if (typeof input === 'number' && input > peakTokens) peakTokens = input;
+        }
+      } catch { /* skip malformed lines */ }
+    }
+  } catch { /* can't read */ }
+
+  return { title: title || fallbackTitle, model: model || 'codex', requests, peakTokens, turnCount };
+}
+
 // ── GET /scan ──────────────────────────────────────────────────────────────
 // Query params:
 //   paths  - comma-separated list of directories to scan (optional)
@@ -131,7 +207,7 @@ router.get('/scan', (_req, res) => {
     const maxDepth = parseInt((_req.query.depth as string) || '3', 10);
     const force = _req.query.force === '1';
 
-    const allFiles: FoundFile[] = [];
+    const allFiles: ScannedFile[] = [];
     for (const dir of dirs) {
       allFiles.push(...scanDir(dir, maxDepth));
     }
@@ -189,7 +265,7 @@ router.get('/scan', (_req, res) => {
         try {
           const content = readFileSync(f.path, 'utf-8');
           hash = crypto.createHash('sha256').update(content).digest('hex');
-          meta = quickMeta(f.path);
+          meta = quickMeta(f.path, content);
         } catch { /* can't read */ }
         try {
           upsertStmt.run(f.path, f.name, f.size, f.modified, hash, meta.title || null, meta.model || null, meta.requests, meta.peakTokens, meta.turnCount);
@@ -228,6 +304,9 @@ function extractSessionTitle(jsonlContent: string): string {
     for (const line of jsonlContent.split('\n').slice(0, 50)) {
       if (!line.trim()) continue;
       const obj = JSON.parse(line);
+      if (obj.type === 'event_msg' && obj.payload?.type === 'user_message' && typeof obj.payload.message === 'string') {
+        return obj.payload.message.trim().slice(0, 120);
+      }
       // First non-tool user message is the best title
       if (obj.type === 'user' && !obj.isSidechain && obj.message?.role === 'user') {
         const c = obj.message.content;
@@ -403,10 +482,6 @@ router.post('/import', (req, res) => {
     const { sessionId, summary, turns } = createSession({
       jsonlContent: content, filename, hash, aiTitle, rawJsonl: null,
     });
-
-    // Enrich turns with sub-agent summaries from the session directory
-    const sessDir = filePath.replace(/\.jsonl$/, '');
-    enrichWithSubAgents(turns, sessDir);
 
     res.status(201).json({
       imported: true,

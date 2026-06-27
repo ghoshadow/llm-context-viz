@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { getDb } from '../db';
-import { buildOntology } from '../../src/pipeline/build-ontology';
 import { existsSync, readFileSync, realpathSync } from 'fs';
 import { getKnowledgeCardContext, type ObsidianOntologyDataLike } from '../obsidian/card-context';
 import { rejectUntrustedLocalRequest } from '../obsidian/local-request';
@@ -199,7 +198,7 @@ router.put('/summarize-card/:topicId', (req, res) => {
     if (!topic) return res.status(400).json({ error: '主题节点不存在' });
     if (topic.type !== 'topic') return res.status(400).json({ error: '只有问题/主题节点可以保存知识总结' });
 
-    db.prepare(`INSERT INTO ontology_card_summaries (session_id, topic_id, status, summary, error, model, prompt_hash, completed_at, updated_at)
+    getDb().prepare(`INSERT INTO ontology_card_summaries (session_id, topic_id, status, summary, error, model, prompt_hash, completed_at, updated_at)
       VALUES (?, ?, 'done', ?, NULL, 'manual_edit', NULL, datetime('now'), datetime('now'))
       ON CONFLICT(session_id, topic_id) DO UPDATE SET status = 'done', summary = excluded.summary, error = NULL,
         model = COALESCE(ontology_card_summaries.model, excluded.model), completed_at = datetime('now'), updated_at = datetime('now')`)
@@ -321,26 +320,6 @@ router.post('/obsidian-card/:topicId', (req, res) => {
 });
 
 // ============================================================================
-// POST /build
-// ============================================================================
-
-router.post('/build', (req, res) => {
-  try {
-    const db = getDb();
-    const { candidates, relations, config } = req.body;
-    if (!Array.isArray(candidates) || candidates.length === 0) return res.status(400).json({ error: 'candidates 数组不能为空' });
-    if (!Array.isArray(relations)) return res.status(400).json({ error: 'relations 数组不能为空' });
-    if (!db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(params(req).id)) return res.status(404).json({ error: '会话不存在' });
-
-    const result = buildOntology({ candidates, relations, config });
-    saveOntology(params(req).id, result.data, result.meta.maxTurn);
-    return res.status(201).json({ sessionId: params(req).id, ...result });
-  } catch (err) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : '构建本体数据时出错' });
-  }
-});
-
-// ============================================================================
 // GET /content-status
 // ============================================================================
 
@@ -398,7 +377,11 @@ router.post('/extract', async (req, res) => {
   const send = (event: string, data: Record<string, unknown>) => {
     const requestShardSize = Number(req.body?.shardSize);
     const requestMaxShardChars = Number(req.body?.maxShardChars);
-    const eventData = {
+    const eventData: Record<string, unknown> & {
+      extractionDepth: 'refined' | 'deep';
+      shardSize: number;
+      maxShardChars: number;
+    } = {
       ...data,
       extractionDepth: data.extractionDepth === 'deep' || req.body?.extractionDepth === 'deep' ? 'deep' : 'refined',
       shardSize: typeof data.shardSize === 'number' ? data.shardSize : Number.isFinite(requestShardSize) ? requestShardSize : 30,

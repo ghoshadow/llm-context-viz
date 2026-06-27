@@ -1,0 +1,101 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  getCalibrationDetailDisplay,
+  getCalibrationDetailLayout,
+  getCalibrationDetailTranslationSlot,
+  getCalibrationDetailSectionIndex,
+} from './calibrationDetailModal';
+
+test('uses side-by-side layout after a translation is available', () => {
+  assert.equal(getCalibrationDetailLayout('translated markdown'), 'side-by-side');
+});
+
+test('uses single-column layout before translation is available', () => {
+  assert.equal(getCalibrationDetailLayout(''), 'single');
+  assert.equal(getCalibrationDetailLayout(undefined), 'single');
+});
+
+test('builds different translation cache sections for different constants and content', () => {
+  const sysA = getCalibrationDetailSectionIndex('SYS_PROMPT_FALLBACK_CHARS', 'alpha');
+  const sysB = getCalibrationDetailSectionIndex('SYS_PROMPT_FALLBACK_CHARS', 'beta');
+  const toolsA = getCalibrationDetailSectionIndex('TOOL_DEFS_FALLBACK_CHARS', 'alpha');
+
+  assert.notEqual(sysA, sysB);
+  assert.notEqual(sysA, toolsA);
+  assert.equal(getCalibrationDetailSectionIndex('SYS_PROMPT_FALLBACK_CHARS', 'alpha'), sysA);
+});
+
+test('builds stable translation cache slot for calibration detail', () => {
+  assert.deepEqual(getCalibrationDetailTranslationSlot('SYS_PROMPT_FALLBACK_CHARS', 'alpha'), {
+    stepIndex: -100,
+    sectionIndex: getCalibrationDetailSectionIndex('SYS_PROMPT_FALLBACK_CHARS', 'alpha'),
+  });
+});
+
+test('renders system prompt detail as plain text and unwraps legacy text fence', () => {
+  const legacy = [
+    '# SYS_PROMPT_FALLBACK_CHARS',
+    '',
+    '字符数: 42',
+    '',
+    '```text',
+    'before',
+    '```json',
+    '{"ok":true}',
+    '```',
+    'after',
+    '```',
+  ].join('\n');
+
+  assert.deepEqual(getCalibrationDetailDisplay('SYS_PROMPT_FALLBACK_CHARS', legacy), {
+    text: ['before', '```json', '{"ok":true}', '```', 'after'].join('\n'),
+    markdown: false,
+  });
+});
+
+test('renders system reminder detail as plain text and unwraps legacy text fence', () => {
+  const legacy = [
+    '# SYSTEM_REMINDER_CHROME_CHARS',
+    '',
+    '字符数: 42',
+    '',
+    '```text',
+    'wrapper before',
+    '```bash',
+    'echo hello',
+    '```',
+    'wrapper after',
+    '```',
+  ].join('\n');
+
+  assert.deepEqual(getCalibrationDetailDisplay('SYSTEM_REMINDER_CHROME_CHARS', legacy), {
+    text: ['wrapper before', '```bash', 'echo hello', '```', 'wrapper after'].join('\n'),
+    markdown: false,
+  });
+});
+
+test('normalizes stuck heading breaks in translated plain text details', () => {
+  const translated = [
+    '# SYSTEM_REMINDER_CHROME_CHARS',
+    '',
+    '字符数: 42',
+    '',
+    '主动拆分回答或使用文件输出# currentDate',
+    '当前日期为 2026/06/26。',
+  ].join('\n');
+
+  assert.deepEqual(getCalibrationDetailDisplay('SYSTEM_REMINDER_CHROME_CHARS', translated), {
+    text: '主动拆分回答或使用文件输出\n# currentDate\n当前日期为 2026/06/26。',
+    markdown: false,
+  });
+});
+
+test('keeps tool detail as markdown for json code rendering', () => {
+  const detail = ['# TOOL_DEFS_FALLBACK_CHARS', '', '```json', '{"name":"Read"}', '```'].join('\n');
+
+  assert.deepEqual(getCalibrationDetailDisplay('TOOL_DEFS_FALLBACK_CHARS', detail), {
+    text: detail,
+    markdown: true,
+  });
+});

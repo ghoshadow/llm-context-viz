@@ -4,7 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM"],
+    "skipLibCheck": true,
     "outDir": "dist-server"
   },
   "include": ["server"]

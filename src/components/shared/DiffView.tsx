@@ -43,15 +43,18 @@ export function DiffView({ body }: DiffViewProps) {
   const GUTTER_W = 40;
 
   return (
-    <div style={{
-      fontFamily: "'IBM Plex Mono', monospace",
-      fontSize: 11,
-      lineHeight: 1.6,
-      background: 'oklch(0.14 0.005 265)',
-      borderRadius: 6,
-      border: '1px solid oklch(0.28 0.012 265)',
-      overflow: 'auto',
-    }}>
+    <div
+      className="thin-scrollbar"
+      style={{
+        fontFamily: "'IBM Plex Mono', monospace",
+        fontSize: 11,
+        lineHeight: 1.6,
+        background: 'oklch(0.14 0.005 265)',
+        borderRadius: 6,
+        border: '1px solid oklch(0.28 0.012 265)',
+        overflow: 'auto',
+      }}
+    >
       {data.filePath && (
         <div style={{
           padding: '3px 10px',

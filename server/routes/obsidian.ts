@@ -28,17 +28,13 @@ export function getObsidianConfig(): ObsidianConfig {
 router.get('/config', (_req, res) => {
   try {
     if (rejectUntrustedLocalRequest(_req, res)) return;
-    const row = getObsidianConfig();
-    const validation = validateConfig({
-      vaultPath: row.vault_path,
-      notesDir: row.notes_dir,
-      filenameTemplate: row.filename_template,
-    });
+    const config = getObsidianConfig();
+    const validation = validateConfig(config);
 
     return res.json({
-      vaultPath: row.vault_path,
-      notesDir: row.notes_dir,
-      filenameTemplate: row.filename_template,
+      vaultPath: config.vaultPath,
+      notesDir: config.notesDir,
+      filenameTemplate: config.filenameTemplate,
       configured: validation.ok,
       error: validation.ok ? null : validation.error,
     });

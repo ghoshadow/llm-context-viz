@@ -1,16 +1,15 @@
 import { Router } from 'express';
-import multer from 'multer';
-import crypto from 'crypto';
 import { getDb } from '../db';
 import { callLLM } from '../llm/client';
-import { createSession, refreshSession } from '../services/pipeline-service';
+import { refreshSession } from '../services/pipeline-service';
+import { reassembleTranslatedSegments } from '../services/translation-reassembly';
 import { enrichWithSubAgents } from './scanner';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { readFileSync } from 'fs';
+import { getSessionSource } from '../../src/utils/sessionSource';
 
 import { findJsonlFile } from './shared';
 import ontologyRouter from './ontology';
+import { parseTurnListPagination } from './pagination';
 
 const router = Router();
 
@@ -19,66 +18,6 @@ const router = Router();
 // ============================================================================
 
 router.use('/:id/ontology', ontologyRouter);
-
-// ============================================================================
-// Multer setup: accept single file upload, max 50 MB
-// ============================================================================
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
-});
-
-// ============================================================================
-// POST /upload
-// ============================================================================
-
-router.post('/upload', upload.single('file'), (req, res) => {
-  try {
-    const file = req.file;
-    if (!file) {
-      return res.status(400).json({ error: '未上传文件' });
-    }
-
-    const content = file.buffer.toString('utf-8');
-    const hash = crypto.createHash('sha256').update(content).digest('hex');
-    const filename = file.originalname;
-
-    // Check for duplicate
-    const db = getDb();
-    const existing = db.prepare('SELECT id FROM sessions WHERE file_hash = ?').get(hash) as
-      | { id: string }
-      | undefined;
-    if (existing) {
-      return res.status(409).json({ error: '文件已存在', sessionId: existing.id });
-    }
-
-    const { sessionId, summary, turns } = createSession({
-      jsonlContent: content, filename, hash, rawJsonl: content,
-    });
-
-    // Enrich with sub-agent data via temp file (best-effort)
-    try {
-      const tmpDir = mkdtempSync(join(tmpdir(), 'llm-viz-upload-'));
-      writeFileSync(join(tmpDir, sessionId + '.jsonl'), content);
-      enrichWithSubAgents(turns as any, tmpDir);
-      rmSync(tmpDir, { recursive: true, force: true });
-    } catch { /* enrichment is best-effort */ }
-
-    return res.status(201).json({
-      id: sessionId,
-      filename,
-      model: summary.session.model,
-      version: summary.session.version,
-      total_requests: summary.session.requests,
-      peak_tokens: summary.session.peakTokens,
-      turn_count: turns.length,
-    });
-  } catch (err) {
-    console.error('POST /upload error:', err);
-    return res.status(500).json({ error: '处理上传文件时出错' });
-  }
-});
 
 // ============================================================================
 // GET /
@@ -93,9 +32,9 @@ router.get('/', (_req, res) => {
          FROM sessions
          ORDER BY created_at DESC`,
       )
-      .all();
+      .all() as Array<Record<string, unknown>>;
 
-    return res.json(rows);
+    return res.json(rows.map((row) => ({ ...row, source: getSessionSource(row) })));
   } catch (err) {
     console.error('GET / error:', err);
     return res.status(500).json({ error: '获取会话列表时出错' });
@@ -109,7 +48,15 @@ router.get('/', (_req, res) => {
 router.get('/:id', (req, res) => {
   try {
     const db = getDb();
-    const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id) as
+    const row = db.prepare(
+      `SELECT id, filename, file_hash, model, version, ai_title, cwd,
+              total_requests, peak_index, peak_tokens, peak_cache_hit,
+              peak_turn_idx, peak_step, total_output, context_limit,
+              turn_count, raw_size, categories_json, tools_json, series_json,
+              created_at, updated_at
+       FROM sessions
+       WHERE id = ?`,
+    ).get(req.params.id) as
       | Record<string, unknown>
       | undefined;
 
@@ -122,13 +69,11 @@ router.get('/:id', (req, res) => {
       categories_json,
       tools_json,
       series_json,
-      raw_jsonl,
       ...rest
     } = row as Record<string, unknown> & {
       categories_json?: string;
       tools_json?: string;
       series_json?: string;
-      raw_jsonl?: string;
     };
 
     const detail = {
@@ -189,16 +134,26 @@ router.post('/:id/refresh', (req, res) => {
 router.get('/:id/turns', (req, res) => {
   try {
     const db = getDb();
-    const rows = db
-      .prepare(
-        `SELECT id, turn_index, prompt, timestamp, asst_reqs, max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, compression_reset, dur_ms, step_count
-         FROM turns
-         WHERE session_id = ?
-         ORDER BY turn_index DESC`,
-      )
-      .all(req.params.id);
+    const page = parseTurnListPagination(req.query);
+    const selectSql = `SELECT id, turn_index, prompt, timestamp, asst_reqs, max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, compression_reset, dur_ms, step_count
+       FROM turns
+       WHERE session_id = ?
+       ORDER BY turn_index DESC`;
+    const rows = page.all
+      ? db.prepare(selectSql).all(req.params.id)
+      : db.prepare(`${selectSql} LIMIT ? OFFSET ?`).all(req.params.id, page.limit, page.offset);
 
-    return res.json(rows);
+    if (page.all) return res.json(rows);
+
+    const totalRow = db.prepare('SELECT COUNT(*) AS total FROM turns WHERE session_id = ?').get(req.params.id) as { total: number };
+
+    return res.json({
+      items: rows,
+      total: totalRow.total,
+      limit: page.limit,
+      offset: page.offset,
+      hasMore: page.offset + rows.length < totalRow.total,
+    });
   } catch (err) {
     console.error('GET /:id/turns error:', err);
     return res.status(500).json({ error: '获取轮次列表时出错' });
@@ -433,32 +388,10 @@ ${items}`;
       translatedMap.set(0, response);
     }
 
-    // Reassemble: merge translated segments back with original Chinese parts.
-    // Insert newlines between segments where needed so that markdown code fences
-    // (```) are always on their own line — otherwise MarkdownBlock can't detect them.
-    let ti = 0;
-    const resultParts: string[] = [];
-    let lastEndsWithNewline = true; // start of text counts as "after newline"
-    for (let si = 0; si < segments.length; si++) {
-      const seg = segments[si]!;
-      // If this segment starts with a code fence and the previous content
-      // doesn't end with a newline, insert one.
-      if (!lastEndsWithNewline && seg.text.startsWith('```')) {
-        resultParts.push('\n');
-        lastEndsWithNewline = true;
-      }
-      if (seg.zh) {
-        resultParts.push(seg.text);
-        lastEndsWithNewline = seg.text.endsWith('\n');
-      } else {
-        const part = translatedMap.get(ti) ?? toTranslate[ti]!;
-        resultParts.push(part);
-        lastEndsWithNewline = part.endsWith('\n');
-        ti++;
-      }
-    }
-    const raw = resultParts.join('');
-    const translated = raw.replace(/\n{3,}/g, '\n\n');
+    const translated = reassembleTranslatedSegments(
+      segments,
+      toTranslate.map((source, index) => translatedMap.get(index) ?? source),
+    );
     db.prepare(
       'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
     ).run(sessionId, turnIndex, stepIndex, sectionIndex, translated);

@@ -19,11 +19,8 @@ import {
 import { fmt, fmtK, fmtDur, fmtDate } from '../../utils/format';
 import { post, get } from '../../api/client';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
-import { MarkdownBlock } from '../shared/MarkdownBlock';
-import { DiffView } from '../shared/DiffView';
-import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
-import type { TurnDetail, TimelineSegment, SegmentDetail } from '../../types/session';
+import { ContentRenderer } from '../shared/ContentRenderer';
+import type { TurnDetail, TurnSummary, TimelineSegment, SegmentDetail } from '../../types/session';
 
 // ============================================================================
 // Helpers
@@ -32,11 +29,6 @@ import type { TurnDetail, TimelineSegment, SegmentDetail } from '../../types/ses
 /** Max height for collapsed content blocks. */
 const COLLAPSED_H = 180;
 
-/** Tools whose input should be rendered as a diff (old_string → new_string). */
-function isEditTool(name: string | undefined): boolean {
-  return name === 'Edit' || name === 'Write';
-}
-
 function parseJSON<T>(raw: string | undefined, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -44,34 +36,6 @@ function parseJSON<T>(raw: string | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-/**
- * Detect whether text looks like source code output (e.g. grep -n results,
- * file contents with line numbers).  When true we can skip MarkdownBlock and
- * render via SyntaxHighlighter directly.
- */
-function looksLikeCode(text: string): boolean {
-  const lines = text.split('\n').filter(l => l.trim());
-  if (lines.length < 2) return false;
-
-  // Count lines matching a line-numbered pattern (e.g. "123: code" or "123  code")
-  let numbered = 0;
-  let codeIndicators = 0;
-  for (const line of lines) {
-    if (/^\s*\d+:\s*\S/.test(line)) numbered++;
-    if (/\b(import|export|const|let|var|function|class|return|if|for|while|async|await|def|from|require)\b/.test(line)) codeIndicators++;
-  }
-
-  const pct = numbered / lines.length;
-  const kwPct = codeIndicators / lines.length;
-  // Heavily line-numbered → almost certainly code output
-  if (pct >= 0.6) return true;
-  // Mix of line numbers and code keywords → likely code
-  if (pct >= 0.3 && codeIndicators >= 2) return true;
-  // High density of code keywords (e.g. file contents without line numbers)
-  if (kwPct >= 0.3 || codeIndicators >= 5) return true;
-  return false;
 }
 
 function segColor(k: string): string {
@@ -757,8 +721,13 @@ function UserPromptSection({ prompt }: { prompt: string }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(prompt); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard unavailable */ }
   };
+
   return (
     <div className="content-block">
       <div className="block-header">
@@ -769,18 +738,14 @@ function UserPromptSection({ prompt }: { prompt: string }) {
           {copied ? '已复制' : '复制'}
         </span>
       </div>
-      <div style={{
-        maxHeight: open ? 'none' : COLLAPSED_H,
-        overflowY: open ? 'visible' : 'auto',
-        padding: '10px 12px',
-        fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        background: 'oklch(0.20 0.01 265 / 0.5)',
-        border: `1px solid ${SEMANTIC.borderSubtle1}`,
-        borderBottom: open ? `1px solid ${SEMANTIC.borderSubtle1}` : 'none',
-        borderRadius: open ? 8 : '8px 8px 0 0',
-      }}>
-        <MarkdownBlock fontSize={13} text={prompt} />
-      </div>
+      <ContentRenderer
+        text={prompt}
+        fontFamily="'IBM Plex Sans', system-ui, sans-serif"
+        fontSize={13}
+        maxHeight={open ? 'none' : COLLAPSED_H}
+        overflowY={open ? 'visible' : 'auto'}
+        markdown
+      />
       {!open && (
         <div onClick={() => setOpen(true)} style={{
           padding: '6px 0', textAlign: 'center', cursor: 'pointer',
@@ -803,9 +768,9 @@ function UserPromptSection({ prompt }: { prompt: string }) {
 }
 
 interface StepDetailPanelProps {
-  prompt: string;
   seg: TimelineSegment | null;
   index: number | null;
+  prompt: string;
 }
 
 function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
@@ -864,7 +829,6 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
   }, [sessionId, translations, translating]);
 
   if (!seg || index === null) {
-    // Show user prompt even when no step selected
     if (prompt) {
       return (
         <div style={{ marginTop: 16, borderTop: `1px solid ${SEMANTIC.borderSubtle2}`, paddingTop: 16 }}>
@@ -872,6 +836,7 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
         </div>
       );
     }
+
     return (
       <div style={{ marginTop: 16, borderTop: `1px solid ${SEMANTIC.borderSubtle2}`, paddingTop: 16 }}>
         <div style={{ fontSize: 12.5, color: SEMANTIC.textDesc4, lineHeight: 1.6 }}>
@@ -1007,7 +972,6 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* User input section — always shown first */}
         {prompt && <UserPromptSection prompt={prompt} />}
         {/* Sub-agent summary — shown before detail sections when subAgents present */}
         {d.subAgents && d.subAgents.length > 0 && (
@@ -1098,98 +1062,33 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
                 </div>
               );
 
-              if (sec.lang) {
-                // Edit tool: render as side-by-side diff
-                if (sec.lang === 'json' && isEditTool(sec.toolName)) {
-                  return (
-                    <>
-                      <div className="block-body mono" style={{ fontFamily: sec.font, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
-                        <DiffView body={sec.body} />
-                      </div>
-                      {isExpandable && toggle(isOpen)}
-                    </>
-                  );
-                }
-
-                let displayBody = sec.body;
-                if (sec.lang === 'json') {
-                  try { displayBody = JSON.stringify(JSON.parse(sec.body), null, 2); } catch { /* keep as-is */ }
-                }
-                return (
-                  <>
-                    <div className="block-body mono" style={{ fontFamily: sec.font, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
-                      <SyntaxHighlighter
-                        language={sec.lang}
-                        style={atomOneDark}
-                        customStyle={{
-                          margin: 0, borderRadius: 6,
-                          border: '1px solid oklch(0.28 0.012 265)',
-                          fontSize: 11, lineHeight: 1.55,
-                          background: 'oklch(0.15 0.008 265)',
-                          maxHeight: isExpandable && !isOpen ? COLLAPSED_H : undefined,
-                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                        }}
-                      >
-                        {displayBody}
-                      </SyntaxHighlighter>
-                    </div>
-                    {isExpandable && toggle(isOpen)}
-                  </>
-                );
-              }
-
-              if (sec.md) {
-                const isCode = looksLikeCode(sec.body);
-                if (isCode) {
-                  return (
-                    <>
-                      <div className="block-body mono" style={{ fontFamily: MONO, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
-                        <SyntaxHighlighter
-                          language="typescript"
-                          style={atomOneDark}
-                          customStyle={{
-                            margin: 0, borderRadius: 6,
-                            border: '1px solid oklch(0.28 0.012 265)',
-                            fontSize: 11, lineHeight: 1.55,
-                            background: 'oklch(0.15 0.008 265)',
-                            maxHeight: isExpandable && !isOpen ? COLLAPSED_H : undefined,
-                            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                          }}
-                        >
-                          {sec.body}
-                        </SyntaxHighlighter>
-                      </div>
-                      {isExpandable && toggle(isOpen)}
-                    </>
-                  );
-                }
-                return (
-                  <>
-                    <div className="block-body" style={{ fontFamily: sec.font, maxHeight: maxH, overflowY: ovf as 'auto' | 'visible' }}>
-                      <MarkdownBlock fontSize={12} text={sec.body} preserveNewlines={sec.preserveNewlines} />
-                    </div>
-                    {isExpandable && toggle(isOpen)}
-                  </>
-                );
-              }
-
               return (
-                <div className="block-body mono" style={{ fontFamily: sec.font }}>
-                  {sec.body}
-                </div>
+                <>
+                  <ContentRenderer
+                    text={sec.body}
+                    fontFamily={sec.font}
+                    fontSize={12}
+                    maxHeight={maxH}
+                    overflowY={ovf as 'auto' | 'visible'}
+                    markdown={Boolean(sec.md)}
+                    language={sec.lang}
+                    toolName={sec.toolName}
+                    preserveNewlines={sec.preserveNewlines}
+                  />
+                  {isExpandable && toggle(isOpen)}
+                </>
               );
             })()}
             {translations[si] && (() => {
               if (translations[si] === '代码内容不支持翻译') {
                 return (
-              <div className="block-body"
-                style={{
-                  fontFamily: sec.font, marginTop: 8, padding: '8px 12px', borderRadius: 6,
-                  border: '1px solid oklch(0.50 0.10 60 / 0.25)', background: 'oklch(0.50 0.10 60 / 0.05)',
-                  fontSize: 12, lineHeight: 1.6, color: SEMANTIC.textAccent2,
-                }}
-              >
-                ⚠ 代码内容不支持翻译
+              <div style={{ marginTop: 8 }}>
+                <ContentRenderer
+                  text="⚠ 代码内容不支持翻译"
+                  fontFamily={sec.font}
+                  fontSize={12}
+                  tone="warning"
+                />
               </div>
                 );
               }
@@ -1207,7 +1106,12 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
                 <div style={{ fontSize: 10, fontWeight: 600, color: SEMANTIC.textGreen, marginBottom: 6 }}>
                   中文翻译
                 </div>
-                <MarkdownBlock fontSize={12} text={translations[si]!} />
+                <ContentRenderer
+                  text={translations[si]!}
+                  fontFamily={sec.font}
+                  fontSize={12}
+                  markdown
+                />
               </div>
               );
             })()}
@@ -1364,9 +1268,12 @@ export default function TurnInspector() {
   const {
     currentSessionId,
     fetchTurns,
+    fetchMoreTurns,
     selectTurn,
     turns,
     turnsLoading,
+    turnsTotal,
+    turnsHasMore,
     currentTurnIndex,
     currentTurn,
     currentTurnLoading,
@@ -1408,13 +1315,22 @@ export default function TurnInspector() {
   }, [currentTurnIndex, setSelectedStepIndex]);
 
   const prevSegLen = useRef(0);
+  const prevTurnIds = useRef('');
 
-  // Auto-refresh: re-parse JSONL (reads from disk) then update if changed
+  // Auto-refresh: re-parse JSONL, then silently update turn list + detail
   useEffect(() => {
     if (!currentSessionId || currentTurnIndex === null) return;
     const timer = setInterval(async () => {
       try {
         await post(`/sessions/${currentSessionId}/refresh`);
+        // Silent turn list refresh — only update if changed
+        const turns = await get<TurnSummary[]>(`/sessions/${currentSessionId}/turns?all=1`);
+        const fp = turns.map(t => `${t.turn_index}:${t.asst_reqs}:${t.max_input}`).join(',');
+        if (fp !== prevTurnIds.current) {
+          prevTurnIds.current = fp;
+          useSessionStore.setState({ turns });
+        }
+        // Current turn detail — only update if segments changed
         const t = await get<TurnDetail>(`/sessions/${currentSessionId}/turns/${currentTurnIndex}`);
         const newLen = (t.segs ?? []).length;
         if (newLen !== prevSegLen.current) {
@@ -1423,7 +1339,11 @@ export default function TurnInspector() {
         }
       } catch { /* silently skip */ }
     }, 3000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      prevSegLen.current = 0;
+      prevTurnIds.current = '';
+    };
   }, [currentSessionId, currentTurnIndex]);
 
   const handleCompEnter = useCallback((key: string) => {
@@ -1582,7 +1502,7 @@ export default function TurnInspector() {
             <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>对话轮次</h2>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: SEMANTIC.textMuted }}>
-                共 {turns.length} 轮
+                共 {turns.length}{turnsTotal > turns.length ? ` / ${turnsTotal}` : ''} 轮
               </span>
               <button
                 onClick={(e) => { e.preventDefault(); setPage('calibrate'); }}
@@ -1652,6 +1572,26 @@ export default function TurnInspector() {
                   />
                 );
               })}
+              {turnsHasMore && (
+                <button
+                  onClick={() => { void fetchMoreTurns(); }}
+                  disabled={turnsLoading}
+                  style={{
+                    border: `1px solid ${SEMANTIC.borderColor}`,
+                    borderRadius: 9,
+                    padding: '9px 12px',
+                    marginTop: 4,
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 11,
+                    cursor: turnsLoading ? 'not-allowed' : 'pointer',
+                    background: 'oklch(0.20 0.01 265 / 0.6)',
+                    color: SEMANTIC.textSecondary,
+                    opacity: turnsLoading ? 0.5 : 1,
+                  }}
+                >
+                  加载更多
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1676,9 +1616,9 @@ export default function TurnInspector() {
             </div>
           ) : currentTurn && turnDetail ? (
             <>
-              {/* Prompt + Stats Card */}
+              {/* Turn summary + Stats Card */}
               <div className="panel" style={{ padding: '20px 22px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 15 }}>
                   <span
                     style={{
                       fontFamily: "'IBM Plex Mono', monospace",
@@ -1699,25 +1639,8 @@ export default function TurnInspector() {
                     {fmtDate(currentTurn.timestamp)}
                   </span>
                 </div>
-                <div
-                  className="thin-scrollbar"
-                  style={{
-                    fontSize: 14,
-                    lineHeight: 1.65,
-                    color: SEMANTIC.textPrimary5,
-                    maxHeight: 120,
-                    overflowY: 'auto',
-                    whiteSpace: 'pre-wrap',
-                    background: 'oklch(0.20 0.01 265 / 0.5)',
-                    border: `1px solid ${SEMANTIC.borderInput}`,
-                    borderRadius: 10,
-                    padding: '12px 14px',
-                  }}
-                >
-                  {currentTurn.prompt}
-                </div>
 
-                <div className="four-col" style={{ marginTop: 15 }}>
+                <div className="four-col">
                   <div className="stat-card">
                     <div className="stat-value">{currentTurn.asst_reqs}</div>
                     <div className="stat-label">模型请求</div>
@@ -1774,7 +1697,7 @@ export default function TurnInspector() {
                 segs={turnDetail.segs}
                 longestName={turnDetail.longestName}
                 longestMs={turnDetail.longestMs}
-                prompt={currentTurn?.prompt ?? ''}
+                prompt={currentTurn.prompt ?? ''}
                 selectedStepIndex={selectedStepIndex}
                 onToggleStep={toggleStep}
               />

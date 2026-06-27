@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUIStore } from '../../store/uiStore';
 import { SEMANTIC } from '../../styles/theme';
@@ -9,6 +9,7 @@ interface FoundFile {
   name: string;
   size: number;
   modified: string;
+  source?: 'claude' | 'codex';
   hash: string;
   imported: boolean;
   title?: string;
@@ -64,17 +65,51 @@ const S = {
     background: 'oklch(0.26 0.01 265)', color: SEMANTIC.textMuted,
     border: `1px solid ${SEMANTIC.borderColor}`,
   } as React.CSSProperties,
+  sourceTag: {
+    padding: '2px 7px',
+    fontSize: 10,
+    borderRadius: 5,
+    background: 'oklch(0.22 0.01 265)',
+    color: SEMANTIC.textMuted,
+    border: `1px solid ${SEMANTIC.borderColor}`,
+    whiteSpace: 'nowrap',
+  } as React.CSSProperties,
   spinner: {
     width: 24, height: 24, border: '3px solid oklch(0.30 0.014 265)',
     borderTopColor: 'oklch(0.74 0.13 60)', borderRadius: '50%',
     animation: 'spin 0.7s linear infinite',
   } as React.CSSProperties,
   status: { textAlign: 'center', fontSize: 13, color: SEMANTIC.textSecondary, marginTop: 12 } as React.CSSProperties,
+  tabs: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 4,
+    padding: 4,
+    marginTop: 14,
+    borderRadius: 8,
+    background: 'oklch(0.15 0.008 265)',
+    border: `1px solid ${SEMANTIC.borderColor}`,
+  } as React.CSSProperties,
+  tabBtn: {
+    border: 'none',
+    borderRadius: 6,
+    padding: '7px 10px',
+    background: 'transparent',
+    color: SEMANTIC.textMuted,
+    cursor: 'pointer',
+    fontSize: 12,
+    fontFamily: "'IBM Plex Mono', monospace",
+  } as React.CSSProperties,
+  tabBtnActive: {
+    background: 'oklch(0.74 0.13 60 / 0.14)',
+    color: SEMANTIC.textAccent2,
+  } as React.CSSProperties,
 };
 
 export default function ScannerModal() {
   const [scanning, setScanning] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
+  const [activeSource, setActiveSource] = useState<'claude' | 'codex'>('claude');
 
   const files = useSessionStore(s => s.scanFiles);
   const status = useSessionStore(s => s.scanStatus);
@@ -84,7 +119,15 @@ export default function ScannerModal() {
   const setPage = useUIStore(s => s.setPage);
   const selectSession = useSessionStore(s => s.selectSession);
 
-  const hasScanned = useRef(false);
+  const claudeFiles = useMemo(
+    () => files.filter((f) => f.source !== 'codex'),
+    [files],
+  );
+  const codexFiles = useMemo(
+    () => files.filter((f) => f.source === 'codex'),
+    [files],
+  );
+  const visibleFiles = activeSource === 'codex' ? codexFiles : claudeFiles;
 
   const doScan = useCallback(async (force?: boolean) => {
     setScanning(true);
@@ -94,7 +137,9 @@ export default function ScannerModal() {
       const resp = await fetch(url);
       const data = await resp.json();
       const cachedNote = data.cached > 0 ? `（${data.cached} 个命中缓存）` : '';
-      setScanFiles(data.files || [], `发现 ${data.totalFiles} 个有效文件，其中 ${data.importedCount} 个已导入${cachedNote}`);
+      const codexCount = Array.isArray(data.files) ? data.files.filter((f: FoundFile) => f.source === 'codex').length : 0;
+      const sourceNote = codexCount > 0 ? `，包含 ${codexCount} 个 Codex 日志` : '';
+      setScanFiles(data.files || [], `发现 ${data.totalFiles} 个有效文件，其中 ${data.importedCount} 个已导入${sourceNote}${cachedNote}`);
     } catch (e) {
       setScanFiles(files, '扫描失败: ' + (e as Error).message);
     } finally {
@@ -138,7 +183,7 @@ export default function ScannerModal() {
 
         {files.length === 0 && !scanning && (
           <p style={{ fontSize: 13, color: SEMANTIC.textSecondary, marginTop: 8, textAlign: 'center' }}>
-            扫描 Claude Code 项目目录下的 JSONL 会话记录
+            扫描 Claude Code 与 Codex 的本地 JSONL 会话记录
           </p>
         )}
 
@@ -158,19 +203,51 @@ export default function ScannerModal() {
 
         {status && <div style={S.status}>{status}</div>}
 
+        {files.length > 0 && (
+          <div style={S.tabs} role="tablist" aria-label="日志来源">
+            {([
+              ['claude', `Claude Code (${claudeFiles.length})`],
+              ['codex', `Codex (${codexFiles.length})`],
+            ] as const).map(([source, label]) => {
+              const active = activeSource === source;
+              return (
+                <button
+                  key={source}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  style={{ ...S.tabBtn, ...(active ? S.tabBtnActive : {}) }}
+                  onClick={() => setActiveSource(source)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {scanning && (
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
             <div style={S.spinner} />
           </div>
         )}
 
-        {files.length > 0 && (
+        {files.length > 0 && visibleFiles.length === 0 && !scanning && (
+          <div style={{ ...S.status, marginTop: 18 }}>
+            {activeSource === 'codex' ? '未发现 Codex 日志' : '未发现 Claude Code 日志'}
+          </div>
+        )}
+
+        {visibleFiles.length > 0 && (
           <div className="tl" style={S.list}>
-            {files.map((f) => (
+            {visibleFiles.map((f) => (
               <div key={f.path} style={S.fileItem}>
                 <span style={{ fontSize: 16, flexShrink: 0 }}>📄</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={S.fileName} title={f.path}>{f.title || f.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <span style={S.sourceTag}>{f.source === 'codex' ? 'Codex' : 'Claude'}</span>
+                    <div style={S.fileName} title={f.path}>{f.title || f.name}</div>
+                  </div>
                   {f.title && <div style={{ fontSize: 10, color: SEMANTIC.textMuted, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.path}>{f.name}</div>}
                   {!f.imported && f.requests != null && (
                     <div style={{ display: 'flex', gap: 10, marginTop: 3 }}>

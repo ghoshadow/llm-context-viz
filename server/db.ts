@@ -82,6 +82,8 @@ export function initDb(): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id);
+    CREATE INDEX IF NOT EXISTS idx_turns_session_turn_index
+      ON turns(session_id, turn_index DESC);
 
     CREATE TABLE IF NOT EXISTS ontology (
       session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -327,5 +329,14 @@ export function migrate(): void {
       );
     `);
     conn.pragma('user_version = 4');
+  }
+
+  // v4 → v5: support paginated turn lists without a temp sort.
+  if (userVersion < 5) {
+    conn.exec(`
+      CREATE INDEX IF NOT EXISTS idx_turns_session_turn_index
+        ON turns(session_id, turn_index DESC);
+    `);
+    conn.pragma('user_version = 5');
   }
 }

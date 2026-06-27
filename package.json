@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "bench:db": "tsx scripts/bench-db.ts",
     "preview": "vite preview",
     "server": "tsx server/index.ts"
   },
@@ -18,7 +19,6 @@
     "diff": "^9.0.0",
     "dotenv": "^17.4.2",
     "express": "^5.0.0",
-    "multer": "^2.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-syntax-highlighter": "^16.1.1",
@@ -30,7 +30,6 @@
     "@types/better-sqlite3": "^7.6.0",
     "@types/diff": "^7.0.2",
     "@types/express": "^5.0.0",
-    "@types/multer": "^2.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",

@@ -3,11 +3,15 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 /**
- * Search ~/.claude/projects/ for a JSONL file by filename.
+ * Search known local transcript roots for a JSONL file by filename.
  * Returns the absolute path, or null if not found.
  */
 export function findJsonlFile(filename: string): string | null {
-  const dirs = [join(homedir(), '.claude', 'projects')];
+  const dirs = [
+    join(homedir(), '.claude', 'projects'),
+    join(homedir(), '.codex', 'sessions'),
+    join(homedir(), '.codex', 'archived_sessions'),
+  ];
   for (const dir of dirs) {
     try {
       const queue = [dir];

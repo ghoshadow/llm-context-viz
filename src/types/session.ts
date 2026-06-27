@@ -307,6 +307,7 @@ export interface TurnData {
 export interface SessionListItem {
   id: string;
   filename: string;
+  source?: 'claude' | 'codex';
   model: string;
   version: string;
   ai_title?: string;
@@ -344,6 +345,14 @@ export interface TurnSummary {
   dur_ms: number;
   step_count: number;
   compression_reset?: boolean;
+}
+
+export interface TurnListPage {
+  items: TurnSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
 }
 
 export interface TurnDetail extends TurnSummary {

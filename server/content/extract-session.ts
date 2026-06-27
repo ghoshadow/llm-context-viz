@@ -7,6 +7,9 @@
  * 本模块从 scripts/extract-session-content.ts 提取核心逻辑。
  */
 
+import { isCodexJsonl, runCodexPipeline } from '../../src/pipeline/codex-jsonl';
+import type { TimelineSegment, TurnData } from '../../src/types/session';
+
 /** 单个 turn 的结构化内容 */
 export interface TurnContent {
   /** turn 编号（从 1 开始） */
@@ -34,6 +37,8 @@ interface JsonlLine {
   type: string;
   message?: JsonlMessage;
 }
+
+type SegmentDetail = TimelineSegment['det'];
 
 const MAX_REASONING_SUMMARY_CHARS = 1_600;
 const MAX_TOOL_SUMMARY_CHARS = 1_200;
@@ -180,6 +185,74 @@ function summarizeToolSummaries(summaries: string[]): string {
   return compactText(picked.join('\n'), MAX_TOOL_SUMMARY_CHARS);
 }
 
+function segmentText(detail: SegmentDetail): string {
+  return typeof detail.text === 'string' ? detail.text : '';
+}
+
+function segmentThinking(detail: SegmentDetail): string {
+  if (typeof detail.think !== 'string' || !detail.think.trim()) return '';
+  const tok = typeof detail.thinkTok === 'number' && detail.thinkTok > 0
+    ? `\nreasoning_output_tokens: ${detail.thinkTok}`
+    : '';
+  return `${detail.think}${tok}`;
+}
+
+function codexToolSummary(seg: TimelineSegment): string {
+  const detail = seg.det;
+  const name = typeof detail.name === 'string' && detail.name.trim() ? detail.name : seg.n;
+  const chunks: string[] = [`[${name}]`];
+
+  if (typeof detail.input === 'string' && detail.input.trim()) {
+    chunks.push(`调用: ${compactText(detail.input, 420)}`);
+  }
+  if (typeof detail.result === 'string' && detail.result.trim()) {
+    chunks.push(`结果: ${compactText(detail.result, 900)}`);
+  }
+  if (detail.isError === true) chunks.push('状态: error');
+
+  return chunks.join('\n');
+}
+
+function codexContentFromTurn(turn: TurnData, turnNum: number): TurnContent {
+  const parts: string[] = [
+    `## 第 ${turnNum} 轮\n\n### 用户输入\n${normalizeText(turn.prompt)}`,
+  ];
+  const modelParts: string[] = [];
+  const reasoningBlocks: string[] = [];
+  const toolSummaries: string[] = [];
+
+  for (const seg of turn.segs) {
+    const thinking = segmentThinking(seg.det);
+    if (thinking) reasoningBlocks.push(thinking);
+
+    const text = segmentText(seg.det);
+    if (text) modelParts.push(`[REPLY] ${normalizeText(text)}`);
+
+    if (seg.k === 't' || seg.k === 's') {
+      const summary = codexToolSummary(seg);
+      if (summary) toolSummaries.push(summary);
+    }
+  }
+
+  if (modelParts.length > 0 || reasoningBlocks.length > 0 || toolSummaries.length > 0) {
+    parts.push('### 模型');
+    parts.push(...modelParts);
+
+    const reasoning = summarizeReasoningBlocks(reasoningBlocks);
+    if (reasoning) parts.push(`[REASONING_SUMMARY]\n${reasoning}`);
+
+    const tools = summarizeToolSummaries(toolSummaries);
+    if (tools) parts.push(`[TOOL_SUMMARY]\n${tools}`);
+  }
+
+  return { turnNum, content: parts.join('\n') };
+}
+
+function extractCodexContentWithTurns(rawJsonl: string): TurnContent[] {
+  const { turns } = runCodexPipeline(rawJsonl, 'codex-session.jsonl');
+  return turns.map((turn, index) => codexContentFromTurn(turn, index + 1));
+}
+
 /**
  * 从原始 JSONL 字符串中提取全部自然语言内容，返回格式化文本。
  *
@@ -202,6 +275,10 @@ export function extractSessionContent(rawJsonl: string): string {
  * 包含 turn 标记、用户消息、推理摘要、工具摘要和助手回复。
  */
 export function extractContentWithTurns(rawJsonl: string): TurnContent[] {
+  if (isCodexJsonl(rawJsonl)) {
+    return extractCodexContentWithTurns(rawJsonl);
+  }
+
   const lines = rawJsonl.trim().split('\n').filter(Boolean);
   let turnNum = 0;
   const turns: TurnContent[] = [];
