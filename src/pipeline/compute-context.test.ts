@@ -48,13 +48,15 @@ test('loads normalized project constants and resets when missing for next projec
     const a = computeContext([group(projectA)], estimator)[0]!;
     assert.equal(a.sysPrompt, 111);
     assert.equal(a.tool_defs, 222);
-    assert.equal(a.userMsgs, 333 + 2);
+    assert.equal(a.userWrapper, 333);
+    assert.equal(a.userMsgs, 2);
 
     loadCalibratedConstants(null);
     const b = computeContext([group(projectB)], estimator)[0]!;
     assert.equal(b.sysPrompt, 5768);
     assert.equal(b.tool_defs, 98949);
-    assert.equal(b.userMsgs, 612 + 2);
+    assert.equal(b.userWrapper, 612);
+    assert.equal(b.userMsgs, 2);
   } finally {
     resetCalibratedConstants();
     rmSync(projectA, { recursive: true, force: true });
@@ -73,7 +75,26 @@ test('keeps legacy calibrated constant input compatible during migration', () =>
     const comp = computeContext([group('/tmp')], estimator)[0]!;
     assert.equal(comp.sysPrompt, 10);
     assert.equal(comp.tool_defs, 20);
-    assert.equal(comp.userMsgs, 30 + 2);
+    assert.equal(comp.userWrapper, 30);
+    assert.equal(comp.userMsgs, 2);
+  } finally {
+    resetCalibratedConstants();
+  }
+});
+
+test('uses split Claude memory categories as the memory fallback', () => {
+  try {
+    loadCalibratedConstants({
+      schemaVersion: 1,
+      source: 'claude',
+      categories: {
+        memoryGlobal: { chars: 40 },
+        memoryProject: { chars: 50 },
+      },
+    });
+
+    const comp = computeContext([group('/tmp')], estimator)[0]!;
+    assert.equal(comp.memory, 90);
   } finally {
     resetCalibratedConstants();
   }

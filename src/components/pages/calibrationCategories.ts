@@ -46,11 +46,13 @@ interface LegacyClaudeSummaryLike {
   SYSTEM_REMINDER_CHROME_CHARS?: number;
 }
 
-const CATEGORY_ORDER = ['sysPrompt', 'tool_defs', 'skills', 'memory', 'mcp', 'reminders', 'userMsgs'];
+const CATEGORY_ORDER = ['sysPrompt', 'tool_defs', 'memoryGlobal', 'memoryProject', 'skills', 'memory', 'mcp', 'reminders', 'userMsgs'];
 
 const CATEGORY_LABELS: Record<string, string> = {
   sysPrompt: '系统提示',
   tool_defs: '工具定义',
+  memoryGlobal: '全局 CLAUDE.md',
+  memoryProject: '项目 CLAUDE.md',
   skills: '技能定义',
   memory: '记忆文件',
   mcp: 'MCP / 插件',

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   DEFAULT_CALIBRATION_CONSTANTS,
   readCalibrationConstants,
+  readClaudeMemoryConstants,
   readProjectConstants,
   resolveProjectConstantsPath,
   writeCalibrationConstants,
@@ -35,6 +36,82 @@ test('reads Claude defaults when project constants are missing', () => {
     assert.equal(current.constantsSource, 'defaults');
     assert.equal(current.cwd, project);
     assert.equal(current.categories.sysPrompt?.chars, DEFAULT_CALIBRATION_CONSTANTS.SYS_PROMPT_FALLBACK_CHARS);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('reads split Claude memory constants from global and project files', () => {
+  const home = mkdtempSync(join(tmpdir(), 'cal-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'cal-constants-'));
+  try {
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'CLAUDE.md'), 'global memory');
+    mkdirSync(join(project, '.claude'), { recursive: true });
+    writeFileSync(join(project, '.claude', 'CLAUDE.md'), 'project memory');
+
+    const memory = readClaudeMemoryConstants(project, home);
+    assert.equal(memory.categories.memoryGlobal?.chars, 'global memory'.length);
+    assert.equal(memory.categories.memoryProject?.chars, 'project memory'.length);
+    assert.equal(memory.details?.['claude.memory.global'], 'global memory');
+    assert.equal(memory.details?.['claude.memory.project'], 'project memory');
+
+    const current = readCalibrationConstants(project, 'claude', { homeDir: home });
+    assert.equal(current.categories.memoryGlobal?.chars, 'global memory'.length);
+    assert.equal(current.categories.memoryProject?.chars, 'project memory'.length);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('keeps stored Claude memory constants before filesystem fallback', () => {
+  const home = mkdtempSync(join(tmpdir(), 'cal-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'cal-constants-'));
+  try {
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'CLAUDE.md'), 'changed global memory');
+    mkdirSync(join(project, '.claude-trace'), { recursive: true });
+    writeFileSync(join(project, '.claude-trace', 'system-constants.json'), JSON.stringify({
+      schemaVersion: 1,
+      source: 'claude',
+      categories: {
+        memoryGlobal: { chars: 6, detailKey: 'claude.memory.global' },
+      },
+      details: {
+        'claude.memory.global': 'stored',
+      },
+    }, null, 2));
+
+    const current = readCalibrationConstants(project, 'claude', { homeDir: home });
+    assert.equal(current.categories.memoryGlobal?.chars, 6);
+    assert.equal(current.details?.['claude.memory.global'], 'stored');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('writes captured Claude memory constants before filesystem fallback', () => {
+  const project = mkdtempSync(join(tmpdir(), 'cal-constants-'));
+  try {
+    mkdirSync(join(project, '.claude'), { recursive: true });
+    writeFileSync(join(project, '.claude', 'CLAUDE.md'), 'filesystem project memory');
+
+    const written = writeCalibrationConstants(project, {
+      source: 'claude',
+      summary: {
+        categories: {
+          memoryProject: { chars: 7, detailKey: 'claude.memory.project' },
+        },
+      },
+      details: {
+        'claude.memory.project': 'capture',
+      },
+    });
+
+    assert.equal(written.categories.memoryProject?.chars, 7);
+    assert.equal(written.details?.['claude.memory.project'], 'capture');
   } finally {
     rmSync(project, { recursive: true, force: true });
   }

@@ -6,7 +6,8 @@ import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/
 import { isCodexJsonl, runCodexPipeline } from '../../src/pipeline/codex-jsonl';
 import type { SessionSummary, TurnData } from '../../src/types/session';
 import type Database from 'better-sqlite3';
-import { readCalibrationConstants, readProjectConstants } from './calibration-constants';
+import { readCalibrationConstants } from './calibration-constants';
+import { memoryCategoryChars } from '../../src/pipeline/calibration-types';
 
 // ============================================================================
 // Shared pipeline service — eliminates duplicated import/refresh logic across
@@ -68,9 +69,11 @@ export function runPipelineOnContent(
   }
 
   const cwd = extractCwdFromJsonl(jsonlContent);
-  const constants = cwd ? readProjectConstants(cwd) : null;
+  const constants = cwd ? readCalibrationConstants(cwd, 'claude') : null;
   loadCalibratedConstants(constants);
-  setMemoryChars(computeMemoryChars(jsonlContent));
+  if (!memoryCategoryChars(constants)) {
+    setMemoryChars(computeMemoryChars(jsonlContent));
+  }
   return runPipeline(jsonlContent, filename);
 }
 

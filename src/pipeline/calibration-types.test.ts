@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   categoryChars,
   legacyClaudeSummaryToNormalized,
+  memoryCategoryChars,
   normalizeAgentSource,
 } from './calibration-types';
 
@@ -22,6 +23,21 @@ test('converts legacy Claude summary into normalized categories', () => {
   assert.equal(normalized.categories.userMsgs?.chars, 333);
   assert.equal(normalized.categories.sysPrompt?.detailKey, 'claude.sysPrompt');
   assert.equal(normalized.details?.['claude.userMsgs'], '# chrome');
+});
+
+test('sums split Claude memory categories with legacy fallback', () => {
+  const split = {
+    categories: {
+      memoryGlobal: { chars: 10 },
+      memoryProject: { chars: 20 },
+      memory: { chars: 99 },
+    },
+  };
+  assert.equal(categoryChars(split, 'memoryGlobal'), 10);
+  assert.equal(categoryChars(split, 'memoryProject'), 20);
+  assert.equal(memoryCategoryChars(split), 30);
+
+  assert.equal(memoryCategoryChars({ categories: { memory: { chars: 7 } } }), 7);
 });
 
 test('categoryChars returns zero for missing categories', () => {

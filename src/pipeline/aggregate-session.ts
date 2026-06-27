@@ -55,6 +55,7 @@ const CATEGORY_META: Record<string, { label: string; group: ContextCategory['gro
   memory:       { label: '记忆文件',          group: 'core' },
   mcp:          { label: 'MCP 配置',          group: 'core' },
   reminders:    { label: '周期提醒',          group: 'core' },
+  userWrapper:  { label: '用户消息包装',      group: 'core' },
   thinking:     { label: '思考过程',          group: 'io' },
   asstText:     { label: '助手输出',          group: 'io' },
   toolCalls:    { label: '工具调用',          group: 'io' },
@@ -63,7 +64,7 @@ const CATEGORY_META: Record<string, { label: string; group: ContextCategory['gro
   subagent:     { label: '子代理',            group: 'convo' },
 };
 
-const ESTIMATED_KEYS = new Set(['sysPrompt', 'tool_defs', 'skills', 'memory', 'mcp', 'reminders']);
+const ESTIMATED_KEYS = new Set(['sysPrompt', 'tool_defs', 'skills', 'memory', 'mcp', 'reminders', 'userWrapper']);
 
 // ============================================================================
 // Main aggregation function

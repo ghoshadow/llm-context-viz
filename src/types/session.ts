@@ -241,6 +241,7 @@ export interface TurnDelta {
   asstText?: number;
   toolCalls?: number;
   toolResults?: number;
+  userWrapper?: number;
   userMsgs?: number;
   subagent?: number;
 }

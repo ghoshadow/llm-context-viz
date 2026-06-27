@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
+import { homedir } from 'os';
 import {
   type AgentSource,
   type LegacyClaudeDetails,
@@ -51,6 +52,10 @@ export interface WriteCalibrationConstantsInput {
   rawLogPath?: string;
 }
 
+export interface ReadCalibrationConstantsOptions {
+  homeDir?: string;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -92,10 +97,68 @@ function ensureWritableTraceDir(cwd: string, source: AgentSource): string {
   return traceDir;
 }
 
-function defaultNormalizedConstants(cwd: string, source: AgentSource, path: string): NormalizedCalibration {
+function readOptionalFile(path: string): string {
+  try {
+    return existsSync(path) ? readFileSync(path, 'utf-8') : '';
+  } catch {
+    return '';
+  }
+}
+
+export function readClaudeMemoryConstants(cwd: string, homeDir = homedir()): Pick<NormalizedCalibration, 'categories' | 'details'> {
+  const normalized = normalizeProjectCwd(cwd);
+  const globalPath = join(homeDir, '.claude', 'CLAUDE.md');
+  const projectPath = join(normalized, '.claude', 'CLAUDE.md');
+  const globalText = readOptionalFile(globalPath);
+  const projectText = readOptionalFile(projectPath);
+
+  const categories: NormalizedCalibration['categories'] = {};
+  const details: Record<string, string> = {};
+  if (globalText.length > 0) {
+    categories.memoryGlobal = { chars: globalText.length, detailKey: 'claude.memory.global', origin: 'default' };
+    details['claude.memory.global'] = globalText;
+  }
+  if (projectText.length > 0) {
+    categories.memoryProject = { chars: projectText.length, detailKey: 'claude.memory.project', origin: 'default' };
+    details['claude.memory.project'] = projectText;
+  }
+  return {
+    categories,
+    ...(Object.keys(details).length > 0 ? { details } : {}),
+  };
+}
+
+function withClaudeMemoryConstants(
+  calibration: NormalizedCalibration,
+  homeDir?: string,
+): NormalizedCalibration {
+  if (calibration.source !== 'claude') return calibration;
+  const memory = readClaudeMemoryConstants(calibration.cwd || '', homeDir);
+  const categories = { ...calibration.categories };
+  if (!categories.memoryGlobal && memory.categories.memoryGlobal) {
+    categories.memoryGlobal = memory.categories.memoryGlobal;
+  }
+  if (!categories.memoryProject && memory.categories.memoryProject) {
+    categories.memoryProject = memory.categories.memoryProject;
+  }
+  const details = { ...(calibration.details ?? {}) };
+  if (!details['claude.memory.global'] && memory.details?.['claude.memory.global']) {
+    details['claude.memory.global'] = memory.details['claude.memory.global'];
+  }
+  if (!details['claude.memory.project'] && memory.details?.['claude.memory.project']) {
+    details['claude.memory.project'] = memory.details['claude.memory.project'];
+  }
+  return {
+    ...calibration,
+    categories,
+    ...(Object.keys(details).length ? { details } : {}),
+  };
+}
+
+function defaultNormalizedConstants(cwd: string, source: AgentSource, path: string, homeDir?: string): NormalizedCalibration {
   if (source === 'claude') {
     const converted = legacyClaudeSummaryToNormalized(DEFAULT_CALIBRATION_CONSTANTS);
-    return {
+    return withClaudeMemoryConstants({
       schemaVersion: 1,
       source,
       constantsSource: 'defaults',
@@ -103,7 +166,7 @@ function defaultNormalizedConstants(cwd: string, source: AgentSource, path: stri
       cwd,
       note: '当前项目尚未应用校准常量。',
       ...converted,
-    };
+    }, homeDir);
   }
 
   return {
@@ -122,16 +185,17 @@ function normalizeLoadedConstants(
   source: AgentSource,
   cwd: string,
   path: string,
+  homeDir?: string,
 ): NormalizedCalibration {
   if (data?.schemaVersion === 1 && data?.categories && typeof data.categories === 'object') {
-    return {
+    return withClaudeMemoryConstants({
       ...data,
       schemaVersion: 1,
       source,
       constantsSource: 'project',
       path,
       cwd,
-    };
+    }, homeDir);
   }
 
   if (source === 'claude') {
@@ -140,7 +204,7 @@ function normalizeLoadedConstants(
       TOOL_DEFS_FALLBACK_CHARS: Number(data?.TOOL_DEFS_FALLBACK_CHARS ?? DEFAULT_CALIBRATION_CONSTANTS.TOOL_DEFS_FALLBACK_CHARS),
       SYSTEM_REMINDER_CHROME_CHARS: Number(data?.SYSTEM_REMINDER_CHROME_CHARS ?? DEFAULT_CALIBRATION_CONSTANTS.SYSTEM_REMINDER_CHROME_CHARS),
     }, data?.details);
-    return {
+    return withClaudeMemoryConstants({
       schemaVersion: 1,
       source,
       constantsSource: 'project',
@@ -150,19 +214,23 @@ function normalizeLoadedConstants(
       ccVersion: data?.ccVersion,
       model: data?.model,
       ...converted,
-    };
+    }, homeDir);
   }
 
-  return defaultNormalizedConstants(cwd, source, path);
+  return defaultNormalizedConstants(cwd, source, path, homeDir);
 }
 
-export function readCalibrationConstants(cwd: string, source: AgentSource = 'claude'): NormalizedCalibration {
+export function readCalibrationConstants(
+  cwd: string,
+  source: AgentSource = 'claude',
+  options: ReadCalibrationConstantsOptions = {},
+): NormalizedCalibration {
   const agent = normalizeAgentSource(source);
   const normalized = normalizeProjectCwd(cwd);
   const path = resolveProjectConstantsPath(normalized, agent);
-  if (!existsSync(path)) return defaultNormalizedConstants(normalized, agent, path);
+  if (!existsSync(path)) return defaultNormalizedConstants(normalized, agent, path, options.homeDir);
   const data = JSON.parse(readFileSync(path, 'utf-8'));
-  return normalizeLoadedConstants(data, agent, normalized, path);
+  return normalizeLoadedConstants(data, agent, normalized, path, options.homeDir);
 }
 
 export function writeCalibrationConstants(cwd: string, input: WriteCalibrationConstantsInput): NormalizedCalibration {
@@ -170,6 +238,7 @@ export function writeCalibrationConstants(cwd: string, input: WriteCalibrationCo
   const normalized = normalizeProjectCwd(cwd);
   ensureWritableTraceDir(normalized, agent);
   const path = resolveProjectConstantsPath(normalized, agent);
+  const memory = agent === 'claude' ? readClaudeMemoryConstants(normalized) : null;
   const data: NormalizedCalibration = {
     schemaVersion: 1,
     source: agent,
@@ -182,11 +251,14 @@ export function writeCalibrationConstants(cwd: string, input: WriteCalibrationCo
     model: input.model || 'unknown',
     wireApi: input.wireApi,
     rawLogPath: input.rawLogPath,
-    categories: input.summary.categories,
+    categories: {
+      ...(memory?.categories ?? {}),
+      ...input.summary.categories,
+    },
     ...(input.summary.usage ? { usage: input.summary.usage } : {}),
     ...(input.summary.toolNames ? { toolNames: input.summary.toolNames } : {}),
     ...(input.summary.hashes ? { hashes: input.summary.hashes } : {}),
-    ...(input.details ? { details: input.details } : {}),
+    ...((input.details || memory?.details) ? { details: { ...(memory?.details ?? {}), ...(input.details ?? {}) } } : {}),
   };
 
   try {

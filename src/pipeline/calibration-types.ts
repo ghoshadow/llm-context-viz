@@ -5,6 +5,8 @@ export type CalibrationCategoryKey =
   | 'tool_defs'
   | 'skills'
   | 'memory'
+  | 'memoryGlobal'
+  | 'memoryProject'
   | 'mcp'
   | 'reminders'
   | 'userMsgs';
@@ -68,6 +70,13 @@ export function categoryChars(
 ): number {
   const chars = calibration?.categories?.[key]?.chars;
   return typeof chars === 'number' && Number.isFinite(chars) && chars > 0 ? chars : 0;
+}
+
+export function memoryCategoryChars(
+  calibration: Pick<NormalizedCalibrationSummary, 'categories'> | null | undefined,
+): number {
+  const split = categoryChars(calibration, 'memoryGlobal') + categoryChars(calibration, 'memoryProject');
+  return split > 0 ? split : categoryChars(calibration, 'memory');
 }
 
 export function legacyClaudeSummaryToNormalized(
