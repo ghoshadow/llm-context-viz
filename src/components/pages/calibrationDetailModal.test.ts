@@ -33,6 +33,15 @@ test('builds stable translation cache slot for calibration detail', () => {
   });
 });
 
+test('builds stable translation cache slot for arbitrary calibration detail keys', () => {
+  const first = getCalibrationDetailTranslationSlot('codex.tools', 'alpha');
+  const second = getCalibrationDetailTranslationSlot('codex.tools', 'alpha');
+  const third = getCalibrationDetailTranslationSlot('codex.instructions', 'alpha');
+
+  assert.deepEqual(first, second);
+  assert.notEqual(first.sectionIndex, third.sectionIndex);
+});
+
 test('renders system prompt detail as plain text and unwraps legacy text fence', () => {
   const legacy = [
     '# SYS_PROMPT_FALLBACK_CHARS',
@@ -97,5 +106,21 @@ test('keeps tool detail as markdown for json code rendering', () => {
   assert.deepEqual(getCalibrationDetailDisplay('TOOL_DEFS_FALLBACK_CHARS', detail), {
     text: detail,
     markdown: true,
+  });
+});
+
+test('renders tool detail as markdown for any tool_defs detail key', () => {
+  const detail = ['# codex.tools', '', '字符数: 10', '', '```json', '{"name":"Read"}', '```'].join('\n');
+  assert.deepEqual(getCalibrationDetailDisplay('codex.tools', detail), {
+    text: detail,
+    markdown: true,
+  });
+});
+
+test('renders non-tool details as plain text', () => {
+  const detail = ['# codex.instructions', '', '字符数: 10', '', 'hello'].join('\n');
+  assert.deepEqual(getCalibrationDetailDisplay('codex.instructions', detail), {
+    text: 'hello',
+    markdown: false,
   });
 });

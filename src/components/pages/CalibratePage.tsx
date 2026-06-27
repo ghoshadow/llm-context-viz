@@ -12,6 +12,15 @@ import {
   getCalibrationDetailLayout,
   getCalibrationDetailTranslationSlot,
 } from './calibrationDetailModal';
+import {
+  type AgentSource,
+  type CalibrationCategoryMap,
+  type CalibrationDetails,
+  type NormalizedCalibrationSummaryLike,
+  buildCalibrationCategoryRows,
+  getNormalizedCalibrationSummary,
+  sumCalibrationCategoryChars,
+} from './calibrationCategories';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,41 +45,39 @@ interface UserMessageParts {
 }
 
 interface ExtractedResult {
-  sourceFile: string;
-  ccVersion: string;
-  model: string;
-  systemBlocks: SystemBlocks;
-  toolsChars: number;
-  userMessage: UserMessageParts;
-  firstRequestTokens: number;
-  summary: {
-    SYS_PROMPT_FALLBACK_CHARS: number;
-    TOOL_DEFS_FALLBACK_CHARS: number;
-    SYSTEM_REMINDER_CHROME_CHARS: number;
-  };
-  details?: ConstantDetails;
-}
-
-type ConstantKey =
-  | 'SYS_PROMPT_FALLBACK_CHARS'
-  | 'TOOL_DEFS_FALLBACK_CHARS'
-  | 'SYSTEM_REMINDER_CHROME_CHARS';
-
-type ConstantDetails = Partial<Record<ConstantKey, string>>;
-
-interface CurrentConstants {
-  source?: 'project' | 'defaults';
+  schemaVersion?: 1;
+  source?: AgentSource;
+  constantsSource?: 'project' | 'defaults';
   path?: string;
   cwd?: string;
   note?: string;
-  SYS_PROMPT_FALLBACK_CHARS: number;
-  TOOL_DEFS_FALLBACK_CHARS: number;
-  SYSTEM_REMINDER_CHROME_CHARS: number;
-  details?: ConstantDetails;
   appliedAt?: string;
+  sourceFile?: string;
   ccVersion?: string;
+  cliVersion?: string;
   model?: string;
+  wireApi?: string;
+  rawLogPath?: string;
+  categories?: CalibrationCategoryMap;
+  usage?: NormalizedCalibrationSummaryLike['usage'];
+  toolNames?: string[];
+  hashes?: Record<string, string>;
+  summary?: NormalizedCalibrationSummaryLike | {
+    SYS_PROMPT_FALLBACK_CHARS?: number;
+    TOOL_DEFS_FALLBACK_CHARS?: number;
+    SYSTEM_REMINDER_CHROME_CHARS?: number;
+  };
+  systemBlocks?: SystemBlocks;
+  toolsChars?: number;
+  userMessage?: UserMessageParts;
+  firstRequestTokens?: number;
+  details?: ConstantDetails;
 }
+
+type ConstantKey = string;
+type ConstantDetails = Partial<CalibrationDetails>;
+type CurrentConstants = ExtractedResult;
+type CalibrationUiSource = Extract<AgentSource, 'claude' | 'codex'>;
 
 type AutoCalibrationStatus =
   | 'starting'
@@ -188,7 +195,7 @@ export default function CalibratePage() {
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [currentConstants, setCurrentConstants] = useState<CurrentConstants | null>(null);
-  const [calibrationSource, setCalibrationSource] = useState<'claude' | 'codex'>('claude');
+  const [calibrationSource, setCalibrationSource] = useState<CalibrationUiSource>('claude');
   const [autoPrompt, setAutoPrompt] = useState('say hi');
   const [autoTargetHost, setAutoTargetHost] = useState('http://127.0.0.1:15721');
   const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
@@ -199,6 +206,17 @@ export default function CalibratePage() {
   const [detailTranslateError, setDetailTranslateError] = useState<string | null>(null);
   const [detailCopied, setDetailCopied] = useState(false);
   const permissionNotice = getCalibrationFailureNotice(autoJob);
+  const resultSummary = useMemo(() => getNormalizedCalibrationSummary(result), [result]);
+  const resultRows = useMemo(
+    () => buildCalibrationCategoryRows(resultSummary.categories, result?.details),
+    [result?.details, resultSummary.categories],
+  );
+  const resultTotalChars = useMemo(() => sumCalibrationCategoryChars(resultRows), [resultRows]);
+  const currentSummary = useMemo(() => getNormalizedCalibrationSummary(currentConstants), [currentConstants]);
+  const currentRows = useMemo(
+    () => buildCalibrationCategoryRows(currentSummary.categories, currentConstants?.details),
+    [currentConstants?.details, currentSummary.categories],
+  );
 
   // Load current constants on mount
   useEffect(() => {
@@ -279,10 +297,13 @@ export default function CalibratePage() {
       await put('/calibrate/apply', {
         source: calibrationSource,
         cwd: sessionCwd,
-        summary: result.summary,
+        summary: resultSummary,
         details: result.details,
         ccVersion: result.ccVersion,
+        cliVersion: result.cliVersion,
         model: result.model,
+        wireApi: result.wireApi,
+        rawLogPath: result.rawLogPath ?? autoJob?.logFile,
       });
       setApplied(true);
       if (sessionCwd) {
@@ -295,13 +316,12 @@ export default function CalibratePage() {
     } finally {
       setApplying(false);
     }
-  }, [calibrationSource, result, sessionCwd]);
+  }, [autoJob?.logFile, calibrationSource, result, resultSummary, sessionCwd]);
 
   // Token estimate
   const estTok = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
 
-  const openDetail = useCallback((key: ConstantKey, details: ConstantDetails | undefined, title: string) => {
-    const text = details?.[key];
+  const openDetail = useCallback((key: ConstantKey, text: string | undefined, title: string) => {
     if (!text) return;
     setDetailModal({ key, title, text });
     setDetailCopied(false);
@@ -482,7 +502,7 @@ export default function CalibratePage() {
           </div>
           <h1>更新系统级上下文常量</h1>
           <p className="subtitle">
-            Claude Code 版本更新后，系统提示词、工具定义等上下文常量可能变化。使用无 sudo 本地代理自动截获一次请求，并将日志固定写入项目内 .claude-trace/。
+            Claude Code 或 Codex 版本更新后，系统提示词、工具定义等上下文常量可能变化。使用无 sudo 本地代理自动截获一次请求，并将原始 API 日志固定写入项目内 trace 目录。
           </p>
         </div>
         <div style={{ display: 'flex', gap: 9, fontFamily: MONO, fontSize: 12 }}>
@@ -500,7 +520,7 @@ export default function CalibratePage() {
       <section style={{ marginTop: 28 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>1. 自动截获 API 请求</h2>
         <p style={{ fontSize: 13, color: S.textDesc3, marginBottom: 16, lineHeight: 1.6 }}>
-          使用无 sudo 本地代理启动一次 Claude Code，请求成功后会自动解析捕获日志。日志固定写入当前会话项目的 .claude-trace/ 目录。
+          使用无 sudo 本地代理启动一次所选 agent，请求成功后会自动解析捕获日志。日志固定写入当前会话项目对应的 trace 目录。
         </p>
         <div style={{
           border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '16px 18px',
@@ -632,89 +652,84 @@ export default function CalibratePage() {
 
           {/* Meta */}
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
-            <StatCard label="Claude Code 版本" value={result.ccVersion} />
-            <StatCard label="模型" value={result.model} />
-            <StatCard label="首次请求 Token" value={fmt(result.firstRequestTokens)} accent="oklch(0.74 0.13 60)" />
-            <StatCard label="工具定义字符数" value={(result.toolsChars / 1000).toFixed(1) + 'K'} unit={`≈ ${estTok(result.toolsChars)} tok`} />
+            <StatCard label="来源" value={result.source === 'codex' ? 'Codex' : 'Claude Code'} />
+            <StatCard label="CLI 版本" value={result.cliVersion || result.ccVersion || '-'} />
+            <StatCard label="模型" value={result.model || '-'} />
+            <StatCard
+              label="首次请求 Token"
+              value={fmt(resultSummary.usage?.firstRequestInputTokens ?? result.firstRequestTokens ?? 0)}
+              accent="oklch(0.74 0.13 60)"
+            />
+            <StatCard
+              label="总字符数"
+              value={(resultTotalChars / 1000).toFixed(1) + 'K'}
+              unit={`≈ ${estTok(resultTotalChars)} tok`}
+            />
           </div>
 
           {/* System blocks */}
-          <div style={{
-            border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
-            background: 'oklch(0.185 0.009 265)', marginBottom: 16,
-          }}>
-            <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>System Blocks</h3>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <StatCard label="Billing Header" value={result.systemBlocks.billing + ''} unit="chars" />
-              <StatCard label="Agent Identity" value={result.systemBlocks.agentIdentity + ''} unit="chars" />
-              <StatCard label="Harness Prompt" value={(result.systemBlocks.harness / 1000).toFixed(1) + 'K'} unit={`${result.systemBlocks.harness} chars`} />
-              <StatCard label="总计" value={(result.summary.SYS_PROMPT_FALLBACK_CHARS / 1000).toFixed(1) + 'K'} unit="chars" accent="oklch(0.67 0.15 25)" />
+          {result.systemBlocks && (
+            <div style={{
+              border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
+              background: 'oklch(0.185 0.009 265)', marginBottom: 16,
+            }}>
+              <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>System Blocks</h3>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <StatCard label="Billing Header" value={result.systemBlocks.billing + ''} unit="chars" />
+                <StatCard label="Agent Identity" value={result.systemBlocks.agentIdentity + ''} unit="chars" />
+                <StatCard label="Harness Prompt" value={(result.systemBlocks.harness / 1000).toFixed(1) + 'K'} unit={`${result.systemBlocks.harness} chars`} />
+                <StatCard label="总计" value={(resultTotalChars / 1000).toFixed(1) + 'K'} unit="chars" accent="oklch(0.67 0.15 25)" />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* User message breakdown */}
-          <div style={{
-            border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
-            background: 'oklch(0.185 0.009 265)', marginBottom: 16,
-          }}>
-            <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>&lt;system-reminder&gt; 包裹体</h3>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <StatCard label="总字符数" value={result.userMessage.total + ''} unit="chars" />
-              <StatCard label="Chrome/包装" value={result.userMessage.chrome + ''} unit="chars" />
-              <StatCard label="Global CLAUDE.md" value={(result.userMessage.globalClaudeMd / 1000).toFixed(1) + 'K'} unit="chars" />
-              {result.userMessage.projectClaudeMd > 0 && (
-                <StatCard label="Project CLAUDE.md" value={(result.userMessage.projectClaudeMd / 1000).toFixed(1) + 'K'} unit="chars" />
-              )}
-              {result.userMessage.mcpInstructions > 0 && (
-                <StatCard label="MCP 指令" value={result.userMessage.mcpInstructions + ''} unit="chars" />
-              )}
-              {result.userMessage.skillsListing > 0 && (
-                <StatCard label="技能列表" value={(result.userMessage.skillsListing / 1000).toFixed(1) + 'K'} unit="chars" />
-              )}
-              <StatCard label="日期/注记" value={result.userMessage.currentDate + ''} unit="chars" />
+          {result.userMessage && (
+            <div style={{
+              border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '18px 20px',
+              background: 'oklch(0.185 0.009 265)', marginBottom: 16,
+            }}>
+              <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>&lt;system-reminder&gt; 包裹体</h3>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <StatCard label="总字符数" value={result.userMessage.total + ''} unit="chars" />
+                <StatCard label="Chrome/包装" value={result.userMessage.chrome + ''} unit="chars" />
+                <StatCard label="Global CLAUDE.md" value={(result.userMessage.globalClaudeMd / 1000).toFixed(1) + 'K'} unit="chars" />
+                {result.userMessage.projectClaudeMd > 0 && (
+                  <StatCard label="Project CLAUDE.md" value={(result.userMessage.projectClaudeMd / 1000).toFixed(1) + 'K'} unit="chars" />
+                )}
+                {result.userMessage.mcpInstructions > 0 && (
+                  <StatCard label="MCP 指令" value={result.userMessage.mcpInstructions + ''} unit="chars" />
+                )}
+                {result.userMessage.skillsListing > 0 && (
+                  <StatCard label="技能列表" value={(result.userMessage.skillsListing / 1000).toFixed(1) + 'K'} unit="chars" />
+                )}
+                <StatCard label="日期/注记" value={result.userMessage.currentDate + ''} unit="chars" />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Summary: the three key constants */}
+          {/* Summary: normalized constants */}
           <div style={{
             border: `1px solid oklch(0.74 0.13 60 / 0.4)`, borderRadius: 13, padding: '18px 20px',
             background: 'oklch(0.74 0.13 60 / 0.08)', marginBottom: 16,
           }}>
             <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: 'oklch(0.74 0.13 60)' }}>将应用的常量</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-              <div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYS_PROMPT_FALLBACK_CHARS</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.SYS_PROMPT_FALLBACK_CHARS.toLocaleString()}</div>
-                  <DetailButton
-                    disabled={!result.details?.SYS_PROMPT_FALLBACK_CHARS}
-                    onClick={() => openDetail('SYS_PROMPT_FALLBACK_CHARS', result.details, '系统提示词内容')}
-                  />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+              {resultRows.map((row) => (
+                <div key={row.key}>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>{row.label}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{row.chars.toLocaleString()}</div>
+                    <DetailButton
+                      disabled={!row.detail}
+                      onClick={() => openDetail(row.detailKey, row.detail, row.label)}
+                    />
+                  </div>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>
+                    {row.detailKey} · ≈ {estTok(row.chars)} tok
+                  </div>
                 </div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>≈ {estTok(result.summary.SYS_PROMPT_FALLBACK_CHARS)} tok</div>
-              </div>
-              <div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>TOOL_DEFS_FALLBACK_CHARS</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.TOOL_DEFS_FALLBACK_CHARS.toLocaleString()}</div>
-                  <DetailButton
-                    disabled={!result.details?.TOOL_DEFS_FALLBACK_CHARS}
-                    onClick={() => openDetail('TOOL_DEFS_FALLBACK_CHARS', result.details, '工具定义 JSON')}
-                  />
-                </div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>≈ {estTok(result.summary.TOOL_DEFS_FALLBACK_CHARS)} tok</div>
-              </div>
-              <div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYSTEM_REMINDER_CHROME_CHARS</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{result.summary.SYSTEM_REMINDER_CHROME_CHARS.toLocaleString()}</div>
-                  <DetailButton
-                    disabled={!result.details?.SYSTEM_REMINDER_CHROME_CHARS}
-                    onClick={() => openDetail('SYSTEM_REMINDER_CHROME_CHARS', result.details, 'system-reminder 包装内容')}
-                  />
-                </div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>≈ {estTok(result.summary.SYSTEM_REMINDER_CHROME_CHARS)} tok</div>
-              </div>
+              ))}
             </div>
           </div>
 
@@ -735,7 +750,7 @@ export default function CalibratePage() {
             </button>
             {!applied && (
               <span style={{ fontSize: 12, color: S.textDesc3 }}>
-                将常量写入当前项目的 .claude-trace/ 目录
+                将常量写入当前项目的 {calibrationSource === 'codex' ? '.codex-trace/' : '.claude-trace/'} 目录
               </span>
             )}
           </div>
@@ -756,11 +771,11 @@ export default function CalibratePage() {
           ) : currentConstants ? (
             <>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
-                <StatCard label="来源" value={currentConstants.source === 'project' ? '项目校准' : '内置默认'} />
+                <StatCard label="来源" value={currentConstants.constantsSource === 'project' ? '项目校准' : '内置默认'} />
                 {currentConstants.appliedAt && (
                   <StatCard label="校准时间" value={new Date(currentConstants.appliedAt).toLocaleString()} />
                 )}
-                <StatCard label="CC 版本" value={currentConstants.ccVersion || '-'} />
+                <StatCard label="CLI 版本" value={currentConstants.cliVersion || currentConstants.ccVersion || '-'} />
                 <StatCard label="模型" value={currentConstants.model || '-'} />
               </div>
               <div style={{ fontSize: 11, color: S.textMuted, fontFamily: MONO, wordBreak: 'break-all', marginBottom: 14 }}>
@@ -771,37 +786,20 @@ export default function CalibratePage() {
                   {currentConstants.note}
                 </div>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                <div>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYS_PROMPT_FALLBACK_CHARS</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYS_PROMPT_FALLBACK_CHARS.toLocaleString()}</div>
-                    <DetailButton
-                      disabled={!currentConstants.details?.SYS_PROMPT_FALLBACK_CHARS}
-                      onClick={() => openDetail('SYS_PROMPT_FALLBACK_CHARS', currentConstants.details, '系统提示词内容')}
-                    />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+                {currentRows.map((row) => (
+                  <div key={row.key}>
+                    <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>{row.label}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{row.chars.toLocaleString()}</div>
+                      <DetailButton
+                        disabled={!row.detail}
+                        onClick={() => openDetail(row.detailKey, row.detail, row.label)}
+                      />
+                    </div>
+                    <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>{row.detailKey}</div>
                   </div>
-                </div>
-                <div>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>TOOL_DEFS_FALLBACK_CHARS</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.TOOL_DEFS_FALLBACK_CHARS.toLocaleString()}</div>
-                    <DetailButton
-                      disabled={!currentConstants.details?.TOOL_DEFS_FALLBACK_CHARS}
-                      onClick={() => openDetail('TOOL_DEFS_FALLBACK_CHARS', currentConstants.details, '工具定义 JSON')}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>SYSTEM_REMINDER_CHROME_CHARS</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{currentConstants.SYSTEM_REMINDER_CHROME_CHARS.toLocaleString()}</div>
-                    <DetailButton
-                      disabled={!currentConstants.details?.SYSTEM_REMINDER_CHROME_CHARS}
-                      onClick={() => openDetail('SYSTEM_REMINDER_CHROME_CHARS', currentConstants.details, 'system-reminder 包装内容')}
-                    />
-                  </div>
-                </div>
+                ))}
               </div>
             </>
           ) : (
