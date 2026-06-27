@@ -74,12 +74,20 @@ function timestampForFile(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, "-").replace("T", "-").slice(0, 19);
 }
 
-function makeLogFilePath(cwd, date = new Date()) {
-  return path.join(path.resolve(cwd), ".claude-trace", `api-log-${timestampForFile(date)}.jsonl`);
+function normalizeTraceOptions(options = {}) {
+  return {
+    traceDirName: options.traceDirName || ".claude-trace",
+    logPrefix: options.logPrefix || "api-log",
+  };
 }
 
-function getProjectLogFilePath(cwd, date = new Date()) {
-  const logFile = makeLogFilePath(cwd, date);
+function makeLogFilePath(cwd, date = new Date(), options = {}) {
+  const opts = normalizeTraceOptions(options);
+  return path.join(path.resolve(cwd), opts.traceDirName, `${opts.logPrefix}-${timestampForFile(date)}.jsonl`);
+}
+
+function getProjectLogFilePath(cwd, date = new Date(), options = {}) {
+  const logFile = makeLogFilePath(cwd, date, options);
   const traceDir = path.dirname(logFile);
   try {
     ensureDir(traceDir);
@@ -136,6 +144,7 @@ module.exports = {
   cleanForwardHeaders,
   tryParse,
   ensureDir,
+  normalizeTraceOptions,
   makeLogFilePath,
   getProjectLogFilePath,
   resolveCaptureTarget,

@@ -56,6 +56,18 @@ test('makeLogFilePath stays under cwd .claude-trace', () => {
   );
 });
 
+test('makeLogFilePath supports Codex trace directory and prefix', () => {
+  const cwd = path.resolve('/tmp/example-project');
+  const logFile = makeLogFilePath(cwd, new Date('2026-06-26T01:02:03.456Z'), {
+    traceDirName: '.codex-trace',
+    logPrefix: 'codex-api-log',
+  });
+  assert.equal(
+    logFile,
+    path.join(cwd, '.codex-trace', 'codex-api-log-2026-06-26-01-02-03.jsonl'),
+  );
+});
+
 test('getProjectLogFilePath fails when project trace path is not writable', () => {
   const tmpRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'cal-proxy-'));
   const project = path.join(tmpRoot, 'demo-project');
