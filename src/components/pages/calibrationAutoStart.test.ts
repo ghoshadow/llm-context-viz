@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildAutoCalibrationStartBody,
-  captureTargetHelpText,
+  captureTargetPlaceholderText,
   defaultCalibrationPromptInput,
   defaultCalibrationTargetInput,
 } from './calibrationAutoStart';
@@ -17,15 +17,15 @@ test('leaves Codex target empty so the server can read config.toml', () => {
   assert.equal(defaultCalibrationTargetInput('codex'), '');
 });
 
-test('explains empty Codex capture target behavior', () => {
-  assert.match(captureTargetHelpText('codex'), /留空/);
-  assert.equal(captureTargetHelpText('codex').includes('~/.codex/config.toml'), true);
-  assert.match(captureTargetHelpText('codex'), /覆盖/);
+test('uses concise Codex capture target placeholder', () => {
+  assert.equal(
+    captureTargetPlaceholderText('codex'),
+    '留空读取 ~/.codex/config.toml；填写可覆盖 Base URL',
+  );
 });
 
-test('keeps Claude capture target help focused on proxy targets', () => {
-  assert.match(captureTargetHelpText('claude'), /完整 Base URL/);
-  assert.match(captureTargetHelpText('claude'), /裸 host/);
+test('uses concise Claude capture target placeholder', () => {
+  assert.equal(captureTargetPlaceholderText('claude'), 'Base URL 或 host');
 });
 
 test('omits Codex targetHost when the input is empty', () => {

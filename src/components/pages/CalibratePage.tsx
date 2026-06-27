@@ -23,7 +23,7 @@ import {
 } from './calibrationCategories';
 import {
   buildAutoCalibrationStartBody,
-  captureTargetHelpText,
+  captureTargetPlaceholderText,
   defaultCalibrationPromptInput,
   defaultCalibrationTargetInput,
 } from './calibrationAutoStart';
@@ -535,9 +535,6 @@ export default function CalibratePage() {
           <div style={{ fontSize: 12, color: S.textMuted, fontFamily: MONO, wordBreak: 'break-all' }}>
             cwd: {sessionCwd || '未选择会话'}
           </div>
-          <div style={{ fontSize: 12, color: S.textDesc3, lineHeight: 1.5 }}>
-            {captureTargetHelpText(calibrationSource)}
-          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             {(['claude', 'codex'] as const).map((source) => (
               <button
@@ -583,15 +580,13 @@ export default function CalibratePage() {
                 value={autoTargetHost}
                 onChange={(e) => setAutoTargetHost(e.target.value)}
                 disabled={autoRunning}
+                placeholder={captureTargetPlaceholderText(calibrationSource)}
                 style={{
                   border: `1px solid ${S.borderColor}`, borderRadius: 8, padding: '10px 12px',
                   background: 'oklch(0.16 0.01 265)', color: S.textPrimary3, fontFamily: MONO,
                 }}
                 aria-label="捕获目标 host 或 base url"
               />
-              <span style={{ fontSize: 11, color: S.textMuted2, lineHeight: 1.45 }}>
-                {captureTargetHelpText(calibrationSource)}
-              </span>
             </label>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
