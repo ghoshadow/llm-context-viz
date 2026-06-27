@@ -181,7 +181,6 @@ export function initDb(): void {
       step_index INTEGER NOT NULL,
       section_index INTEGER NOT NULL DEFAULT 0,
       translated_text TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
       PRIMARY KEY (session_id, turn_index, step_index, section_index)
     );
 
@@ -365,4 +364,31 @@ export function migrate(): void {
     `);
     conn.pragma('user_version = 6');
   }
+
+  // v6 → v7: keep turn_translations for ordinary per-session text only.
+  if (userVersion < 7) {
+    migrateTurnTranslationsV7(conn);
+    conn.pragma('user_version = 7');
+  }
+}
+
+export function migrateTurnTranslationsV7(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TABLE turn_translations_v7 (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      turn_index INTEGER NOT NULL,
+      step_index INTEGER NOT NULL,
+      section_index INTEGER NOT NULL DEFAULT 0,
+      translated_text TEXT NOT NULL,
+      PRIMARY KEY (session_id, turn_index, step_index, section_index)
+    );
+
+    INSERT OR REPLACE INTO turn_translations_v7 (session_id, turn_index, step_index, section_index, translated_text)
+    SELECT session_id, turn_index, step_index, section_index, translated_text
+    FROM turn_translations
+    WHERE step_index != -100;
+
+    DROP TABLE turn_translations;
+    ALTER TABLE turn_translations_v7 RENAME TO turn_translations;
+  `);
 }
