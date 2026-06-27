@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  parseConstantTranslationSections,
   isConstantTranslationSlot,
   normalizeTranslationProjectKey,
   translateRequestText,
@@ -34,4 +35,10 @@ test('normalizes project translation cache keys by cwd and source', () => {
     project_cwd: '/tmp/project',
     source: 'claude',
   });
+});
+
+test('parses requested constant translation sections from query input', () => {
+  assert.deepEqual(parseConstantTranslationSections('1, 2, nope, 2'), [1, 2]);
+  assert.deepEqual(parseConstantTranslationSections(['3', '4,5']), [3, 4, 5]);
+  assert.deepEqual(parseConstantTranslationSections(undefined), []);
 });

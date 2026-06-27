@@ -364,7 +364,9 @@ export default function CalibratePage() {
     if (!detailModal || !detailTranslationSlot || !currentSessionId || currentTurnIndex == null) return;
     if (detailTranslations[detailModal.key]) return;
     let cancelled = false;
-    get<{ translations: Record<string, Record<string, string>> }>(`/sessions/${currentSessionId}/translations/${currentTurnIndex}`)
+    get<{ translations: Record<string, Record<string, string>> }>(
+      `/sessions/${currentSessionId}/translations/${currentTurnIndex}?constantSections=${detailTranslationSlot.sectionIndex}`,
+    )
       .then((res) => {
         const translated = res.translations?.[String(detailTranslationSlot.stepIndex)]?.[String(detailTranslationSlot.sectionIndex)];
         if (!cancelled && translated) {

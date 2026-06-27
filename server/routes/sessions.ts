@@ -258,6 +258,19 @@ export function normalizeTranslationProjectKey(
   };
 }
 
+export function parseConstantTranslationSections(value: unknown): number[] {
+  const rawValues = Array.isArray(value) ? value : [value];
+  const sections = new Set<number>();
+  for (const raw of rawValues) {
+    if (typeof raw !== 'string') continue;
+    for (const part of raw.split(',')) {
+      const parsed = Number.parseInt(part.trim(), 10);
+      if (Number.isFinite(parsed)) sections.add(parsed);
+    }
+  }
+  return [...sections];
+}
+
 router.post('/:id/translate', async (req, res) => {
   try {
     const { text, turnIndex, stepIndex, sectionIndex } = req.body || {};
@@ -333,6 +346,9 @@ router.get('/:id/translations/:turnIndex', (req, res) => {
   try {
     const { id: sessionId, turnIndex } = req.params;
     const db = getDb();
+    const session = db.prepare('SELECT id, cwd, model, filename, version FROM sessions WHERE id = ?').get(sessionId) as
+      | { id: string; cwd?: string | null; model?: string | null; filename?: string | null; version?: string | null }
+      | undefined;
     const rows = db.prepare(
       'SELECT step_index, section_index, translated_text FROM turn_translations WHERE session_id = ? AND turn_index = ?'
     ).all(sessionId!, parseInt(turnIndex!, 10)) as Array<{ step_index: number; section_index: number; translated_text: string }>;
@@ -342,6 +358,27 @@ router.get('/:id/translations/:turnIndex', (req, res) => {
       if (!map[r.step_index]) map[r.step_index] = {};
       map[r.step_index]![r.section_index] = r.translated_text;
     }
+
+    const constantSections = parseConstantTranslationSections(req.query.constantSections);
+    if (session?.cwd && constantSections.length > 0) {
+      const projectKey = normalizeTranslationProjectKey(session.cwd, getSessionSource(session));
+      const stmt = db.prepare(
+        'SELECT section_index, translated_text FROM project_constant_translations WHERE project_cwd = ? AND source = ? AND section_index = ?'
+      );
+      for (const sectionIndex of constantSections) {
+        if (map[-100]?.[sectionIndex]) continue;
+        const cached = stmt.get(projectKey.project_cwd, projectKey.source, sectionIndex) as
+          | { section_index: number; translated_text: string }
+          | undefined;
+        if (!cached) continue;
+        if (!map[-100]) map[-100] = {};
+        map[-100][sectionIndex] = cached.translated_text;
+        db.prepare(
+          'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
+        ).run(sessionId, parseInt(turnIndex!, 10), -100, sectionIndex, cached.translated_text);
+      }
+    }
+
     return res.json({ translations: map });
   } catch (err) {
     console.error('GET /:id/translations/:turnIndex error:', err);
