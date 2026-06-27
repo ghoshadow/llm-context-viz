@@ -20,6 +20,33 @@ test('keeps translated markdown heading on its own line', () => {
   );
 });
 
+test('keeps translated file header separated from following list', () => {
+  const translated = reassembleTranslatedSegments(
+    [
+      {
+        zh: false,
+        text: "Contents of /Users/link/.claude/CLAUDE.md (user's private global instructions for all projects):\n\n",
+      },
+      {
+        zh: true,
+        text: '- 输出超过 token 限制风险时，主动拆分回答或使用文件输出',
+      },
+    ],
+    [
+      "Contents of /Users/link/.claude/CLAUDE.md (user's private global instructions for all projects):",
+    ],
+  );
+
+  assert.equal(
+    translated,
+    [
+      "Contents of /Users/link/.claude/CLAUDE.md (user's private global instructions for all projects):",
+      '',
+      '- 输出超过 token 限制风险时，主动拆分回答或使用文件输出',
+    ].join('\n'),
+  );
+});
+
 test('keeps heading break when source heading has leading whitespace', () => {
   const translated = reassembleTranslatedSegments(
     [

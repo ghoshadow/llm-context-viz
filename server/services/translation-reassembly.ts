@@ -11,8 +11,13 @@ export function reassembleTranslatedSegments(
   const resultParts: string[] = [];
   let lastEndsWithNewline = true;
 
-  for (const seg of segments) {
-    const part = seg.zh ? seg.text : translatedSegments[ti++] ?? seg.text;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]!;
+    const part = preserveTrailingStructuralNewlines(
+      seg.zh ? seg.text : translatedSegments[ti++] ?? seg.text,
+      seg.text,
+      segments[i + 1]?.text,
+    );
     if (needsLeadingNewline(seg.text, part, lastEndsWithNewline)) {
       resultParts.push('\n');
       lastEndsWithNewline = true;
@@ -22,6 +27,21 @@ export function reassembleTranslatedSegments(
   }
 
   return resultParts.join('').replace(/\n{3,}/g, '\n\n');
+}
+
+function preserveTrailingStructuralNewlines(
+  text: string,
+  sourceText: string,
+  nextSourceText?: string,
+): string {
+  if (text.endsWith('\n')) return text;
+  if (sourceText.endsWith('\n\n') && startsWithMarkdownList(nextSourceText)) return text.trimEnd() + '\n\n';
+  if (sourceText.endsWith('\n')) return text.trimEnd() + '\n';
+  return text;
+}
+
+function startsWithMarkdownList(text?: string): boolean {
+  return /^(\s*)([-*+]|\d+[.)])\s+/.test(text ?? '');
 }
 
 function needsLeadingNewline(sourceText: string, text: string, lastEndsWithNewline: boolean): boolean {
