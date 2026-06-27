@@ -14,7 +14,6 @@ const TRANSLATION_SYSTEM_PROMPT = `你是一位专业的技术文档翻译。请
 interface TranslationEnv {
   LLM_API_KEY?: string;
   LLM_BASE_URL?: string;
-  TRANSLATION_API_KEY?: string;
   TRANSLATION_BASE_URL?: string;
   TRANSLATION_MAX_TOKENS?: string;
   TRANSLATION_MODEL?: string;
@@ -33,8 +32,8 @@ export interface TranslationCallOptions {
 }
 
 export function resolveTranslationRequestConfig(env: TranslationEnv = process.env): TranslationRequestConfig {
-  const apiKey = env.TRANSLATION_API_KEY || env.LLM_API_KEY;
-  if (!apiKey) throw new Error('未设置 TRANSLATION_API_KEY 或 LLM_API_KEY 环境变量');
+  const apiKey = env.LLM_API_KEY;
+  if (!apiKey) throw new Error('未设置 LLM_API_KEY 环境变量');
 
   return {
     apiKey,

@@ -18,12 +18,12 @@ test('resolves direct translation API config without using shared agent defaults
   assert.equal(config.maxTokens, undefined);
 });
 
-test('does not read DeepSeek-specific API key for translation requests', () => {
+test('uses only the shared LLM API key for translation requests', () => {
   assert.throws(
     () => resolveTranslationRequestConfig({
-      DEEPSEEK_API_KEY: 'deepseek-key',
+      TRANSLATION_API_KEY: 'translation-key',
     }),
-    /未设置 TRANSLATION_API_KEY 或 LLM_API_KEY 环境变量/,
+    /未设置 LLM_API_KEY 环境变量/,
   );
 });
 
