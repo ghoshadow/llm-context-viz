@@ -10,6 +10,20 @@ import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 const DEFAULT_MODEL = 'deepseek-v4-pro';
 const DEFAULT_BASE_URL = 'https://api.deepseek.com/anthropic';
 
+export interface LLMCallOptions {
+  model?: string;
+}
+
+export function resolveLLMRequestConfig(
+  env: Pick<NodeJS.ProcessEnv, 'LLM_MODEL' | 'LLM_BASE_URL'>,
+  options: LLMCallOptions = {},
+): { model: string; baseUrl: string } {
+  return {
+    model: options.model || env.LLM_MODEL || DEFAULT_MODEL,
+    baseUrl: env.LLM_BASE_URL || DEFAULT_BASE_URL,
+  };
+}
+
 /**
  * Send a single-turn prompt to the LLM and return the concatenated text reply.
  *
@@ -17,10 +31,9 @@ const DEFAULT_BASE_URL = 'https://api.deepseek.com/anthropic';
  * The caller is responsible for catching errors and translating them into
  * appropriate HTTP responses.
  */
-export async function callLLM(prompt: string): Promise<string> {
-  const model = process.env.LLM_MODEL || DEFAULT_MODEL;
+export async function callLLM(prompt: string, options: LLMCallOptions = {}): Promise<string> {
+  const { model, baseUrl } = resolveLLMRequestConfig(process.env, options);
   const apiKey = process.env.LLM_API_KEY;
-  const baseUrl = process.env.LLM_BASE_URL || DEFAULT_BASE_URL;
 
   if (!apiKey) throw new Error('未设置 LLM_API_KEY 环境变量');
 

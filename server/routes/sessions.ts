@@ -12,6 +12,7 @@ import ontologyRouter from './ontology';
 import { parseTurnListPagination } from './pagination';
 
 const router = Router();
+const TRANSLATION_MODEL = 'deepseek-v4-flash';
 
 // ============================================================================
 // Mount ontology sub-router
@@ -347,7 +348,7 @@ ${items}`;
 
     let response: string;
     try {
-      response = await callLLM(prompt);
+      response = await callLLM(prompt, { model: TRANSLATION_MODEL });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: '翻译失败: ' + message });
