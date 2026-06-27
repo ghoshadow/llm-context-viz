@@ -1,6 +1,6 @@
 const DEFAULT_TRANSLATION_MODEL = 'deepseek-v4-flash';
 const DEFAULT_TRANSLATION_BASE_URL = 'https://api.deepseek.com/anthropic';
-const TRANSLATION_MAX_TOKENS = 8192;
+const TRANSLATION_MAX_TOKENS = 1_280_000;
 const ANTHROPIC_VERSION = '2023-06-01';
 
 interface TranslationEnv {

@@ -49,7 +49,7 @@ test('posts Anthropic messages request and returns concatenated text', async () 
 
   const body = JSON.parse(String(calls[0]!.init.body));
   assert.equal(body.model, 'deepseek-v4-flash');
-  assert.equal(body.max_tokens, 8192);
+  assert.equal(body.max_tokens, 1280000);
   assert.deepEqual(body.messages, [{ role: 'user', content: 'Translate me' }]);
 });
 
