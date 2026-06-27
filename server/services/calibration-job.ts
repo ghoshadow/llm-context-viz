@@ -10,6 +10,7 @@ import { normalizeAgentSource } from '../../src/pipeline/calibration-types';
 import { extractConstants } from '../../src/pipeline/extract-constants';
 import { extractCodexConstants } from '../../src/pipeline/extract-codex-constants';
 import { buildCalibrationProxyArgs } from './calibration-launchers';
+import { readClaudeBaseUrl } from './claude-config';
 import { readCodexBaseUrl } from './codex-config';
 
 type ProxyUtils = {
@@ -118,8 +119,12 @@ export function defaultCalibrationPrompt(source: AgentSource): string {
   return source === 'codex' ? 'Calibration probe: reply with "ok".' : 'say hi';
 }
 
-export function defaultCalibrationTarget(source: AgentSource, readBaseUrl = readCodexBaseUrl): string {
-  return source === 'codex' ? readBaseUrl() : 'api.deepseek.com';
+export function defaultCalibrationTarget(
+  source: AgentSource,
+  readCodexTarget = readCodexBaseUrl,
+  readClaudeTarget = readClaudeBaseUrl,
+): string {
+  return source === 'codex' ? readCodexTarget() : readClaudeTarget();
 }
 
 export async function startCalibrationJob(options: StartCalibrationJobOptions): Promise<CalibrationJobSnapshot> {

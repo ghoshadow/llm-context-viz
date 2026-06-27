@@ -13,13 +13,13 @@ export function defaultCalibrationPromptInput(source: CalibrationAutoSource): st
 }
 
 export function defaultCalibrationTargetInput(source: CalibrationAutoSource): string {
-  return source === 'codex' ? '' : 'http://127.0.0.1:15721';
+  return '';
 }
 
 export function captureTargetPlaceholderText(source: CalibrationAutoSource): string {
   return source === 'codex'
     ? '留空读取 ~/.codex/config.toml；填写可覆盖 Base URL'
-    : 'Base URL 或 host';
+    : '留空读取 ~/.claude/settings.json；填写可覆盖 Base URL';
 }
 
 export function buildAutoCalibrationStartBody(input: {
@@ -40,8 +40,6 @@ export function buildAutoCalibrationStartBody(input: {
 
   if (targetHost) {
     body.targetHost = targetHost;
-  } else if (input.source === 'claude') {
-    body.targetHost = 'api.deepseek.com';
   }
 
   return body;

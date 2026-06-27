@@ -7,9 +7,9 @@ import {
   defaultCalibrationTargetInput,
 } from './calibrationAutoStart';
 
-test('uses Claude UI defaults for the existing proxy workflow', () => {
+test('leaves Claude target empty so the server can read settings.json', () => {
   assert.equal(defaultCalibrationPromptInput('claude'), 'say hi');
-  assert.equal(defaultCalibrationTargetInput('claude'), 'http://127.0.0.1:15721');
+  assert.equal(defaultCalibrationTargetInput('claude'), '');
 });
 
 test('leaves Codex target empty so the server can read config.toml', () => {
@@ -25,7 +25,10 @@ test('uses concise Codex capture target placeholder', () => {
 });
 
 test('uses concise Claude capture target placeholder', () => {
-  assert.equal(captureTargetPlaceholderText('claude'), 'Base URL 或 host');
+  assert.equal(
+    captureTargetPlaceholderText('claude'),
+    '留空读取 ~/.claude/settings.json；填写可覆盖 Base URL',
+  );
 });
 
 test('omits Codex targetHost when the input is empty', () => {
@@ -59,7 +62,7 @@ test('keeps explicit Codex targetHost overrides', () => {
   });
 });
 
-test('keeps Claude targetHost fallback when the input is empty', () => {
+test('omits Claude targetHost when the input is empty', () => {
   assert.deepEqual(buildAutoCalibrationStartBody({
     source: 'claude',
     cwd: '/tmp/project',
@@ -70,7 +73,6 @@ test('keeps Claude targetHost fallback when the input is empty', () => {
     source: 'claude',
     cwd: '/tmp/project',
     prompt: 'say hi',
-    targetHost: 'api.deepseek.com',
     timeoutMs: 45000,
   });
 });

@@ -28,6 +28,12 @@ test('defaults calibration prompt by source', () => {
 });
 
 test('defaults calibration target by source', () => {
-  assert.equal(defaultCalibrationTarget('claude'), 'api.deepseek.com');
-  assert.equal(defaultCalibrationTarget('codex', () => 'http://127.0.0.1:9090'), 'http://127.0.0.1:9090');
+  assert.equal(
+    defaultCalibrationTarget('claude', () => 'https://api.openai.com/v1', () => 'http://127.0.0.1:15721'),
+    'http://127.0.0.1:15721',
+  );
+  assert.equal(
+    defaultCalibrationTarget('codex', () => 'http://127.0.0.1:9090', () => 'http://127.0.0.1:15721'),
+    'http://127.0.0.1:9090',
+  );
 });
