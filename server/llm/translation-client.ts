@@ -12,7 +12,6 @@ const TRANSLATION_SYSTEM_PROMPT = `你是一位专业的技术文档翻译。请
 7. 直接输出翻译结果，不要添加任何解释或说明`;
 
 interface TranslationEnv {
-  DEEPSEEK_API_KEY?: string;
   LLM_API_KEY?: string;
   LLM_BASE_URL?: string;
   TRANSLATION_API_KEY?: string;
@@ -34,8 +33,8 @@ export interface TranslationCallOptions {
 }
 
 export function resolveTranslationRequestConfig(env: TranslationEnv = process.env): TranslationRequestConfig {
-  const apiKey = env.TRANSLATION_API_KEY || env.DEEPSEEK_API_KEY || env.LLM_API_KEY;
-  if (!apiKey) throw new Error('未设置 TRANSLATION_API_KEY、DEEPSEEK_API_KEY 或 LLM_API_KEY 环境变量');
+  const apiKey = env.TRANSLATION_API_KEY || env.LLM_API_KEY;
+  if (!apiKey) throw new Error('未设置 TRANSLATION_API_KEY 或 LLM_API_KEY 环境变量');
 
   return {
     apiKey,

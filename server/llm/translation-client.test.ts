@@ -18,12 +18,13 @@ test('resolves direct translation API config without using shared agent defaults
   assert.equal(config.maxTokens, undefined);
 });
 
-test('can use DeepSeek-specific API key for translation requests', () => {
-  const config = resolveTranslationRequestConfig({
-    DEEPSEEK_API_KEY: 'deepseek-key',
-  });
-
-  assert.equal(config.apiKey, 'deepseek-key');
+test('does not read DeepSeek-specific API key for translation requests', () => {
+  assert.throws(
+    () => resolveTranslationRequestConfig({
+      DEEPSEEK_API_KEY: 'deepseek-key',
+    }),
+    /未设置 TRANSLATION_API_KEY 或 LLM_API_KEY 环境变量/,
+  );
 });
 
 test('posts OpenAI chat completions request matching the verified direct script', async () => {
