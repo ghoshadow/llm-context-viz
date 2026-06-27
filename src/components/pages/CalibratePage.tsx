@@ -10,6 +10,7 @@ import { MarkdownBlock } from '../shared/MarkdownBlock';
 import {
   getCalibrationDetailDisplay,
   getCalibrationDetailLayout,
+  getCalibrationDetailTranslationBlockReason,
   getCalibrationDetailTranslationSlot,
 } from './calibrationDetailModal';
 import {
@@ -394,6 +395,11 @@ export default function CalibratePage() {
   const handleDetailTranslate = useCallback(async () => {
     if (!detailModal || !detailDisplay || !detailTranslationSlot || detailTranslating) return;
     if (detailTranslations[detailModal.key]) return;
+    const blockReason = getCalibrationDetailTranslationBlockReason(detailModal.key, detailDisplay);
+    if (blockReason) {
+      setDetailTranslateError(blockReason);
+      return;
+    }
     if (!currentSessionId || currentTurnIndex == null) {
       setDetailTranslateError('请先打开一个会话和轮次，再使用翻译。');
       return;

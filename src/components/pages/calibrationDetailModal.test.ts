@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  PURE_CODE_TRANSLATION_MESSAGE,
   getCalibrationDetailDisplay,
   getCalibrationDetailLayout,
+  getCalibrationDetailTranslationBlockReason,
   getCalibrationDetailTranslationSlot,
   getCalibrationDetailSectionIndex,
 } from './calibrationDetailModal';
@@ -123,4 +125,66 @@ test('renders non-tool details as plain text', () => {
     text: 'hello',
     markdown: false,
   });
+});
+
+test('blocks translation for pure tool definition code', () => {
+  const detail = ['# codex.tools', '', '字符数: 10', '', '```json', '{"name":"Read"}', '```'].join('\n');
+  const display = getCalibrationDetailDisplay('codex.tools', detail);
+
+  assert.equal(
+    getCalibrationDetailTranslationBlockReason('codex.tools', display),
+    PURE_CODE_TRANSLATION_MESSAGE,
+  );
+});
+
+test('blocks tool definition json even when strings contain fenced examples', () => {
+  const detail = [
+    '# TOOL_DEFS_FALLBACK_CHARS',
+    '',
+    '字符数: 100',
+    '',
+    '```json',
+    '[',
+    '  {',
+    '    "name": "Bash",',
+    '    "description": "Example:\\n```bash\\necho hello\\n```\\nUse for shell commands."',
+    '  }',
+    ']',
+    '```',
+  ].join('\n');
+  const display = getCalibrationDetailDisplay('claude.tool_defs', detail);
+
+  assert.equal(
+    getCalibrationDetailTranslationBlockReason('claude.tool_defs', display),
+    PURE_CODE_TRANSLATION_MESSAGE,
+  );
+});
+
+test('blocks translation for raw json calibration detail', () => {
+  assert.equal(
+    getCalibrationDetailTranslationBlockReason('custom.detail', {
+      text: '{"name":"Read","input_schema":{"type":"object"}}',
+      markdown: false,
+    }),
+    PURE_CODE_TRANSLATION_MESSAGE,
+  );
+});
+
+test('allows translation when prose remains outside code blocks', () => {
+  const detail = [
+    '# SYSTEM_REMINDER_CHROME_CHARS',
+    '',
+    '字符数: 42',
+    '',
+    '```text',
+    'Read the following JSON if relevant:',
+    '```json',
+    '{"name":"Read"}',
+    '```',
+    'Then answer in Chinese.',
+    '```',
+  ].join('\n');
+  const display = getCalibrationDetailDisplay('SYSTEM_REMINDER_CHROME_CHARS', detail);
+
+  assert.equal(getCalibrationDetailTranslationBlockReason('SYSTEM_REMINDER_CHROME_CHARS', display), null);
 });

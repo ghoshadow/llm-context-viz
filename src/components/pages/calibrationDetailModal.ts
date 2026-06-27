@@ -3,6 +3,7 @@ export type CalibrationDetailDisplay = { text: string; markdown: boolean };
 export type CalibrationDetailTranslationSlot = { stepIndex: number; sectionIndex: number };
 
 export type CalibrationDetailKey = string;
+export const PURE_CODE_TRANSLATION_MESSAGE = '纯代码内容不支持翻译';
 
 export function getCalibrationDetailLayout(translatedText?: string): CalibrationDetailLayout {
   return translatedText?.trim() ? 'side-by-side' : 'single';
@@ -33,6 +34,13 @@ export function getCalibrationDetailTranslationSlot(
   };
 }
 
+export function getCalibrationDetailTranslationBlockReason(
+  _key: CalibrationDetailKey,
+  display: CalibrationDetailDisplay,
+): string | null {
+  return isPureCodeContent(display.text, display.markdown) ? PURE_CODE_TRANSLATION_MESSAGE : null;
+}
+
 function hashText(text: string): number {
   let hash = 2166136261;
   for (let i = 0; i < text.length; i++) {
@@ -52,4 +60,31 @@ function unwrapPlainTextDetail(_key: CalibrationDetailKey, detail: string): stri
 
 function normalizePlainTextHeadings(text: string): string {
   return text.replace(/([^\n])(#\s+[A-Za-z][^\n]*)/g, '$1\n$2');
+}
+
+function isPureCodeContent(text: string, markdown: boolean): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (isJsonLike(trimmed)) return true;
+
+  if (!markdown) return false;
+
+  const withoutCode = trimmed
+    .replace(/^# [^\n]+\n*/gm, '')
+    .replace(/^字符数:\s*\d+\s*$/gm, '')
+    .replace(/^```[^\n]*\n[\s\S]*?\n```$/gm, '')
+    .replace(/`[^`\n]+`/g, '')
+    .trim();
+
+  return withoutCode.length === 0;
+}
+
+function isJsonLike(text: string): boolean {
+  if (!/^[\[{]/.test(text)) return false;
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
