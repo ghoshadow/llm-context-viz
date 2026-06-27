@@ -21,6 +21,11 @@ import {
   getNormalizedCalibrationSummary,
   sumCalibrationCategoryChars,
 } from './calibrationCategories';
+import {
+  buildAutoCalibrationStartBody,
+  defaultCalibrationPromptInput,
+  defaultCalibrationTargetInput,
+} from './calibrationAutoStart';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -196,8 +201,8 @@ export default function CalibratePage() {
   const [applied, setApplied] = useState(false);
   const [currentConstants, setCurrentConstants] = useState<CurrentConstants | null>(null);
   const [calibrationSource, setCalibrationSource] = useState<CalibrationUiSource>('claude');
-  const [autoPrompt, setAutoPrompt] = useState('say hi');
-  const [autoTargetHost, setAutoTargetHost] = useState('http://127.0.0.1:15721');
+  const [autoPrompt, setAutoPrompt] = useState(defaultCalibrationPromptInput('claude'));
+  const [autoTargetHost, setAutoTargetHost] = useState(defaultCalibrationTargetInput('claude'));
   const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
   const [detailModal, setDetailModal] = useState<{ key: ConstantKey; title: string; text: string } | null>(null);
@@ -239,13 +244,13 @@ export default function CalibratePage() {
     setAutoRunning(true);
     setResult(null);
     try {
-      const job = await post<AutoCalibrationJob>('/calibrate/auto/start', {
+      const job = await post<AutoCalibrationJob>('/calibrate/auto/start', buildAutoCalibrationStartBody({
         source: calibrationSource,
         cwd: sessionCwd,
-        prompt: autoPrompt.trim() || 'say hi',
-        targetHost: autoTargetHost.trim() || 'api.deepseek.com',
+        prompt: autoPrompt,
+        targetHost: autoTargetHost,
         timeoutMs: 45000,
-      });
+      }));
       setAutoJob(job);
     } catch (err) {
       setError((err as Error).message);
@@ -536,7 +541,11 @@ export default function CalibratePage() {
             {(['claude', 'codex'] as const).map((source) => (
               <button
                 key={source}
-                onClick={() => setCalibrationSource(source)}
+                onClick={() => {
+                  setCalibrationSource(source);
+                  setAutoPrompt(defaultCalibrationPromptInput(source));
+                  setAutoTargetHost(defaultCalibrationTargetInput(source));
+                }}
                 disabled={autoRunning}
                 style={{
                   border: `1px solid ${calibrationSource === source ? S.borderAccent : S.borderColor}`,
