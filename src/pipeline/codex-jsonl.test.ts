@@ -394,3 +394,56 @@ test('marks Codex turns that have no readable assistant events at all', () => {
   assert.equal(turns[0]!.segs.length, 1);
   assert.match(turns[0]!.segs[0]!.det.text ?? '', /未记录可读的 assistant 事件/);
 });
+
+test('fills missing Codex core categories from normalized calibration constants', () => {
+  const sample = [
+    {
+      timestamp: '2026-06-26T01:00:00.000Z',
+      type: 'session_meta',
+      payload: {
+        session_id: 'sess_1',
+        cwd: '/repo',
+        cli_version: '0.99.0',
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:01.000Z',
+      type: 'event_msg',
+      payload: { type: 'task_started', turn_id: 'turn_1' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:01.100Z',
+      type: 'event_msg',
+      payload: { type: 'user_message', message: '检查 Codex 常量' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: { input_tokens: 500, output_tokens: 20 },
+        },
+      },
+    },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const { turns } = runCodexPipeline(sample, 'metadata.jsonl', {
+    schemaVersion: 1,
+    source: 'codex',
+    categories: {
+      sysPrompt: { chars: 30 },
+      tool_defs: { chars: 60 },
+      skills: { chars: 90 },
+      mcp: { chars: 120 },
+      reminders: { chars: 150 },
+    },
+  });
+
+  const turn = turns[0]!;
+  assert.ok((turn.comp.sysPrompt ?? 0) > 0);
+  assert.ok((turn.comp.tool_defs ?? 0) > 0);
+  assert.ok((turn.comp.skills ?? 0) > 0);
+  assert.ok((turn.comp.mcp ?? 0) > 0);
+  assert.ok((turn.comp.reminders ?? 0) > 0);
+});

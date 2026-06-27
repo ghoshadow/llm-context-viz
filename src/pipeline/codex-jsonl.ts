@@ -7,6 +7,11 @@ import type {
   TurnData,
   TurnDelta,
 } from '../types/session';
+import {
+  type NormalizedCalibration,
+  type NormalizedCalibrationSummary,
+  categoryChars,
+} from './calibration-types';
 import { estimateTokens, isSubAgentTool, isTaskTool, roundTokens } from './utils';
 
 type JsonObject = Record<string, any>;
@@ -102,7 +107,11 @@ export function isCodexJsonl(jsonlText: string): boolean {
   return false;
 }
 
-export function runCodexPipeline(jsonlText: string, filename: string): {
+export function runCodexPipeline(
+  jsonlText: string,
+  filename: string,
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
+): {
   summary: SessionSummary;
   turns: TurnData[];
   errors: { line: number; message: string }[];
@@ -110,7 +119,7 @@ export function runCodexPipeline(jsonlText: string, filename: string): {
   const { lines, errors } = parseCodexLines(jsonlText);
   const sessionMeta = firstPayload(lines, 'session_meta');
   const turns = buildCodexTurns(lines);
-  const turnData = assembleTurns(turns, sessionMeta);
+  const turnData = assembleTurns(turns, sessionMeta, calibration);
   const summary = aggregateCodexSession(sessionMeta, turns, turnData, filename);
   return { summary, turns: turnData, errors };
 }
@@ -217,9 +226,13 @@ function finalizeTurn(turn: CodexTurn, fallbackEndTs: string): void {
   if (!turn.prompt) turn.prompt = '(Codex 日志未记录用户输入)';
 }
 
-function assembleTurns(turns: CodexTurn[], sessionMeta: JsonObject | null): TurnData[] {
+function assembleTurns(
+  turns: CodexTurn[],
+  sessionMeta: JsonObject | null,
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
+): TurnData[] {
   const results: TurnData[] = [];
-  const coreComp = buildCodexCoreComp(sessionMeta, turns);
+  const coreComp = buildCodexCoreComp(sessionMeta, turns, calibration);
   const runningComp = initComp(coreComp);
   const cumTools: Record<string, { calls: number; resultTokens: number; task: boolean }> = {};
   let prevComp = initComp(coreComp);
@@ -683,7 +696,11 @@ function sumComp(comp: Record<string, number>): number {
   return Math.round(Object.values(comp).reduce((sum, value) => sum + value, 0));
 }
 
-function buildCodexCoreComp(sessionMeta: JsonObject | null, turns: CodexTurn[]): Record<string, number> {
+function buildCodexCoreComp(
+  sessionMeta: JsonObject | null,
+  turns: CodexTurn[],
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
+): Record<string, number> {
   const comp = initComp();
   addTokens(comp, 'sysPrompt', codexInstructionText(sessionMeta?.base_instructions));
 
@@ -714,7 +731,20 @@ function buildCodexCoreComp(sessionMeta: JsonObject | null, turns: CodexTurn[]):
     }
   }
 
+  applyCodexCalibrationFallback(comp, calibration);
   return comp;
+}
+
+function applyCodexCalibrationFallback(
+  comp: Record<string, number>,
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
+): void {
+  if (!calibration) return;
+  for (const key of ['sysPrompt', 'tool_defs', 'skills', 'mcp', 'reminders'] as const) {
+    if ((comp[key] ?? 0) > 0) continue;
+    const chars = categoryChars(calibration, key);
+    if (chars > 0) addTokens(comp, key, ' '.repeat(chars));
+  }
 }
 
 function codexInstructionText(value: unknown): string {
