@@ -17,9 +17,11 @@ import {
   ERROR_TEXT,
 } from '../../styles/theme';
 import { fmt, fmtK, fmtDur, fmtDate } from '../../utils/format';
-import { post, get } from '../../api/client';
+import { post, get, API_BASE } from '../../api/client';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { ContentRenderer } from '../shared/ContentRenderer';
+import { CommandMessageBlock } from '../shared/CommandMessageBlock';
+import { getStructuredTextPreview, hasStructuredText } from '../shared/structuredText';
 import type { TurnDetail, TurnSummary, TimelineSegment, SegmentDetail } from '../../types/session';
 
 // ============================================================================
@@ -84,8 +86,22 @@ function TurnListItem({
   compressionReset,
   onClick,
 }: TurnListItemProps) {
-  const loadPct = Math.max(2, (cumTotal / ctxLimit) * 100);
+  const loadPct = ctxLimit > 0 ? Math.max(2, (cumTotal / ctxLimit) * 100) : 2;
   const peakColor = maxInput >= 120000 ? 'oklch(0.76 0.13 60)' : SEMANTIC.textDesc2;
+  const structuredPreview = getStructuredTextPreview(prompt);
+  const isCommandPreview = structuredPreview?.kind === 'command';
+  const isPluginPreview = structuredPreview?.kind === 'plugin-reference';
+  const previewIcon = isCommandPreview ? '/' : isPluginPreview ? '@' : '!';
+  const previewAccent = isCommandPreview
+    ? 'oklch(0.86 0.09 165)'
+    : isPluginPreview
+      ? 'oklch(0.86 0.08 285)'
+      : 'oklch(0.86 0.10 80)';
+  const previewIconBg = isCommandPreview
+    ? 'oklch(0.38 0.10 165 / 0.22)'
+    : isPluginPreview
+      ? 'oklch(0.50 0.10 285 / 0.18)'
+      : 'oklch(0.64 0.10 80 / 0.16)';
 
   return (
     <button
@@ -162,13 +178,67 @@ function TurnListItem({
           fontSize: 12.5,
           lineHeight: 1.45,
           color: isSelected ? SEMANTIC.textPrimary : SEMANTIC.textSecondary,
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
+          display: structuredPreview ? 'flex' : '-webkit-box',
+          alignItems: structuredPreview ? 'center' : undefined,
+          gap: structuredPreview ? 7 : undefined,
+          minHeight: structuredPreview ? 35 : undefined,
+          WebkitLineClamp: structuredPreview ? undefined : 2,
+          WebkitBoxOrient: structuredPreview ? undefined : 'vertical',
           overflow: 'hidden',
         }}
       >
-        {prompt}
+        {structuredPreview ? (
+          <>
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 6,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 11,
+                fontWeight: 700,
+                color: previewAccent,
+                background: previewIconBg,
+              }}
+            >
+              {previewIcon}
+            </span>
+            <span style={{ minWidth: 0 }}>
+              <span
+                style={{
+                  display: 'block',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  color: previewAccent,
+                  fontWeight: 650,
+                }}
+              >
+                {structuredPreview.label}
+              </span>
+              {structuredPreview.detail && (
+                <span
+                  style={{
+                    display: 'block',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontSize: 11,
+                    color: SEMANTIC.textMiniLabel,
+                    marginTop: 1,
+                  }}
+                >
+                  {structuredPreview.detail}
+                </span>
+              )}
+            </span>
+          </>
+        ) : prompt}
       </div>
       <div
         style={{
@@ -738,14 +808,24 @@ function UserPromptSection({ prompt }: { prompt: string }) {
           {copied ? '已复制' : '复制'}
         </span>
       </div>
-      <ContentRenderer
-        text={prompt}
-        fontFamily="'IBM Plex Sans', system-ui, sans-serif"
-        fontSize={13}
-        maxHeight={open ? 'none' : COLLAPSED_H}
-        overflowY={open ? 'visible' : 'auto'}
-        markdown
-      />
+      {hasStructuredText(prompt) ? (
+        <CommandMessageBlock
+          text={prompt}
+          fontFamily="'IBM Plex Sans', system-ui, sans-serif"
+          fontSize={13}
+          maxHeight={open ? 'none' : COLLAPSED_H}
+          overflowY={open ? 'visible' : 'auto'}
+        />
+      ) : (
+        <ContentRenderer
+          text={prompt}
+          fontFamily="'IBM Plex Sans', system-ui, sans-serif"
+          fontSize={13}
+          maxHeight={open ? 'none' : COLLAPSED_H}
+          overflowY={open ? 'visible' : 'auto'}
+          markdown
+        />
+      )}
       {!open && (
         <div onClick={() => setOpen(true)} style={{
           padding: '6px 0', textAlign: 'center', cursor: 'pointer',
@@ -1519,7 +1599,7 @@ export default function TurnInspector() {
                 onClick={async () => {
                   if (!currentSessionId) return;
                   try {
-                    await fetch('/api/sessions/' + currentSessionId + '/refresh', { method: 'POST' });
+                    await fetch(`${API_BASE}/sessions/${currentSessionId}/refresh`, { method: 'POST' });
                     fetchTurns(currentSessionId);
                   } catch { fetchTurns(currentSessionId); }
                 }}
