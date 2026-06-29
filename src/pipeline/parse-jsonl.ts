@@ -6,6 +6,8 @@ import type {
   SessionLine,
   AssistantLine,
   UserLine,
+  SystemLine,
+  AttachmentLine,
   LineType,
   MessageContent,
   ContentBlock,
@@ -244,6 +246,28 @@ function parseUserMessage(obj: Record<string, unknown>): UserLine['message'] | n
 }
 
 // ---------------------------------------------------------------------------
+// 行迭代器：避免 `text.split('\n')` 创建全量数组导致双倍内存
+// ---------------------------------------------------------------------------
+
+/**
+ * 逐行迭代器：通过查找下一个 \n 的位置来 yield 每一行，
+ * 避免创建全量数组，支持大文件处理。
+ */
+function* lineIterator(text: string): Generator<string, void, undefined> {
+  let start = 0;
+  const len = text.length;
+  while (start < len) {
+    const end = text.indexOf('\n', start);
+    if (end === -1) {
+      yield text.slice(start);
+      break;
+    }
+    yield text.slice(start, end);
+    start = end + 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main parser
 // ---------------------------------------------------------------------------
 
@@ -257,19 +281,19 @@ function parseUserMessage(obj: Record<string, unknown>): UserLine['message'] | n
  *
  * Malformed JSON and structural validation failures are reported as `ParseError`
  * rather than crashing.
+ *
+ * 优化：使用生成器逐行消费，避免 `text.split('\n')` 创建全量数组导致双倍内存。
  */
 export function parseJsonl(text: string): ParseResult {
-  const rawLines = text.split('\n');
-
   const lines: SessionLine[] = [];
   const errors: ParseError[] = [];
 
-  for (let i = 0; i < rawLines.length; i++) {
-    const lineNumber = i + 1; // 1-based for error reporting
-    const raw = rawLines[i];
+  let lineNumber = 0;
+  for (const raw of lineIterator(text)) {
+    lineNumber++;
 
     // Skip empty lines
-    if (raw === undefined || raw.trim() === '') continue;
+    if (raw.trim() === '') continue;
 
     // --- JSON parse ---
     let parsed: unknown;
@@ -362,14 +386,17 @@ export function parseJsonl(text: string): ParseResult {
       // system, attachment, mode, permission-mode, ai-title, last-prompt,
       // file-history-snapshot, task_reminder, Project, nested_memory
       // — pass through with base fields + attachment if present.
-      const line: any = { ...base, type };
+      const baseLine: Record<string, unknown> & { type: string; uuid: string; timestamp: string; sessionId: string; parentUuid?: string; cwd?: string; gitBranch?: string } = {
+        ...base,
+        type,
+      };
       if (parsed.attachment && typeof parsed.attachment === 'object') {
-        line.attachment = parsed.attachment;
+        baseLine.attachment = parsed.attachment;
       }
       if (parsed.message && typeof parsed.message === 'object') {
-        line.message = parsed.message;
+        baseLine.message = parsed.message;
       }
-      lines.push(line as SessionLine);
+      lines.push(baseLine as SessionLine);
     }
   }
 

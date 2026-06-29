@@ -9,11 +9,39 @@ import scannerRouter from './routes/scanner';
 import calibrateRouter from './routes/calibrate';
 import obsidianRouter from './routes/obsidian';
 import { initDb, migrate } from './db';
+import { sanitizeForLog } from './utils/log-sanitizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 4137;
+
+// ============================================================================
+// 进程级错误兜底处理 —— 防止未捕获异常导致进程崩溃
+// ============================================================================
+
+process.on('uncaughtException', (err: Error) => {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('uncaughtException:', sanitizeForLog(err.message));
+  } else {
+    console.error('uncaughtException:', err.stack || err.message);
+  }
+  process.exitCode = 1;
+  setTimeout(() => process.exit(1), 1000).unref();
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  if (process.env.NODE_ENV === 'production') {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    console.error('unhandledRejection:', sanitizeForLog(message));
+  } else {
+    if (reason instanceof Error) {
+      console.error('unhandledRejection:', reason.stack || reason.message);
+    } else {
+      console.error('unhandledRejection:', reason);
+    }
+  }
+});
 
 const app = express();
 

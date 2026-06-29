@@ -44,7 +44,7 @@ export { computeDeltas } from './compute-deltas';
 export { computeTimeline } from './compute-timeline';
 export { aggregateSession } from './aggregate-session';
 // Re-export shared utilities
-export { estimateTokens, CHARS_PER_TOKEN, isSubAgentTool, isTaskTool } from './utils';
+export { estimateTokens, estimateTokensModelAware, CHARS_PER_TOKEN, isSubAgentTool, isTaskTool } from './utils';
 
 export type { ParseError } from './parse-jsonl';
 export type { TurnContextComposition, TokenEstimator } from './compute-context';
@@ -131,7 +131,11 @@ function assembleTurns(
       }
     }
 
-    // Use API actual total context from timeline, fall back to composition sum
+    // Use API actual total context from timeline, fall back to composition sum.
+    // Both compute-timeline.ts (computeContextInfo) and this fallback use
+    // Object.values(comp).reduce((a, b) => a + b, 0) — ensure alignment.
+    // Note: cumTotal measures cumulative context tokens and is distinct from
+    // aggregateSession's totalRequests which counts assistant API requests.
     const cumTotal = tl?.cumTotal
       ? tl.cumTotal
       : Math.round(Object.values(comp).reduce((a, b) => a + b, 0));
@@ -169,9 +173,9 @@ function assembleTurns(
       segs: tl?.segs ?? [],
       comp: { ...comp },
       cumTotal,
-      cumCacheHit: (tl as any)?.cumCacheHit ?? 0,
-      cumTools: (tl as any)?.cumTools ?? {},
-      compressionReset: (tl as any)?.compressionReset ?? false,
+      cumCacheHit: tl?.cumCacheHit ?? 0,
+      cumTools: tl?.cumTools ?? {},
+      compressionReset: tl?.compressionReset ?? false,
     };
 
     turns.push(turn);

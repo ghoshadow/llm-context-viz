@@ -18,6 +18,8 @@ import { buildOntology, type OntologyBuildOutput } from '../../src/pipeline/buil
 import type { CandidateEntity, SemanticRelation, OntologyBuildConfig } from '../../src/pipeline/build-ontology.js';
 import { buildEntityExtractorDef, buildOrchestratorPrompt, type ExtractionDepth } from './orchestrator-prompt.js';
 import { SubmitExtractionSchema } from './schema.js';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
+import { DEFAULT_MODEL, DEFAULT_BASE_URL, buildSafeEnv } from './config.js';
 
 // ── 类型 ──────────────────────────────────────────────────────────────────
 
@@ -37,8 +39,20 @@ interface MissingShard {
   reason: string;
 }
 
+/** 分片收集的结构化错误 — 区分致命错误和可恢复错误 */
+export interface ShardError {
+  type: 'fatal' | 'recoverable';
+  detail: string;
+  /** 致命错误时标识是否应终止整个提取流程 */
+  shouldAbort?: boolean;
+}
+
 const LLM_EXTRACTION_BATCH_SIZE = 8;
 const LLM_EXTRACTION_MAX_ATTEMPTS = 3;
+/** Agent SDK 最大连续失败次数，超过则熔断跳过剩余分片 */
+const LLM_EXTRACTION_MAX_CONSECUTIVE_FAILURES = 3;
+/** Agent SDK 超时时间（毫秒），单次 query 最长等待 */
+const LLM_EXTRACTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟
 
 export interface ExtractSuccess {
   success: true;
@@ -119,10 +133,11 @@ async function collectShardTextResults(params: {
   depth: ExtractionDepth;
   onEvent: (event: string, data: Record<string, unknown>) => void;
   attempt: number;
-}): Promise<Map<number, string>> {
+}): Promise<{ results: Map<number, string>; errors: ShardError[] }> {
   const { manifest, shards, model, apiKey, baseUrl, depth, onEvent, attempt } = params;
   const shardTextResults: Map<number, string> = new Map();
-  if (shards.length === 0) return shardTextResults;
+  const errors: ShardError[] = [];
+  if (shards.length === 0) return { results: shardTextResults, errors };
 
   const abort = new AbortController();
   const expectedShards = shards.length;
@@ -132,6 +147,12 @@ async function collectShardTextResults(params: {
   } else {
     for (const shard of shards) onEvent('shard-retry', { shardIndex: shard.index, attempt });
   }
+
+  // 超时保护：防止 Agent SDK 永久挂起
+  const timeoutId = setTimeout(() => {
+    console.error('[extract-ontology] Agent SDK 超时（%d ms），中止', LLM_EXTRACTION_TIMEOUT_MS);
+    abort.abort();
+  }, LLM_EXTRACTION_TIMEOUT_MS);
 
   try {
     const q = query({
@@ -147,14 +168,14 @@ async function collectShardTextResults(params: {
         maxTurns: Math.max(shards.length + 5, 5),
         thinking: { type: 'disabled' as const },
         cwd: manifest.rootDir.replace(/\/data\/extractions\/.*$/, ''),
-        env: { ...process.env, ANTHROPIC_API_KEY: apiKey, ANTHROPIC_BASE_URL: baseUrl } as Record<string, string>,
+        env: { ...buildSafeEnv({}), ANTHROPIC_API_KEY: apiKey, ANTHROPIC_BASE_URL: baseUrl },
       },
     });
 
     for await (const msg of q) {
       const mtype = (msg as Record<string, unknown>).type as string;
       const msubtype = (msg as Record<string, unknown>).subtype as string || '';
-      console.error('[msg]', mtype, msubtype);
+      console.error('[msg]', sanitizeForLog(mtype), sanitizeForLog(msubtype));
 
       if (msg.type === 'system' && msubtype === 'init') {
         onEvent('agent-start', { sessionId: (msg as SDKMessage & { session_id: string }).session_id });
@@ -164,7 +185,7 @@ async function collectShardTextResults(params: {
         const am = msg as SDKMessage & { type: 'assistant'; message?: { content?: unknown[] } };
         if (am.message?.content) {
           for (const block of am.message.content as Array<{ type: string; text?: string; name?: string }>) {
-            if (block.type === 'text') console.error('  [asst text]', (block.text || '').substring(0, 120));
+            if (block.type === 'text') console.error('  [asst text]', sanitizeForLog((block.text || '').substring(0, 120)));
             if (block.type === 'tool_use') console.error('  [asst tool]', block.name);
           }
         }
@@ -182,14 +203,14 @@ async function collectShardTextResults(params: {
           const text = textFromToolResultContent(block.content);
           if (!text) continue;
 
-          console.error('  [tool_result]', text.substring(0, 200));
+          console.error('  [tool_result]', sanitizeForLog(text.substring(0, 200)));
           const parsed = parseJsonFromText(text);
           for (const item of collectParsedItems(parsed)) {
             const validation = SubmitExtractionSchema.safeParse(item);
             if (validation.success) {
               const r = validation.data;
               shardTextResults.set(r.shardIndex, JSON.stringify(r));
-              console.error('  [parsed shard]', r.shardIndex, 'theme:', r.phaseTheme);
+              console.error('  [parsed shard]', r.shardIndex, 'theme:', sanitizeForLog(r.phaseTheme || ''));
               const shard = manifest.shards.find((s) => s.index === r.shardIndex);
               onEvent('shard-done', {
                 shardIndex: r.shardIndex,
@@ -206,7 +227,7 @@ async function collectShardTextResults(params: {
               const candidate = item as Record<string, unknown>;
               const shardIndex = typeof candidate?.shardIndex === 'number' ? candidate.shardIndex : -1;
               const error = formatValidationError(validation.error);
-              console.error('  [validation error]', shardIndex, error);
+              console.error('  [validation error]', shardIndex, sanitizeForLog(error));
               const shard = manifest.shards.find((s) => s.index === shardIndex);
               onEvent('shard-error', {
                 shardIndex,
@@ -228,19 +249,38 @@ async function collectShardTextResults(params: {
       }
 
       if (msg.type === 'result') {
-        console.error('  [result]', JSON.stringify(msg).substring(0, 400));
+        const resultStr = JSON.stringify(msg);
+        console.error('  [result]', sanitizeForLog(resultStr.substring(0, 400)));
       }
     }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      console.error('[extract-ontology] Agent SDK aborted (expected)');
+      // 区分超时中止和正常中止
+      if (shardTextResults.size === 0) {
+        const errorDetail = 'Agent SDK 请求超时，所有分片均未返回结果';
+        console.error('[extract-ontology]', errorDetail);
+        errors.push({ type: 'fatal', detail: errorDetail, shouldAbort: true });
+      } else {
+        console.error('[extract-ontology] Agent SDK aborted (expected)');
+      }
     } else {
-      console.error('[extract-ontology] Agent SDK error:', err);
-      onEvent('agent-error', { message: err instanceof Error ? err.message : String(err) });
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error('[extract-ontology] Agent SDK error:', sanitizeForLog(errorMsg));
+      onEvent('agent-error', { message: errorMsg });
+
+      // SDK 层面的网络/认证错误视为可恢复（允许重试），SDK 内部崩溃视为致命
+      const isFatal = errorMsg.includes('ENOENT') || errorMsg.includes('EACCES') || errorMsg.includes('cwd');
+      errors.push({
+        type: isFatal ? 'fatal' : 'recoverable',
+        detail: errorMsg,
+        shouldAbort: isFatal,
+      });
     }
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  return shardTextResults;
+  return { results: shardTextResults, errors };
 }
 
 // ── 聚合生成 ────────────────────────────────────────────────────────────
@@ -555,7 +595,7 @@ export async function extractAndBuild(
 
   try {
     if (incremental) {
-      const incResult = extractIncremental(rawJsonl, sessionId, { shardSize, maxShardChars });
+      const incResult = await extractIncremental(rawJsonl, sessionId, { shardSize, maxShardChars });
       manifest = incResult.manifest;
       if (!incResult.hasNewTurns) {
         onEvent('extracted', {
@@ -574,7 +614,7 @@ export async function extractAndBuild(
       }
       processShardIndices = incResult.newShardIndices;
     } else {
-      manifest = extractToFiles(rawJsonl, sessionId, { shardSize, maxShardChars, force });
+      manifest = await extractToFiles(rawJsonl, sessionId, { shardSize, maxShardChars, force });
     }
   } catch (err) {
     return { success: false, stage: 'content', message: '内容提取失败: ' + (err instanceof Error ? err.message : String(err)) };
@@ -631,9 +671,9 @@ export async function extractAndBuild(
   });
 
   // Step 2: Agent SDK orchestration
-  const model = process.env.LLM_MODEL || 'deepseek-v4-pro';
+  const model = process.env.LLM_MODEL || DEFAULT_MODEL;
   const apiKey = process.env.LLM_API_KEY;
-  const baseUrl = process.env.LLM_BASE_URL || 'https://api.deepseek.com/anthropic';
+  const baseUrl = process.env.LLM_BASE_URL || DEFAULT_BASE_URL;
 
   if (!apiKey) {
     return { success: false, stage: 'llm', message: '未设置 LLM_API_KEY 环境变量' };
@@ -644,14 +684,18 @@ export async function extractAndBuild(
   const shardTextResults: Map<number, string> = new Map();
   const activeShardIndexSet = new Set(activeShards.map((s) => s.index));
   let pendingShards = activeShards;
+  let consecutiveFailures = 0;
+  let globalAbort = false;
 
-  for (let attempt = 1; attempt <= LLM_EXTRACTION_MAX_ATTEMPTS && pendingShards.length > 0; attempt++) {
+  for (let attempt = 1; attempt <= LLM_EXTRACTION_MAX_ATTEMPTS && pendingShards.length > 0 && !globalAbort; attempt++) {
     const retryLabel = attempt === 1 ? 'initial' : `retry ${attempt - 1}`;
     console.error('[extract-ontology] Starting', retryLabel, 'for shards:', pendingShards.map((s) => s.index).join(','));
 
     for (let i = 0; i < pendingShards.length; i += LLM_EXTRACTION_BATCH_SIZE) {
+      if (globalAbort) break;
+
       const batch = pendingShards.slice(i, i + LLM_EXTRACTION_BATCH_SIZE);
-      const batchResults = await collectShardTextResults({
+      const { results: batchResults, errors: batchErrors } = await collectShardTextResults({
         manifest,
         shards: batch,
         model,
@@ -667,8 +711,36 @@ export async function extractAndBuild(
           shardTextResults.set(shardIndex, text);
         }
       }
+
+      // 处理错误：致命错误终止流程，可恢复错误计入熔断计数
+      for (const err of batchErrors) {
+        if (err.type === 'fatal' && err.shouldAbort) {
+          globalAbort = true;
+          console.error('[extract-ontology] 致命错误，终止提取:', sanitizeForLog(err.detail));
+          break;
+        }
+        if (err.type === 'fatal') {
+          globalAbort = true;
+          console.error('[extract-ontology] 致命错误，终止提取:', sanitizeForLog(err.detail));
+          break;
+        }
+      }
+
+      // 熔断判断：连续失败超过阈值则跳过剩余分片
+      if (batchResults.size === 0 && batchErrors.length > 0 && batchErrors.every((e) => e.type === 'recoverable')) {
+        consecutiveFailures++;
+      } else {
+        consecutiveFailures = 0;
+      }
+
+      if (consecutiveFailures >= LLM_EXTRACTION_MAX_CONSECUTIVE_FAILURES) {
+        console.error('[extract-ontology] 连续 %d 批失败，触发熔断，跳过剩余分片', consecutiveFailures);
+        globalAbort = true;
+        break;
+      }
     }
 
+    if (globalAbort) break;
     pendingShards = activeShards.filter((s) => !shardTextResults.has(s.index));
   }
 

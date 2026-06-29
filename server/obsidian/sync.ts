@@ -13,6 +13,7 @@ import {
   renderManagedCardMarkdown,
   topicHash,
 } from './markdown';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
 
 export interface ObsidianConfig {
   vaultPath: string | null;
@@ -44,27 +45,32 @@ export function validateConfig(config: ObsidianConfig): {
     return { ok: false, error: '尚未配置 Obsidian Vault 路径' };
   }
 
-  const requestedVault = path.resolve(config.vaultPath);
-  if (!existsSync(requestedVault)) return { ok: false, error: 'Obsidian Vault 路径不存在' };
-  const vaultRoot = realpathSync(requestedVault);
-  if (!statSync(vaultRoot).isDirectory()) return { ok: false, error: 'Obsidian Vault 路径不是目录' };
-  if (!existsSync(path.join(vaultRoot, '.obsidian')) || !statSync(path.join(vaultRoot, '.obsidian')).isDirectory()) {
-    return { ok: false, error: '请选择包含 .obsidian 目录的真实 Obsidian Vault' };
-  }
+  try {
+    const requestedVault = path.resolve(config.vaultPath);
+    if (!existsSync(requestedVault)) return { ok: false, error: 'Obsidian Vault 路径不存在' };
+    const vaultRoot = realpathSync(requestedVault);
+    if (!statSync(vaultRoot).isDirectory()) return { ok: false, error: 'Obsidian Vault 路径不是目录' };
+    if (!existsSync(path.join(vaultRoot, '.obsidian')) || !statSync(path.join(vaultRoot, '.obsidian')).isDirectory()) {
+      return { ok: false, error: '请选择包含 .obsidian 目录的真实 Obsidian Vault' };
+    }
 
-  const notesDir = config.notesDir || 'LLM知识卡片';
-  const normalizedNotesDir = path.normalize(notesDir);
-  if (
-    path.isAbsolute(notesDir)
-    || normalizedNotesDir === '.'
-    || normalizedNotesDir === '..'
-    || normalizedNotesDir.startsWith(`..${path.sep}`)
-  ) {
-    return { ok: false, error: '笔记目录必须是 Vault 内的相对路径' };
-  }
+    const notesDir = config.notesDir || 'LLM知识卡片';
+    const normalizedNotesDir = path.normalize(notesDir);
+    if (
+      path.isAbsolute(notesDir)
+      || normalizedNotesDir === '.'
+      || normalizedNotesDir === '..'
+      || normalizedNotesDir.startsWith(`..${path.sep}`)
+    ) {
+      return { ok: false, error: '笔记目录必须是 Vault 内的相对路径' };
+    }
 
-  const filenameTemplate = normalizeFilenameTemplate(config.filenameTemplate);
-  return { ok: true, vaultRoot, notesDir: normalizedNotesDir, filenameTemplate };
+    const filenameTemplate = normalizeFilenameTemplate(config.filenameTemplate);
+    return { ok: true, vaultRoot, notesDir: normalizedNotesDir, filenameTemplate };
+  } catch (err) {
+    console.error('[validateConfig] 验证失败:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    return { ok: false, error: 'Obsidian 配置验证异常: ' + (err instanceof Error ? err.message : String(err)) };
+  }
 }
 
 function ensureInside(root: string, target: string): void {
@@ -127,7 +133,12 @@ export function writeObsidianCard(params: {
 }): ObsidianWriteResult {
   const validation = validateConfig(params.config);
   if (!validation.ok) throw new Error(validation.error);
-  ensureOntologyGraphColorGroups(validation.vaultRoot);
+
+  try {
+    ensureOntologyGraphColorGroups(validation.vaultRoot);
+  } catch (err) {
+    console.error('[writeObsidianCard] 清理 graph.json 失败:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+  }
 
   const syncedAt = new Date().toISOString();
   const notesRoot = path.resolve(validation.vaultRoot, validation.notesDir);

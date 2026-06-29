@@ -12,9 +12,9 @@ import {
   type NormalizedCalibrationSummary,
   categoryChars,
 } from './calibration-types';
-import { estimateTokens, isSubAgentTool, isTaskTool, roundTokens } from './utils';
+import { estimateTokensModelAware, isSubAgentTool, isTaskTool, roundTokens } from './utils';
 
-type JsonObject = Record<string, any>;
+type JsonObject = Record<string, unknown>;
 
 interface CodexLine {
   order: number;
@@ -96,10 +96,16 @@ export function isCodexJsonl(jsonlText: string): boolean {
   for (const raw of jsonlText.split('\n')) {
     if (!raw.trim()) continue;
     try {
-      const obj = JSON.parse(raw) as JsonObject;
+      const obj = JSON.parse(raw) as Record<string, unknown>;
       if (obj.type === 'session_meta' || obj.type === 'turn_context') return true;
-      if (obj.type === 'event_msg' && typeof obj.payload?.type === 'string') return true;
-      if (obj.type === 'response_item' && typeof obj.payload?.type === 'string') return true;
+      if (obj.type === 'event_msg') {
+        const payload = obj.payload;
+        if (typeof payload === 'object' && payload !== null && !Array.isArray(payload) && typeof (payload as Record<string, unknown>).type === 'string') return true;
+      }
+      if (obj.type === 'response_item') {
+        const payload = obj.payload;
+        if (typeof payload === 'object' && payload !== null && !Array.isArray(payload) && typeof (payload as Record<string, unknown>).type === 'string') return true;
+      }
     } catch {
       return false;
     }
@@ -197,9 +203,10 @@ function buildCodexTurns(lines: CodexLine[]): CodexTurn[] {
       const text = textFromCodexContent(payload.content).trim();
       if (text && !text.startsWith('<environment_context>')) current.prompt = text;
     } else if (line.type === 'event_msg' && payload.type === 'token_count') {
-      const usage = payload.info?.last_token_usage;
+      const info = payload.info as Record<string, unknown> | undefined;
+      const usage = info?.last_token_usage;
       if (isObject(usage)) current.tokenUsages.push({ line, usage });
-      const window = payload.info?.model_context_window;
+      const window = info?.model_context_window;
       if (typeof window === 'number') current.contextLimit = window;
     } else if (line.type === 'event_msg' && payload.type === 'task_complete') {
       current.durationMs = typeof payload.duration_ms === 'number' ? payload.duration_ms : undefined;
@@ -357,7 +364,7 @@ function buildSegments(
         });
       }
     } else if (isToolCallPayload(payload)) {
-      const call = calls.get(payload.call_id);
+      const call = calls.get(payload.call_id as string);
       if (!call) continue;
       tools[call.name] = (tools[call.name] ?? 0) + 1;
       incrementTool(cumTools, call.name);
@@ -435,12 +442,12 @@ function collectToolCalls(events: CodexLine[]): Map<string, ToolCall> {
     const p = event.payload;
     if (!isToolCallPayload(p)) continue;
     const input = p.type === 'function_call' || p.type === 'tool_search_call'
-      ? stringifyInput(p.arguments)
+      ? stringifyInput(p.arguments as string)
       : p.type === 'web_search_call'
-        ? stringifyInput(p.action)
-        : stringifyInput(p.input);
-    calls.set(p.call_id, {
-      callId: p.call_id,
+        ? stringifyInput(p.action as string)
+        : stringifyInput(p.input as string);
+    calls.set(p.call_id as string, {
+      callId: p.call_id as string,
       name: toolNameFor(p),
       input,
       ts: event.timestamp,
@@ -481,14 +488,15 @@ function collectToolResults(events: CodexLine[]): Map<string, ToolResult> {
         isError: false,
       });
     } else if (p.type === 'mcp_tool_call_end') {
-      const ok = p.result?.Ok;
-      const err = p.result?.Err;
+      const result = p.result as Record<string, unknown> | undefined;
+      const ok = result?.Ok;
+      const err = result?.Err;
       results.set(p.call_id, {
         callId: p.call_id,
-        output: outputToText(ok?.content ?? err ?? p.result),
+        output: outputToText((ok as Record<string, unknown> | undefined)?.content ?? err ?? p.result),
         ts: event.timestamp,
         order: event.order,
-        isError: ok?.isError === true || Boolean(err),
+        isError: (ok as Record<string, unknown> | undefined)?.isError === true || Boolean(err),
         durationMs: durationToMs(p.duration),
       });
     } else if (p.type === 'patch_apply_end' && !results.has(p.call_id)) {
@@ -637,7 +645,7 @@ function aggregateCodexSession(
     for (const [name, calls] of Object.entries(turn.tools)) {
       const existing = toolMap.get(name) ?? { calls: 0, resultTokens: 0 };
       existing.calls += calls;
-      const agg = (turn as any).cumTools?.[name]?.resultTokens;
+      const agg = turn.cumTools?.[name]?.resultTokens;
       if (typeof agg === 'number') existing.resultTokens = Math.max(existing.resultTokens, agg);
       toolMap.set(name, existing);
     }
@@ -675,7 +683,8 @@ function initComp(seed?: Record<string, number>): Record<string, number> {
 
 function addTokens(comp: Record<string, number>, key: string, text: string): void {
   if (!text) return;
-  comp[key] = (comp[key] ?? 0) + Math.round(estimateTokens(text));
+  // 使用模型感知估算：Codex 日志通常为英文/代码混合
+  comp[key] = (comp[key] ?? 0) + Math.round(estimateTokensModelAware(text));
 }
 
 function addTokenCount(comp: Record<string, number>, key: string, count: number): void {

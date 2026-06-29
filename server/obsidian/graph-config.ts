@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
 
 const OBSOLETE_ONTOLOGY_GRAPH_QUERIES = new Set<string>([
   { query: 'tag:#来源/大模型上下文', rgb: 14701138 },
@@ -31,17 +32,30 @@ interface GraphConfig {
 }
 
 export function ensureOntologyGraphColorGroups(vaultRoot: string): void {
-  const obsidianDir = path.join(vaultRoot, '.obsidian');
-  const graphPath = path.join(obsidianDir, 'graph.json');
+  let obsidianDir: string;
+  let graphPath: string;
+  let config: GraphConfig;
 
-  if (!existsSync(obsidianDir) || !existsSync(graphPath)) return;
+  try {
+    obsidianDir = path.join(vaultRoot, '.obsidian');
+    graphPath = path.join(obsidianDir, 'graph.json');
 
-  const config = JSON.parse(readFileSync(graphPath, 'utf-8')) as GraphConfig;
+    if (!existsSync(obsidianDir) || !existsSync(graphPath)) return;
 
-  const existing = Array.isArray(config.colorGroups) ? config.colorGroups : [];
-  config.colorGroups = existing.filter((group) => {
-    const query = group.query.trim();
-    return !LEGACY_ONTOLOGY_GRAPH_QUERIES.has(query) && !OBSOLETE_ONTOLOGY_GRAPH_QUERIES.has(query);
-  });
-  writeFileSync(graphPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+    config = JSON.parse(readFileSync(graphPath, 'utf-8')) as GraphConfig;
+  } catch (err) {
+    console.error('[ensureOntologyGraphColorGroups] 读取 graph.json 失败:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    return;
+  }
+
+  try {
+    const existing = Array.isArray(config.colorGroups) ? config.colorGroups : [];
+    config.colorGroups = existing.filter((group) => {
+      const query = (group.query ?? '').trim();
+      return !LEGACY_ONTOLOGY_GRAPH_QUERIES.has(query) && !OBSOLETE_ONTOLOGY_GRAPH_QUERIES.has(query);
+    });
+    writeFileSync(graphPath!, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  } catch (err) {
+    console.error('[ensureOntologyGraphColorGroups] 写入 graph.json 失败:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+  }
 }

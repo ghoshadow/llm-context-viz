@@ -119,7 +119,8 @@ function GrowthChart({
   const IMAX = requests > 0 ? requests : (series.length > 0 ? series[series.length - 1]!.i : 1);
   // VMAX: accommodate the assembled line (cumulative) + single-request peak
   const maxAssembled = series.length > 0 ? Math.max(...series.map(p => p.assembled)) : 0;
-  const VMAX = Math.max(contextLimit, maxAssembled * 1.05, peakTokens * 1.15);
+  const rawVmax = Math.max(contextLimit, maxAssembled * 1.05, peakTokens * 1.15);
+  const VMAX = Number.isFinite(rawVmax) && rawVmax > 0 ? rawVmax : contextLimit;
 
   const X = (i: number) => (i / IMAX) * W;
   const Y = (v: number) => H - (v / VMAX) * H;
@@ -361,6 +362,9 @@ interface PeakSessionData {
   peak_turn_idx?: number;
   peak_step?: number;
   total_output?: number;
+  categories?: ContextCategory[];
+  tools?: ToolAggregation[];
+  series?: SeriesPoint[];
 }
 
 interface PeakDataProps {
@@ -377,7 +381,7 @@ interface PeakDataProps {
 export default function ContextAssembly({ peakData, embedded, mode }: PeakDataProps = {}) {
   const isCum = mode === 'cumulative';
   const sessionFromStore = useSessionStore((s) => s.currentSession);
-  const session = (peakData ? peakData.session : sessionFromStore) as PeakSessionData | any;
+  const session = (peakData ? peakData.session : sessionFromStore) as PeakSessionData | null;
   const setPage = useUIStore((s) => s.setPage);
   const hoveredCategory = useUIStore((s) => s.hoveredCategory);
   const setHoveredCategory = useUIStore((s) => s.setHoveredCategory);

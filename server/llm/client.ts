@@ -1,21 +1,25 @@
 /**
- * client.ts — shared LLM invocation helper.
+ * client.ts — 共享 LLM 调用助手。
  *
- * Eliminates the duplicated query() boilerplate that was copy-pasted between
- * routes/sessions.ts (translate) and services/card-summary.ts (summary).
+ * 消除 routes/sessions.ts（translate）和 services/card-summary.ts（summary）
+ * 中重复的 query() 模板代码。
+ *
+ * 安全：
+ * - 用户数据通过 `<user_data>...</user_data>` XML 标签与系统指令分层，防止 Prompt 注入
+ * - process.env 只传递白名单变量，禁止全量展开泄漏凭据
  */
 
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-
-const DEFAULT_MODEL = 'deepseek-v4-pro';
-const DEFAULT_BASE_URL = 'https://api.deepseek.com/anthropic';
+import { DEFAULT_MODEL, DEFAULT_BASE_URL, buildSafeEnv } from './config';
 
 export interface LLMCallOptions {
   model?: string;
 }
 
+type LLMRequestEnv = Partial<Pick<NodeJS.ProcessEnv, 'LLM_MODEL' | 'LLM_BASE_URL'>>;
+
 export function resolveLLMRequestConfig(
-  env: Pick<NodeJS.ProcessEnv, 'LLM_MODEL' | 'LLM_BASE_URL'>,
+  env: LLMRequestEnv,
   options: LLMCallOptions = {},
 ): { model: string; baseUrl: string } {
   return {
@@ -25,31 +29,52 @@ export function resolveLLMRequestConfig(
 }
 
 /**
- * Send a single-turn prompt to the LLM and return the concatenated text reply.
+ * 将用户来源数据用 XML 标签包裹，与系统指令明确分层，防止 Prompt 注入。
+ */
+export function wrapUserData(text: string): string {
+  return `<user_data>\n${text}\n</user_data>`;
+}
+
+/**
+ * 发送结构化 prompt（system + user 分层）到 LLM 并返回拼接的文本回复。
  *
- * Throws if LLM_API_KEY is not set or the model returns an empty response.
- * The caller is responsible for catching errors and translating them into
- * appropriate HTTP responses.
+ * 如果未设置 LLM_API_KEY 或模型返回空响应，则抛出错误。
+ * 调用方负责捕获错误并将其转换为适当的 HTTP 响应。
  */
 export async function callLLM(prompt: string, options: LLMCallOptions = {}): Promise<string> {
+  return callLLMStructured({ user: prompt }, options);
+}
+
+/**
+ * 发送结构化 prompt（system + user 分层）到 LLM 并返回拼接的文本回复。
+ *
+ * 与 callLLM 不同，此函数将系统指令和用户数据分开传递，
+ * 用户数据会自动用 `<user_data>...</user_data>` 包裹以防止注入。
+ */
+export async function callLLMStructured(
+  parts: { system?: string; user: string },
+  options: LLMCallOptions = {},
+): Promise<string> {
   const { model, baseUrl } = resolveLLMRequestConfig(process.env, options);
   const apiKey = process.env.LLM_API_KEY;
 
   if (!apiKey) throw new Error('未设置 LLM_API_KEY 环境变量');
 
+  // 构建安全 prompt：系统指令与用户数据分层
+  let fullPrompt = parts.system ? `${parts.system}\n\n` : '';
+  fullPrompt += wrapUserData(parts.user);
+
   const q = query({
-    prompt,
+    prompt: fullPrompt,
     options: {
       model,
       maxTurns: 1,
       thinking: { type: 'disabled' as const },
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      env: {
-        ...process.env,
+      permissionMode: 'default',
+      env: buildSafeEnv({
         ANTHROPIC_API_KEY: apiKey,
         ANTHROPIC_BASE_URL: baseUrl,
-      } as Record<string, string>,
+      }),
     },
   });
 

@@ -113,3 +113,29 @@ test('rejects truncated translation responses instead of caching partial text', 
     /翻译 API 返回被截断: length/,
   );
 });
+
+test('waits before retrying retryable translation API errors', async () => {
+  const startedAt = Date.now();
+  const attemptTimes: number[] = [];
+  const fetchImpl: typeof fetch = async () => {
+    attemptTimes.push(Date.now() - startedAt);
+    if (attemptTimes.length === 1) {
+      return new Response(JSON.stringify({ error: { message: 'rate limited' } }), { status: 429 });
+    }
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: '已翻译' }, finish_reason: 'stop' }],
+    }), { status: 200 });
+  };
+
+  const text = await callTranslationLLM('Translate me', {
+    env: { LLM_API_KEY: 'test-key' },
+    fetchImpl,
+  });
+
+  assert.equal(text, '已翻译');
+  assert.equal(attemptTimes.length, 2);
+  assert.ok(
+    attemptTimes[1]! >= 900,
+    `second attempt should wait for first backoff, got ${attemptTimes[1]}ms`,
+  );
+});

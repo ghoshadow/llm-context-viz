@@ -75,6 +75,13 @@ export interface AssistantLine extends SessionLine {
   message: AssistantMessage;
 }
 
+// --- Attachment line ---
+
+export interface AttachmentLine extends SessionLine {
+  type: 'attachment';
+  attachment: Record<string, unknown>;
+}
+
 // --- System line ---
 
 export interface SystemLine extends SessionLine {
@@ -155,6 +162,13 @@ export interface ToolAggregation {
   task: boolean;
 }
 
+/** Raw tool snapshot entry stored in cumTools / cum_tools_json. */
+export interface RawToolEntry {
+  calls: number;
+  resultTokens: number;
+  task: boolean;
+}
+
 export interface SessionSummary {
   session: {
     model: string;
@@ -179,6 +193,12 @@ export interface SessionSummary {
 // Turn Grouping — pipeline stage 1 output
 // ============================================================================
 
+export interface AttachmentSummary {
+  type: string;
+  content: unknown;
+  timestamp: string;
+}
+
 export interface TurnGroup {
   /** 1-based turn index. */
   turnIndex: number;
@@ -191,7 +211,7 @@ export interface TurnGroup {
   /** Tool-result user messages that arrive between assistant responses. */
   toolResultLines: UserLine[];
   /** System attachments (skill_listing, task_reminder, etc.) not in systemLines. */
-  attachmentLines?: Array<{ type: string; content: any; timestamp: string }>;
+  attachmentLines?: AttachmentSummary[];
   /** First event timestamp (ISO). */
   startTs: string;
   /** Last event timestamp (ISO). */
@@ -293,6 +313,7 @@ export interface TurnData {
   comp: Record<string, number>;
   /** Cache hit from the last request (for cum_total display). */
   cumCacheHit?: number;
+  /** Cumulative tools snapshot at turn end (name -> calls, resultTokens, task). */
   cumTools?: Record<string, { calls: number; resultTokens: number; task: boolean }>;
   /** Cumulative total context tokens at turn end. */
   cumTotal: number;
@@ -342,11 +363,12 @@ export interface TurnSummary {
   max_req_idx?: number;
   max_req_step?: number;
   cum_cache_hit?: number;
+  cum_tools_json?: string;
   out_tok: number;
   cum_total: number;
   dur_ms: number;
   step_count: number;
-  compression_reset?: boolean;
+  compression_reset?: boolean | number;
 }
 
 export interface TurnListPage {

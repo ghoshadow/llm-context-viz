@@ -7,15 +7,16 @@ import {
   type LegacyClaudeSummary,
   type NormalizedCalibration,
   type NormalizedCalibrationSummary,
+  CALIBRATION_DEFAULTS,
   legacyClaudeSummaryToNormalized,
   normalizeAgentSource,
   normalizedToLegacyClaudeSummary,
 } from '../../src/pipeline/calibration-types';
 
 export const DEFAULT_CALIBRATION_CONSTANTS = {
-  SYS_PROMPT_FALLBACK_CHARS: 5768,
-  TOOL_DEFS_FALLBACK_CHARS: 98949,
-  SYSTEM_REMINDER_CHROME_CHARS: 612,
+  SYS_PROMPT_FALLBACK_CHARS: CALIBRATION_DEFAULTS.SYS_PROMPT_CHARS,
+  TOOL_DEFS_FALLBACK_CHARS: CALIBRATION_DEFAULTS.TOOL_DEFS_CHARS,
+  SYSTEM_REMINDER_CHROME_CHARS: CALIBRATION_DEFAULTS.USER_WRAPPER_CHARS,
 };
 
 export type CalibrationConstantsSource = 'project' | 'defaults';
@@ -180,8 +181,24 @@ function defaultNormalizedConstants(cwd: string, source: AgentSource, path: stri
   };
 }
 
+interface LoadedCalibrationData {
+  schemaVersion?: number;
+  categories?: Record<string, unknown>;
+  constantsSource?: string;
+  path?: string;
+  cwd?: string;
+  note?: string;
+  appliedAt?: string;
+  ccVersion?: string;
+  model?: string;
+  details?: Record<string, string>;
+  SYS_PROMPT_FALLBACK_CHARS?: number;
+  TOOL_DEFS_FALLBACK_CHARS?: number;
+  SYSTEM_REMINDER_CHROME_CHARS?: number;
+}
+
 function normalizeLoadedConstants(
-  data: any,
+  data: LoadedCalibrationData,
   source: AgentSource,
   cwd: string,
   path: string,

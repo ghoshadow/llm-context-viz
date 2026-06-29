@@ -9,6 +9,7 @@
 
 import { isCodexJsonl, runCodexPipeline } from '../../src/pipeline/codex-jsonl';
 import type { TimelineSegment, TurnData } from '../../src/types/session';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
 
 /** 单个 turn 的结构化内容 */
 export interface TurnContent {
@@ -349,7 +350,8 @@ export function extractContentWithTurns(rawJsonl: string): TurnContent[] {
           }
         }
       }
-    } catch {
+    } catch (parseErr) {
+      console.error('JSONL 行解析失败:', sanitizeForLog(parseErr instanceof Error ? parseErr.message : String(parseErr)));
       // 跳过非法 JSON 行
     }
   }

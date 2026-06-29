@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { mkdirSync, existsSync, renameSync } from 'fs';
+import { sanitizeForLog } from './utils/log-sanitizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -8,19 +10,63 @@ const __dirname = path.dirname(__filename);
 let db: Database.Database | null = null;
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'llm-context.db');
+const DB_DIR = path.join(__dirname, '..', 'data');
 
+/**
+ * Get or create the database connection with retry logic and crash protection.
+ *
+ * 如果数据库文件所在目录不存在，自动创建。
+ * 如果数据库文件损坏，尝试备份并重建。
+ */
 export function getDb(): Database.Database {
   if (db) return db;
 
-  db = new Database(DB_PATH);
+  // 确保 data 目录存在
+  try {
+    if (!existsSync(DB_DIR)) {
+      mkdirSync(DB_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.error(`无法创建数据目录 ${sanitizeForLog(DB_DIR)}:`, sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    throw new Error(`数据目录 ${DB_DIR} 创建失败，请检查文件系统权限`);
+  }
 
-  // Enable WAL mode for better concurrent read performance
-  db.pragma('journal_mode = WAL');
+  let attempts = 0;
+  const MAX_ATTEMPTS = 3;
 
-  // Enable foreign key enforcement
-  db.pragma('foreign_keys = ON');
+  while (attempts < MAX_ATTEMPTS) {
+    try {
+      db = new Database(DB_PATH);
+      // Enable WAL mode for better concurrent read performance
+      db.pragma('journal_mode = WAL');
+      // Enable foreign key enforcement
+      db.pragma('foreign_keys = ON');
+      return db;
+    } catch (err) {
+      attempts++;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`数据库连接失败 (第 ${attempts} 次尝试):`, sanitizeForLog(message));
 
-  return db;
+      if (attempts >= MAX_ATTEMPTS) {
+        console.error(`数据库连接失败，已尝试 ${MAX_ATTEMPTS} 次，放弃重试`);
+        throw new Error(`数据库 ${sanitizeForLog(DB_PATH)} 连接失败: ${sanitizeForLog(message)}`);
+      }
+
+      // 如果第一次失败，尝试备份损坏的数据库文件后重试
+      if (attempts === 1 && existsSync(DB_PATH)) {
+        try {
+          const backupPath = DB_PATH + '.backup-' + Date.now();
+          renameSync(DB_PATH, backupPath);
+          console.warn(`已将可能损坏的数据库文件备份到 ${sanitizeForLog(backupPath)}`);
+        } catch (backupErr) {
+          console.error('备份损坏数据库文件失败:', sanitizeForLog(backupErr instanceof Error ? backupErr.message : String(backupErr)));
+        }
+      }
+    }
+  }
+
+  // 理论上不可达，但确保类型安全
+  throw new Error('数据库初始化失败');
 }
 
 export function initDb(): void {
@@ -326,6 +372,7 @@ export function migrate(): void {
   // Old table had (session_id, turn_index, step_index) PK — drop and recreate
   if (userVersion < 4) {
     conn.exec(`
+      BEGIN TRANSACTION;
       DROP TABLE IF EXISTS turn_translations;
       CREATE TABLE turn_translations (
         session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -336,6 +383,7 @@ export function migrate(): void {
         created_at TEXT DEFAULT (datetime('now')),
         PRIMARY KEY (session_id, turn_index, step_index, section_index)
       );
+      COMMIT;
     `);
     conn.pragma('user_version = 4');
   }
@@ -374,6 +422,7 @@ export function migrate(): void {
 
 export function migrateTurnTranslationsV7(conn: Database.Database): void {
   conn.exec(`
+    BEGIN TRANSACTION;
     CREATE TABLE turn_translations_v7 (
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       turn_index INTEGER NOT NULL,
@@ -390,5 +439,6 @@ export function migrateTurnTranslationsV7(conn: Database.Database): void {
 
     DROP TABLE turn_translations;
     ALTER TABLE turn_translations_v7 RENAME TO turn_translations;
+    COMMIT;
   `);
 }

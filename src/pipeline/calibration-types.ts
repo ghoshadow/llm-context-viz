@@ -1,52 +1,25 @@
-export type AgentSource = 'claude' | 'codex' | 'opencode' | 'openclaw';
+/**
+ * calibration-types.ts — 校准类型。
+ *
+ * 类型定义已迁移到 shared/types/calibration.ts。
+ * 本文件保留独有工具函数并重导出共享类型。
+ */
 
-export type CalibrationCategoryKey =
-  | 'sysPrompt'
-  | 'tool_defs'
-  | 'skills'
-  | 'memory'
-  | 'memoryGlobal'
-  | 'memoryProject'
-  | 'mcp'
-  | 'reminders'
-  | 'userMsgs';
+// Re-export all shared types
+export type {
+  AgentSource,
+  CalibrationCategory,
+  CalibrationUsage,
+  CalibrationCategoryKey,
+  NormalizedCalibrationSummary,
+  NormalizedCalibration,
+} from '../../shared/types/calibration';
 
-export interface CalibrationCategory {
-  chars: number;
-  tokens?: number;
-  detailKey?: string;
-  origin?: 'capture' | 'jsonl' | 'default';
-}
+export { CALIBRATION_DEFAULTS } from '../../shared/types/calibration';
 
-export interface CalibrationUsage {
-  firstRequestInputTokens?: number;
-  firstRequestCachedTokens?: number;
-  firstRequestOutputTokens?: number;
-  firstRequestReasoningTokens?: number;
-}
+// ── 本文件独有的工具函数 ──────────────────────────────────────────────────────
 
-export interface NormalizedCalibrationSummary {
-  categories: Partial<Record<CalibrationCategoryKey, CalibrationCategory>>;
-  usage?: CalibrationUsage;
-  toolNames?: string[];
-  hashes?: Record<string, string>;
-}
-
-export interface NormalizedCalibration extends NormalizedCalibrationSummary {
-  schemaVersion: 1;
-  source: AgentSource;
-  constantsSource?: 'project' | 'defaults';
-  path?: string;
-  cwd?: string;
-  note?: string;
-  appliedAt?: string;
-  cliVersion?: string;
-  ccVersion?: string;
-  model?: string;
-  wireApi?: string;
-  rawLogPath?: string;
-  details?: Record<string, string>;
-}
+import type { NormalizedCalibrationSummary, CalibrationCategoryKey, AgentSource } from '../../shared/types/calibration';
 
 export interface LegacyClaudeSummary {
   SYS_PROMPT_FALLBACK_CHARS: number;
