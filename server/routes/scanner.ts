@@ -1,10 +1,19 @@
 import { Router } from 'express';
-import { readdirSync, statSync, readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
+import { readFile, readdir, stat } from 'fs/promises';
 import { join, basename } from 'path';
 import { homedir } from 'os';
 import crypto from 'crypto';
-import { getDb } from '../db';
 import { createSession } from '../services/pipeline-service';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
+import { validateBody, ImportRequestSchema } from '../middleware/validate.js';
+import {
+  getAllScannedFiles,
+  upsertScannedFile,
+  clearScannedFiles,
+  getAllImportedFilenames,
+  findSessionByHash,
+} from '../repositories/session-repository';
 
 const router = Router();
 
@@ -33,30 +42,36 @@ function inferSource(filePath: string): SessionSource {
   return filePath.includes(`${join(homedir(), '.codex')}/`) ? 'codex' : 'claude';
 }
 
-function scanDir(dir: string, maxDepth = 3): ScannedFile[] {
+async function scanDir(dir: string, maxDepth = 3): Promise<ScannedFile[]> {
   const results: ScannedFile[] = [];
   if (!existsSync(dir)) return results;
 
   try {
-    const entries = readdirSync(dir);
-    for (const entry of entries) {
-      const full = join(dir, entry);
-      try {
-        const st = statSync(full);
-        if (st.isDirectory() && maxDepth > 0 && !entry.startsWith('.') && entry !== 'subagents') {
-          results.push(...scanDir(full, maxDepth - 1));
-        } else if (st.isFile() && entry.endsWith('.jsonl') && !entry.startsWith('agent-')) {
-          results.push({
-            path: full,
-            name: entry,
-            size: st.size,
-            modified: st.mtime.toISOString(),
-            source: inferSource(full),
-          });
+    const entries = await readdir(dir);
+    const entryResults = await Promise.all(
+      entries.map(async (entry) => {
+        const full = join(dir, entry);
+        try {
+          const st = await stat(full);
+          if (st.isDirectory() && maxDepth > 0 && !entry.startsWith('.') && entry !== 'subagents') {
+            return await scanDir(full, maxDepth - 1);
+          } else if (st.isFile() && entry.endsWith('.jsonl') && !entry.startsWith('agent-')) {
+            return [{
+              path: full,
+              name: entry,
+              size: st.size,
+              modified: st.mtime.toISOString(),
+              source: inferSource(full),
+            }] as ScannedFile[];
+          }
+        } catch {
+          // skip inaccessible entries
         }
-      } catch {
-        // skip inaccessible entries
-      }
+        return [] as ScannedFile[];
+      }),
+    );
+    for (const group of entryResults) {
+      results.push(...group);
     }
   } catch {
     // skip inaccessible directories
@@ -76,12 +91,18 @@ interface FoundFile extends ScannedFile {
 }
 
 /** Quick metadata extraction from JSONL without running the full pipeline. */
-function isQuickToolResult(obj: any): boolean {
-  if (obj.message?.role !== 'user') return false;
-  const content = obj.message?.content;
+function isQuickToolResult(obj: Record<string, unknown>): boolean {
+  const message = obj.message as { role?: string; content?: unknown } | undefined;
+  if (message?.role !== 'user') return false;
+  const content = message?.content;
   if (typeof content === 'string') return false;
   if (Array.isArray(content)) {
-    return content.some((b: any) => b.type === 'tool_result');
+    return content.some((b: unknown) => {
+      if (typeof b === 'object' && b !== null) {
+        return (b as Record<string, unknown>).type === 'tool_result';
+      }
+      return false;
+    });
   }
   return false;
 }
@@ -129,16 +150,15 @@ function quickMetaClaude(raw: string): { title?: string; model?: string; request
           // Skip task notifications (same as pipeline's startsNewTurn)
           const c = obj.message?.content;
           if (typeof c === 'string' && c.startsWith('<task-notification>')) {
-            // skip
+            // promptId fallback: pipeline counts these as turns even without content
+            if (obj.promptId) turnCount++;
+            // else skip
           } else {
             if (!title && typeof c === 'string') {
               title = c.slice(0, 80);
             }
             turnCount++;
           }
-        } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isSidechain && !isQuickToolResult(obj) && obj.promptId) {
-          // promptId fallback (pipeline: startsNewTurn returns true for promptId even without content)
-          turnCount++;
         }
       } catch { /* skip malformed lines */ }
     }
@@ -197,7 +217,7 @@ function quickMetaCodex(raw: string): { title?: string; model?: string; requests
 //   paths  - comma-separated list of directories to scan (optional)
 //   depth  - max subdirectory depth (default 3)
 
-router.get('/scan', (_req, res) => {
+router.get('/scan', async (_req, res) => {
   try {
     const pathsParam = _req.query.paths as string | undefined;
     const dirs = pathsParam
@@ -208,17 +228,16 @@ router.get('/scan', (_req, res) => {
     const force = _req.query.force === '1';
 
     const allFiles: ScannedFile[] = [];
-    for (const dir of dirs) {
-      allFiles.push(...scanDir(dir, maxDepth));
+    const dirResults = await Promise.all(dirs.map((dir) => scanDir(dir, maxDepth)));
+    for (const group of dirResults) {
+      allFiles.push(...group);
     }
     allFiles.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
-
-    const db = getDb();
 
     // Load cached scan results
     const cache = new Map<string, { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number; hash: string; modified: string }>();
     try {
-      const rows = db.prepare('SELECT * FROM scanned_files').all() as any[];
+      const rows = getAllScannedFiles();
       for (const r of rows) {
         cache.set(r.path, { title: r.title, model: r.model, requests: r.requests ?? 0, peakTokens: r.peak_tokens ?? 0, turnCount: r.turn_count ?? 0, hash: r.hash ?? '', modified: r.modified ?? '' });
       }
@@ -228,60 +247,57 @@ router.get('/scan', (_req, res) => {
     // as the JSONL grows during an active session)
     const dbImported = new Set<string>();
     try {
-      const rows = db.prepare('SELECT filename FROM sessions').all() as { filename: string }[];
-      for (const row of rows) dbImported.add(row.filename);
+      const filenames = getAllImportedFilenames();
+      for (const fn of filenames) dbImported.add(fn);
     } catch { }
-
-    const upsertStmt = db.prepare(`
-      INSERT INTO scanned_files (path, name, size, modified, hash, title, model, requests, peak_tokens, turn_count, last_seen)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(path) DO UPDATE SET
-        size=excluded.size, modified=excluded.modified, hash=excluded.hash,
-        title=excluded.title, model=excluded.model, requests=excluded.requests,
-        peak_tokens=excluded.peak_tokens, turn_count=excluded.turn_count,
-        last_seen=excluded.last_seen
-    `);
 
     // When forcing rescan, only clear the scanned_files cache so hashes
     // are recomputed.  Sessions are left intact — a file is "imported" iff
     // its current hash already exists in the sessions table.
     if (force) {
       try {
-        db.prepare('DELETE FROM scanned_files').run();
+        clearScannedFiles();
         cache.clear();
       } catch { }
     }
 
     let cached = 0, scanned = 0;
     const files: FoundFile[] = [];
-    for (const f of allFiles) {
-      const cachedMeta = cache.get(f.path);
-      let result: FoundFile;
-      if (!force && cachedMeta && cachedMeta.modified === f.modified) {
-        result = { ...f, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
-      } else {
-        let hash = '';
-        let meta: ReturnType<typeof quickMeta> = { requests: 0, peakTokens: 0, turnCount: 0 };
-        try {
-          const content = readFileSync(f.path, 'utf-8');
-          hash = crypto.createHash('sha256').update(content).digest('hex');
-          meta = quickMeta(f.path, content);
-        } catch { /* can't read */ }
-        try {
-          upsertStmt.run(f.path, f.name, f.size, f.modified, hash, meta.title || null, meta.model || null, meta.requests, meta.peakTokens, meta.turnCount);
-        } catch { }
-        result = { ...f, ...meta, hash, imported: dbImported.has(f.name) };
-      }
+    const fileResults = await Promise.all(
+      allFiles.map(async (f) => {
+        const cachedMeta = cache.get(f.path);
+        let result: FoundFile;
+        if (!force && cachedMeta && cachedMeta.modified === f.modified) {
+          result = { ...f, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
+        } else {
+          let hash = '';
+          let meta: ReturnType<typeof quickMeta> = { requests: 0, peakTokens: 0, turnCount: 0 };
+          try {
+            const content = await readFile(f.path, 'utf-8');
+            hash = crypto.createHash('sha256').update(content).digest('hex');
+            meta = quickMeta(f.path, content);
+          } catch { /* can't read */ }
+          try {
+            upsertScannedFile({
+              path: f.path, name: f.name, size: f.size, modified: f.modified, hash,
+              title: meta.title || null, model: meta.model || null,
+              requests: meta.requests, peakTokens: meta.peakTokens, turnCount: meta.turnCount,
+            });
+          } catch { }
+          result = { ...f, ...meta, hash, imported: dbImported.has(f.name) };
+        }
 
-      // Filter out sessions with 0 turns and 0 requests
-      if ((result.turnCount ?? 0) === 0 && (result.requests ?? 0) === 0) continue;
+        // Filter out sessions with 0 turns and 0 requests
+        if ((result.turnCount ?? 0) === 0 && (result.requests ?? 0) === 0) return null;
 
-      files.push(result);
-      if (!force && cachedMeta && cachedMeta.modified === f.modified) {
-        cached++;
-      } else {
-        scanned++;
-      }
+        return { result, wasCached: !force && cachedMeta && cachedMeta.modified === f.modified };
+      }),
+    );
+
+    for (const item of fileResults) {
+      if (!item) continue;
+      files.push(item.result);
+      if (item.wasCached) cached++; else scanned++;
     }
 
     res.json({
@@ -293,7 +309,8 @@ router.get('/scan', (_req, res) => {
       files,
     });
   } catch (err) {
-    res.status(500).json({ error: '扫描失败: ' + (err as Error).message });
+    console.error('GET /scan error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    res.status(500).json({ error: '扫描失败: ' + (err instanceof Error ? err.message : String(err)) });
   }
 });
 
@@ -321,157 +338,25 @@ function extractSessionTitle(jsonlContent: string): string {
   return '';
 }
 
-/** Read sub-agent logs from the session directory and attach summaries to turns. */
-export function enrichWithSubAgents(turns: any[], sessDir: string) {
-  const subDir = join(sessDir, 'subagents');
-  if (!existsSync(subDir)) return;
-
-  // Collect all .jsonl files recursively (subagents + subagents/workflows/*)
-  let subFiles: string[] = [];
-  function collectJsonl(dir: string, depth: number) {
-    if (depth > 3) return;
-    try {
-      for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry);
-        try {
-          const st = statSync(full);
-          if (st.isDirectory() && !entry.startsWith('.')) {
-            collectJsonl(full, depth + 1);
-          } else if (st.isFile() && entry.endsWith('.jsonl')) {
-            subFiles.push(full);
-          }
-        } catch { /* skip */ }
-      }
-    } catch { /* skip */ }
-  }
-  collectJsonl(subDir, 0);
-
-  const subAgents: any[] = [];
-  for (const f of subFiles) {
-    try {
-      const raw = readFileSync(f, 'utf-8');
-      const lines = raw.split('\n').filter(l => l.trim());
-      let model = '', firstPrompt = '', asstCount = 0, firstTs = '', lastTs = '';
-      const toolCalls: string[] = [];
-
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          const ts = obj.timestamp;
-          if (ts) { if (!firstTs) firstTs = ts; lastTs = ts; }
-          if (obj.type === 'assistant') {
-            asstCount++;
-            if (!model && obj.message?.model) model = obj.message.model;
-            for (const b of (obj.message?.content ?? [])) {
-              if (b.type === 'tool_use' && toolCalls.length < 5) {
-                if (!toolCalls.includes(b.name)) toolCalls.push(b.name);
-              }
-            }
-          }
-          if (obj.type === 'user' && !obj.isSidechain && !firstPrompt) {
-            const c = obj.message?.content;
-            firstPrompt = typeof c === 'string' ? c.slice(0, 120) : '';
-          }
-        } catch { /* skip */ }
-      }
-
-      let dur = 0;
-      if (firstTs && lastTs) {
-        dur = Math.max(0, new Date(lastTs).getTime() - new Date(firstTs).getTime());
-      }
-
-      subAgents.push({ file: f, model, prompt: firstPrompt, asstCount, durMs: dur, toolCalls, firstTs, lastTs });
-    } catch { /* skip */ }
-  }
-
-  if (subAgents.length === 0) return;
-
-  // Separate workflow sub-agents (in subagents/workflows/) from direct ones
-  const workflowAgents = subAgents.filter((sa: any) => sa.file.includes('/workflows/'));
-  const directAgents = subAgents.filter((sa: any) => !sa.file.includes('/workflows/'));
-
-  for (const turn of turns) {
-    // Workflow sub-agents → attach to the LAST Workflow segment in the turn
-    if (workflowAgents.length > 0) {
-      let lastWfSeg: any = null;
-      for (const seg of (turn.segs ?? [])) {
-        if (seg.k === 's' && seg.n === 'Workflow') lastWfSeg = seg;
-      }
-      if (lastWfSeg && lastWfSeg.det) {
-        lastWfSeg.det.subAgents = workflowAgents;
-      }
-    }
-
-    // Direct sub-agents → match each to the LAST Agent call that
-    // happened before the sub-agent started.  This correctly assigns
-    // sub-agents to overlapping/consecutive Agent calls in the same turn.
-    if (directAgents.length > 0) {
-      // Collect all Agent call times (m-segment ts before each s-segment)
-      const agentCalls: { seg: any; callMs: number }[] = [];
-      for (let si = 0; si < (turn.segs ?? []).length; si++) {
-        const seg = turn.segs![si]!;
-        if (seg.k !== 's') continue;
-        // Call time = timestamp of the last m-segment before this s-segment
-        let callMs = new Date(seg.ts).getTime();
-        for (let j = si - 1; j >= 0; j--) {
-          if (turn.segs![j]!.k === 'm') {
-            callMs = new Date(turn.segs![j]!.ts).getTime();
-            break;
-          }
-        }
-        agentCalls.push({ seg, callMs });
-      }
-
-      // Turn window: only match sub-agents that started within this turn
-      const turnStartMs = new Date(turn.ts).getTime();
-      const turnEndMs = turns.indexOf(turn) + 1 < turns.length
-        ? new Date(turns[turns.indexOf(turn) + 1]!.ts).getTime()
-        : Infinity;
-
-      for (const sa of directAgents) {
-        if (!sa.firstTs) continue;
-        const saMs = new Date(sa.firstTs).getTime();
-        if (saMs < turnStartMs || saMs >= turnEndMs) continue; // wrong turn
-
-        // Find the last Agent call that happened before this sub-agent started
-        let best: { seg: any; callMs: number } | null = null;
-        for (const ac of agentCalls) {
-          if (ac.callMs <= saMs) {
-            if (!best || ac.callMs > best.callMs) {
-              best = ac;
-            }
-          }
-        }
-
-        if (best && best.seg.det) {
-          if (!best.seg.det.subAgents) best.seg.det.subAgents = [];
-          best.seg.det.subAgents.push(sa);
-        }
-      }
-    }
-  }
-}
+// Re-export from dedicated service module for backward compatibility.
+export { enrichWithSubAgents } from '../services/sub-agent-enricher.js';
 
 // ── POST /import ───────────────────────────────────────────────────────────
 // Body: { path: string } — absolute path to a .jsonl file
 
-router.post('/import', (req, res) => {
+router.post('/import', validateBody(ImportRequestSchema), async (req, res) => {
   try {
-    const filePath = (req.body as { path?: string }).path;
-    if (!filePath) {
-      return res.status(400).json({ error: '缺少文件路径' });
-    }
+    const filePath = req.body.path;
 
     if (!existsSync(filePath)) {
       return res.status(404).json({ error: '文件不存在: ' + filePath });
     }
 
-    const content = readFileSync(filePath, 'utf-8');
+    const content = await readFile(filePath, 'utf-8');
     const hash = crypto.createHash('sha256').update(content).digest('hex');
 
     // Check for duplicate
-    const db = getDb();
-    const existing = db.prepare('SELECT id FROM sessions WHERE file_hash = ?').get(hash) as { id: string } | undefined;
+    const existing = findSessionByHash(hash);
     if (existing) {
       return res.status(200).json({ imported: false, sessionId: existing.id, message: '会话已存在' });
     }
@@ -479,7 +364,7 @@ router.post('/import', (req, res) => {
     const filename = basename(filePath);
     const aiTitle = extractSessionTitle(content);
 
-    const { sessionId, summary, turns } = createSession({
+    const { sessionId, summary, turns, errors } = await createSession({
       jsonlContent: content, filename, hash, aiTitle, rawJsonl: null,
     });
 
@@ -490,9 +375,11 @@ router.post('/import', (req, res) => {
       total_requests: summary.session.requests,
       peak_tokens: summary.session.peakTokens,
       turn_count: turns.length,
+      errors: errors.length > 0 ? errors : undefined,
     });
   } catch (err) {
-    res.status(500).json({ error: '导入失败: ' + (err as Error).message });
+    console.error('POST /import error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    res.status(500).json({ error: '导入失败: ' + (err instanceof Error ? err.message : String(err)) });
   }
 });
 

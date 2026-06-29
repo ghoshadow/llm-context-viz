@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { normalizeAgentSource } from '../../src/pipeline/calibration-types';
+import type { NormalizedCalibrationSummary } from '../../src/pipeline/calibration-types';
 import {
   readCalibrationConstants,
   writeCalibrationConstants,
@@ -9,6 +10,7 @@ import {
   getCalibrationJob,
   startCalibrationJob,
 } from '../services/calibration-job';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
 
 const router = Router();
 
@@ -19,7 +21,7 @@ router.put('/apply', (req, res) => {
     const body = req.body as {
       source?: string;
       cwd?: string;
-      summary?: any;
+      summary?: NormalizedCalibrationSummary;
       details?: Record<string, string>;
       ccVersion?: string;
       cliVersion?: string;
@@ -47,7 +49,8 @@ router.put('/apply', (req, res) => {
     });
     return res.json({ ...data, ok: true, path: data.path });
   } catch (err) {
-    return res.status(500).json({ error: '保存失败: ' + (err as Error).message });
+    console.error('PUT /calibrate/apply error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    return res.status(500).json({ error: '保存失败: ' + (err instanceof Error ? err.message : String(err)) });
   }
 });
 
@@ -62,7 +65,8 @@ router.get('/current', (_req, res) => {
     const source = normalizeAgentSource(_req.query.source);
     return res.json(readCalibrationConstants(cwd, source));
   } catch (err) {
-    return res.status(500).json({ error: '读取失败: ' + (err as Error).message });
+    console.error('GET /calibrate/current error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    return res.status(500).json({ error: '读取失败: ' + (err instanceof Error ? err.message : String(err)) });
   }
 });
 
@@ -73,7 +77,8 @@ router.post('/auto/start', async (req, res) => {
     const job = await startCalibrationJob(req.body || {});
     return res.json(job);
   } catch (err) {
-    return res.status(400).json({ error: (err as Error).message });
+    console.error('POST /calibrate/auto/start error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    return res.status(400).json({ error: (err instanceof Error ? err.message : String(err)) });
   }
 });
 

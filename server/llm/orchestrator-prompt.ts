@@ -199,6 +199,7 @@ id 命名规范：优先使用英文技术术语的小写下划线形式（如 p
 // ── 主 Agent 编排 prompt ─────────────────────────────────────────────────
 
 import type { ShardFile } from '../content/extract-to-files.js';
+import { wrapUserData } from './client.js';
 
 export function buildOrchestratorPrompt(manifest: ExtractionManifest, activeShards?: ShardFile[], depth: ExtractionDepth = 'refined'): string {
   const shards = activeShards ?? manifest.shards;
@@ -213,18 +214,21 @@ export function buildOrchestratorPrompt(manifest: ExtractionManifest, activeShar
     )
     .join('\n');
 
+  // 用户/项目来源数据用 XML 标签包裹，与系统指令严格分层
+  const userContext = wrapUserData(
+    `会话 ID: ${manifest.sessionId}\n` +
+    `总轮次: ${manifest.totalTurns}\n` +
+    `分片数: ${shards.length}\n` +
+    `分片详情:\n${shardList}`
+  );
+
   return `你是本体提取编排器。协调 entity-extractor 子 Agent 并行处理所有分片。
 
 ## 当前会话
 
-- 会话 ID: ${manifest.sessionId}
-- 总轮次: ${manifest.totalTurns}
-- 分片数: ${shards.length}
-- 抽取密度: ${depthLabel(depth)}
+${userContext}
 
-## 分片列表
-
-${shardList}
+抽取密度: ${depthLabel(depth)}
 
 ## 执行步骤
 

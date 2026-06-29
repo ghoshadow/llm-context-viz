@@ -15,7 +15,8 @@
  */
 
 import { extractContentWithTurns, type TurnContent } from './extract-session.js';
-import { writeFileSync, readFileSync, mkdirSync, existsSync, rmSync } from 'fs';
+import { writeFile, readFile, mkdir, rm } from 'fs/promises';
+import { existsSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -120,18 +121,18 @@ function groupTurnsIntoShards(
   return groups;
 }
 
-function writeShardGroup(
+async function writeShardGroup(
   outputDir: string,
   index: number,
   group: TurnContent[],
-): ShardFile {
+): Promise<ShardFile> {
   const startTurn = group[0]!.turnNum;
   const endTurn = group[group.length - 1]!.turnNum;
   const filename = shardFilename(index, startTurn, endTurn);
   const filePath = join(outputDir, filename);
   const content = group.map((t) => t.content).join('\n');
 
-  writeFileSync(filePath, content, 'utf-8');
+  await writeFile(filePath, content, 'utf-8');
 
   return {
     index,
@@ -151,15 +152,15 @@ function writeShardGroup(
  *
  * @returns 已存在则返回 Manifest，否则返回 null
  */
-export function loadExistingManifest(
+export async function loadExistingManifest(
   sessionId: string,
   baseDir?: string,
-): ExtractionManifest | null {
+): Promise<ExtractionManifest | null> {
   const manifestPath = getManifestPath(sessionId, baseDir ?? DEFAULT_BASE_DIR);
   if (!existsSync(manifestPath)) return null;
 
   try {
-    const raw = readFileSync(manifestPath, 'utf-8');
+    const raw = await readFile(manifestPath, 'utf-8');
     return JSON.parse(raw) as ExtractionManifest;
   } catch {
     return null;
@@ -177,7 +178,7 @@ export function loadExistingManifest(
  * @param options   — 可选配置
  * @returns 提取文件树的元信息清单
  */
-export function extractToFiles(
+export async function extractToFiles(
   rawJsonl: string,
   sessionId: string,
   options?: {
@@ -190,7 +191,7 @@ export function extractToFiles(
     /** 是否强制覆盖已有文件，默认 false */
     force?: boolean;
   },
-): ExtractionManifest {
+): Promise<ExtractionManifest> {
   const shardSize = options?.shardSize ?? DEFAULT_SHARD_SIZE;
   const maxShardChars = options?.maxShardChars ?? DEFAULT_MAX_SHARD_CHARS;
   const baseDir = options?.baseDir ?? DEFAULT_BASE_DIR;
@@ -198,7 +199,7 @@ export function extractToFiles(
 
   // ── 幂等检查：已有 manifest 且非强制模式则直接返回 ──
   if (!force) {
-    const existing = loadExistingManifest(sessionId, baseDir);
+    const existing = await loadExistingManifest(sessionId, baseDir);
     if (existing) return existing;
   }
 
@@ -215,17 +216,17 @@ export function extractToFiles(
 
   // 强制模式：先清空已有目录
   if (force && existsSync(outputDir)) {
-    rmSync(outputDir, { recursive: true, force: true });
+    await rm(outputDir, { recursive: true, force: true });
   }
 
-  mkdirSync(outputDir, { recursive: true });
+  await mkdir(outputDir, { recursive: true });
 
   // ── 按 shardSize + maxShardChars 混合预算顺序切分 ──
   const shards: ShardFile[] = [];
   const groups = groupTurnsIntoShards(turns, shardSize, maxShardChars);
 
   for (let i = 0; i < groups.length; i++) {
-    shards.push(writeShardGroup(outputDir, i, groups[i]!));
+    shards.push(await writeShardGroup(outputDir, i, groups[i]!));
   }
 
   // ── 写入 manifest.json ──
@@ -239,7 +240,7 @@ export function extractToFiles(
   };
 
   const manifestPath = getManifestPath(sessionId, baseDir);
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
 
   return manifest;
 }
@@ -270,11 +271,11 @@ export interface IncrementalResult {
  * @param options   — 可选配置
  * @returns 增量结果
  */
-export function extractIncremental(
+export async function extractIncremental(
   rawJsonl: string,
   sessionId: string,
   options?: { shardSize?: number; maxShardChars?: number; baseDir?: string },
-): IncrementalResult {
+): Promise<IncrementalResult> {
   const shardSize = options?.shardSize ?? DEFAULT_SHARD_SIZE;
   const maxShardChars = options?.maxShardChars ?? DEFAULT_MAX_SHARD_CHARS;
   const baseDir = options?.baseDir ?? DEFAULT_BASE_DIR;
@@ -288,11 +289,11 @@ export function extractIncremental(
   }
 
   // 加载已有 manifest
-  const existingManifest = loadExistingManifest(sessionId, baseDir);
+  const existingManifest = await loadExistingManifest(sessionId, baseDir);
 
   // 无已有 manifest → 全量提取
   if (!existingManifest) {
-    const manifest = extractToFiles(rawJsonl, sessionId, { shardSize, maxShardChars, baseDir, force: true });
+    const manifest = await extractToFiles(rawJsonl, sessionId, { shardSize, maxShardChars, baseDir, force: true });
     const allIndices = manifest.shards.map((_, i) => i);
     return { manifest, newShardIndices: allIndices, hasNewTurns: true };
   }
@@ -310,7 +311,7 @@ export function extractIncremental(
   const groups = groupTurnsIntoShards(turns, shardSize, maxShardChars, oldTotalTurns);
 
   for (let i = 0; i < groups.length; i++) {
-    newShards.push(writeShardGroup(outputDir, oldShardCount + i, groups[i]!));
+    newShards.push(await writeShardGroup(outputDir, oldShardCount + i, groups[i]!));
   }
 
   // 合并 shards：已有分片中不包含的保留，新增或更新的替换
@@ -340,7 +341,7 @@ export function extractIncremental(
   };
 
   const manifestPath = getManifestPath(sessionId, baseDir);
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
 
   return { manifest, newShardIndices, hasNewTurns: true };
 }

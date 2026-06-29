@@ -176,8 +176,9 @@ function buildLayout(
   const aggregateEntries = Array.from(nodesByAggregate.entries())
     .map(([id, nodes]) => {
       const meta = aggregateMeta.get(id);
-      const minTurn = Math.min(...nodes.map((n) => n.firstTurn));
-      const maxTurn = Math.max(...nodes.flatMap((n) => n.turns.length > 0 ? n.turns : [n.firstTurn]));
+      const turnsArray = nodes.flatMap((n) => n.turns.length > 0 ? n.turns : [n.firstTurn]);
+      const minTurn = nodes.length > 0 ? Math.min(...nodes.map((n) => n.firstTurn)) : 1;
+      const maxTurn = turnsArray.length > 0 ? Math.max(...turnsArray) : minTurn;
       return {
         id,
         label: meta?.label || (id === 'unassigned' ? '未分组知识' : id),

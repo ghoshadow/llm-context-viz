@@ -20,7 +20,7 @@ import { fmt, fmtK, fmtDur, fmtDate } from '../../utils/format';
 import { post, get } from '../../api/client';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { ContentRenderer } from '../shared/ContentRenderer';
-import type { TurnDetail, TurnSummary, TimelineSegment, SegmentDetail } from '../../types/session';
+import type { TurnDetail, TurnSummary, TimelineSegment, SegmentDetail, RawToolEntry } from '../../types/session';
 
 // ============================================================================
 // Helpers
@@ -84,7 +84,7 @@ function TurnListItem({
   compressionReset,
   onClick,
 }: TurnListItemProps) {
-  const loadPct = Math.max(2, (cumTotal / ctxLimit) * 100);
+  const loadPct = ctxLimit > 0 ? Math.max(2, (cumTotal / ctxLimit) * 100) : 100;
   const peakColor = maxInput >= 120000 ? 'oklch(0.76 0.13 60)' : SEMANTIC.textDesc2;
 
   return (
@@ -251,7 +251,7 @@ function ContextStructure({
     op: hoveredComp && hoveredComp !== k ? 0.28 : 1,
   }));
 
-  const ctxPct = ((maxInput / ctxLimit) * 100).toFixed(2);
+  const ctxPct = ctxLimit > 0 ? ((maxInput / ctxLimit) * 100).toFixed(2) : '0.00';
   const over = cumTotal > ctxLimit;
   const overflowNote = over
     ? `累计拼装内容已超过 ${fmtK(ctxLimit)} 上下文窗口 —— 实际请求依靠缓存与压缩才能容纳，峰值输入仅 ${fmt(maxInput)} tok。`
@@ -1320,11 +1320,14 @@ export default function TurnInspector() {
   // Auto-refresh: re-parse JSONL, then silently update turn list + detail
   useEffect(() => {
     if (!currentSessionId || currentTurnIndex === null) return;
+    let cancelled = false;
     const timer = setInterval(async () => {
+      if (cancelled) return;
       try {
         await post(`/sessions/${currentSessionId}/refresh`);
         // Silent turn list refresh — only update if changed
         const turns = await get<TurnSummary[]>(`/sessions/${currentSessionId}/turns?all=1`);
+        if (cancelled) return;
         const fp = turns.map(t => `${t.turn_index}:${t.asst_reqs}:${t.max_input}`).join(',');
         if (fp !== prevTurnIds.current) {
           prevTurnIds.current = fp;
@@ -1332,6 +1335,7 @@ export default function TurnInspector() {
         }
         // Current turn detail — only update if segments changed
         const t = await get<TurnDetail>(`/sessions/${currentSessionId}/turns/${currentTurnIndex}`);
+        if (cancelled) return;
         const newLen = (t.segs ?? []).length;
         if (newLen !== prevSegLen.current) {
           prevSegLen.current = newLen;
@@ -1340,6 +1344,7 @@ export default function TurnInspector() {
       } catch { /* silently skip */ }
     }, 3000);
     return () => {
+      cancelled = true;
       clearInterval(timer);
       prevSegLen.current = 0;
       prevTurnIds.current = '';
@@ -1567,7 +1572,7 @@ export default function TurnInspector() {
                     cumTotal={t.cum_total ?? 0}
                     contextLimit={contextLimit}
                     isSelected={isSelected}
-                    compressionReset={(t as any).compression_reset === 1}
+                    compressionReset={!!t.compression_reset}
                     onClick={() => selectTurn(t.turn_index)}
                   />
                 );
@@ -1666,7 +1671,7 @@ export default function TurnInspector() {
                   <div className="stat-card">
                     <div className="stat-value">{fmt(currentTurn.cum_total)}<span style={{fontSize:11,color:'oklch(0.55 0.012 265)',marginLeft:4}}>tok</span></div>
                     <div className="stat-label">
-                      累计拼装{(currentTurn.cum_cache_hit ?? 0) > 0 ? ` · 缓存 ${fmt(currentTurn.cum_cache_hit ?? 0)}（${(((currentTurn.cum_cache_hit ?? 0) / currentTurn.cum_total) * 100).toFixed(2)}%）` : ''}
+                      累计拼装{(currentTurn.cum_cache_hit ?? 0) > 0 ? ` · 缓存 ${fmt(currentTurn.cum_cache_hit ?? 0)}（${currentTurn.cum_total > 0 ? (((currentTurn.cum_cache_hit ?? 0) / currentTurn.cum_total) * 100).toFixed(2) : '0.00'}%）` : ''}
                       <span
                         style={{ marginLeft: 4, color: 'oklch(0.74 0.13 60)', cursor: 'pointer', fontSize: 10, textDecoration: 'underline' }}
                         onClick={(e) => { e.stopPropagation(); setShowCumDetail(true); }}
@@ -1730,34 +1735,38 @@ export default function TurnInspector() {
 
       {/* Peak request detail modal — compute stepTools + scale once, share for both categories and tools */}
       {showPeakDetail && currentTurn && (() => {
-        const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
-        const segs = turnDetail?.segs ?? (currentTurn as any).segs ?? [];
+        const comp: Record<string, number> = turnDetail?.comp ?? {};
+        const segs = turnDetail?.segs ?? (currentTurn.segs ?? []);
 
         // Find stepTools at or before the peak step
-        let stepTools: any = null;
+        let stepTools: Record<string, RawToolEntry> | null = null;
         for (let i = Math.min(currentTurn.max_req_step ?? 0, segs.length - 1); i >= 0; i--) {
-          if (segs[i]?.det?.stepTools) { stepTools = segs[i]!.det!.stepTools; break; }
+          const det = segs[i]?.det;
+          if (det?.stepTools) {
+            stepTools = det.stepTools as Record<string, RawToolEntry>;
+            break;
+          }
         }
         if (!stepTools) {
-          const ct = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+          const ct = JSON.parse(currentTurn.cum_tools_json || '{}') as Record<string, RawToolEntry>;
           if (Object.keys(ct).length > 0) stepTools = ct;
         }
 
         // Adjust comp to step level
         const adjComp = { ...comp };
         if (stepTools) {
-          const turnCt: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
-          const turnSubRt = Object.entries(turnCt).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-          const stepSubRt = Object.entries(stepTools).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-          const turnToolRt = Object.entries(turnCt).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-          const stepToolRt = Object.entries(stepTools).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          const turnCt: Record<string, RawToolEntry> = JSON.parse(currentTurn.cum_tools_json || '{}');
+          const turnSubRt = Object.entries(turnCt).filter(([, v]) => v.task).reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0);
+          const stepSubRt = Object.entries(stepTools).filter(([, v]) => v.task).reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0);
+          const turnToolRt = Object.entries(turnCt).filter(([, v]) => !v.task).reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0);
+          const stepToolRt = Object.entries(stepTools).filter(([, v]) => !v.task).reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0);
           if (turnSubRt > 0) adjComp.subagent = stepSubRt;
           if (turnToolRt > 0) adjComp.toolResults = stepToolRt;
         }
         const adjSum = Object.values(adjComp).reduce((a, b) => (a as number) + (b as number), 0) || 1;
         const catsP = buildCategories(adjComp, currentTurn.max_input, adjSum);
         const toolsP = stepTools
-          ? Object.entries(stepTools).map(([name, v]: any) => ({
+          ? Object.entries(stepTools).map(([name, v]) => ({
               name, calls: v.calls ?? 0, resultTokens: v.resultTokens ?? 0, task: v.task ?? false,
             }))
           : [];
@@ -1783,13 +1792,13 @@ export default function TurnInspector() {
 
       {/* Cumulative context detail modal */}
       {showCumDetail && currentTurn && (() => {
-        const comp: Record<string, number> = turnDetail?.comp ?? (currentTurn as any).comp ?? {};
+        const comp: Record<string, number> = turnDetail?.comp ?? {};
         // Replace subagent/toolResults with exact cumTools values
-        const ctRaw: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
+        const ctRaw: Record<string, RawToolEntry> = JSON.parse(currentTurn.cum_tools_json || '{}');
         const adjComp = { ...comp };
         if (Object.keys(ctRaw).length > 0) {
-          const sRt = Object.entries(ctRaw).filter(([, v]: any) => v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
-          const tRt = Object.entries(ctRaw).filter(([, v]: any) => !v.task).reduce((s, [, v]: any) => s + (v.resultTokens ?? 0), 0);
+          const sRt = Object.entries(ctRaw).filter(([, v]) => v.task).reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0);
+          const tRt = Object.entries(ctRaw).filter(([, v]) => !v.task).reduce((s, [, v]) => s + (v.resultTokens ?? 0), 0);
           if (sRt > 0) adjComp.subagent = sRt;
           if (tRt > 0) adjComp.toolResults = tRt;
         }
@@ -1797,8 +1806,8 @@ export default function TurnInspector() {
         const cats = buildCategories(adjComp, currentTurn.cum_total, compSum);
 
                 // Build tools list directly from cumTools — raw values, no API scaling
-        const ct: Record<string, any> = JSON.parse((currentTurn as any).cum_tools_json || '{}');
-        const toolsRaw = Object.entries(ct).map(([name, v]: any) => ({
+        const ct: Record<string, RawToolEntry> = JSON.parse(currentTurn.cum_tools_json || '{}');
+        const toolsRaw = Object.entries(ct).map(([name, v]) => ({
           name,
           calls: v.calls ?? 0,
           resultTokens: v.resultTokens ?? 0,

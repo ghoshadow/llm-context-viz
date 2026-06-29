@@ -13,6 +13,7 @@ import {
   type NormalizedCalibrationSummary,
   categoryChars,
   memoryCategoryChars,
+  CALIBRATION_DEFAULTS,
 } from './calibration-types';
 
 // ---------------------------------------------------------------------------
@@ -50,27 +51,23 @@ export interface CategoryMetrics {
 // ---------------------------------------------------------------------------
 // Estimated system-module character sizes
 // ---------------------------------------------------------------------------
-// Defaults calibrated from a real API request capture (Claude Code v2.1.170,
-// deepseek-v4-pro). These can be overridden by running automatic calibration
-// from the UI, which writes <cwd>/.claude-trace/system-constants.json.
-//
-// Measured from proxy capture:
-//   system blocks:  5,768 chars (billing 85 + agent 62 + harness 5,621)
-//   tools JSON:    98,949 chars (full JSON Schema for all ~50 tools)
+// 默认值来自 CALIBRATION_DEFAULTS（src/pipeline/calibration-types.ts），
+// 这是唯一的真实来源。运行时可通过 loadCalibratedConstants() 从项目
+// .claude-trace/system-constants.json 覆盖。
 
-const DEFAULT_SYS_PROMPT_FALLBACK_CHARS = 5768;
-const DEFAULT_TOOL_DEFS_FALLBACK_CHARS = 98949;
-const DEFAULT_SYSTEM_REMINDER_CHROME_CHARS = 612;
-const DEFAULT_MEMORY_FALLBACK_CHARS = 2474;
+const DEFAULT_SYS_PROMPT_FALLBACK_CHARS = CALIBRATION_DEFAULTS.SYS_PROMPT_CHARS;
+const DEFAULT_TOOL_DEFS_FALLBACK_CHARS = CALIBRATION_DEFAULTS.TOOL_DEFS_CHARS;
+const DEFAULT_SYSTEM_REMINDER_CHROME_CHARS = CALIBRATION_DEFAULTS.USER_WRAPPER_CHARS;
+const DEFAULT_MEMORY_FALLBACK_CHARS = CALIBRATION_DEFAULTS.MEMORY_CHARS;
 
 let SYS_PROMPT_FALLBACK_CHARS  = DEFAULT_SYS_PROMPT_FALLBACK_CHARS;
 let TOOL_DEFS_FALLBACK_CHARS   = DEFAULT_TOOL_DEFS_FALLBACK_CHARS;
-const SKILLS_FALLBACK_CHARS      = 9122;
-const MCP_FALLBACK_CHARS         = 222;
-const REMINDERS_FALLBACK_CHARS   = 409;
+const SKILLS_FALLBACK_CHARS      = CALIBRATION_DEFAULTS.SKILLS_CHARS;
+const MCP_FALLBACK_CHARS         = CALIBRATION_DEFAULTS.MCP_CHARS;
+const REMINDERS_FALLBACK_CHARS   = CALIBRATION_DEFAULTS.REMINDERS_CHARS;
 let SYSTEM_REMINDER_CHROME_CHARS = DEFAULT_SYSTEM_REMINDER_CHROME_CHARS;
 
-// MEMORY is set at runtime from actual CLAUDE.md files on disk.
+// MEMORY 在运行时从磁盘上的实际 CLAUDE.md 文件设置。
 let MEMORY_FALLBACK_CHARS = DEFAULT_MEMORY_FALLBACK_CHARS;
 
 export function resetCalibratedConstants() {
@@ -344,7 +341,7 @@ function processGroup(
       cum.skills!.tokens = 0;
       addTo(cum.skills!, att.content, est);
     } else if (att.type === 'task_reminder') {
-      const items: any[] = Array.isArray(att.content) ? att.content : (att.content ? [att.content] : []);
+      const items: Array<{ title?: string; description?: string } | string> = Array.isArray(att.content) ? att.content : (att.content ? [att.content] : []);
       for (const item of items) {
         const text = typeof item === 'string' ? item : (item?.title || '') + '\n' + (item?.description || '');
         if (text.trim()) {
@@ -357,8 +354,8 @@ function processGroup(
       }
     } else if (att.type === 'mcp_instructions_delta') {
       // MCP server instructions — uses addedBlocks at attachment root
-      const data: any = att.content;
-      const blocks: string[] = Array.isArray(data?.addedBlocks) ? data.addedBlocks : [];
+      const data = att.content;
+      const blocks = Array.isArray((data as { addedBlocks?: string[] } | null)?.addedBlocks) ? (data as { addedBlocks: string[] }).addedBlocks : [];
       const text = blocks.join('\n');
       if (text) {
         cum.mcp!.raw = 0;
@@ -421,6 +418,16 @@ export function computeContext(
 
   const compositions: TurnContextComposition[] = [];
 
+  // Fallback constants are seeded into cum via seedCoreScaffolding at turn 0.
+  // When real JSONL payloads are encountered during processGroup, the matching
+  // categories (memory, reminders, mcp, skills) are reset to zero and
+  // re-accumulated with measured content. If a later compression reset triggers
+  // cum[key]=initAccum(), those payload categories would be overwritten with
+  // zeroes. Preserve tracked (non-fallback) category values before reset,
+  // then restore them afterward.
+  const CORE_TRACKED_KEYS = ['memory', 'reminders', 'mcp', 'skills'] as const;
+  const PRESERVED_CATEGORIES = [...CORE_TRACKED_KEYS] as readonly string[];
+
   let lastApiTotal = 0;
 
   for (const group of groups) {
@@ -434,10 +441,25 @@ export function computeContext(
 
     if (turnApiMax > 0) {
       if (lastApiTotal > 0 && turnApiMax < lastApiTotal * 0.5) {
+        // Save categories that have been overwritten with real payload data
+        // (raw != fallback value) so compression reset doesn't lose them.
+        const saved: Record<string, Accum> = {};
+        for (const key of PRESERVED_CATEGORIES) {
+          const a = cum[key];
+          if (a && a.tokens > 0) {
+            saved[key] = { tokens: a.tokens, raw: a.raw };
+          }
+        }
         for (const key of Object.keys(cum)) {
           cum[key] = initAccum();
         }
         seedCoreScaffolding(cum, estimator);
+        // Restore payload-backed categories that were overwritten by reset
+        for (const key of PRESERVED_CATEGORIES) {
+          if (saved[key]) {
+            cum[key] = saved[key]!;
+          }
+        }
       }
       lastApiTotal = turnApiMax;
     }

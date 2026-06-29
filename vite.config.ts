@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 const API_PORT = process.env.PORT || '4137';
+const DEV_SERVER_PORT = parseInt(process.env.VITE_PORT || '5173');
 
 export default defineConfig({
   plugins: [react()],
@@ -10,7 +11,7 @@ export default defineConfig({
     alias: { '@': path.resolve(__dirname, 'src') },
   },
   server: {
-    port: parseInt(process.env.VITE_PORT || '5173'),
+    port: DEV_SERVER_PORT,
     watch: {
       ignored: [
         '**/data/extractions/**',
@@ -24,6 +25,8 @@ export default defineConfig({
       '/api': {
         target: `http://localhost:${API_PORT}`,
         changeOrigin: true,
+        // 代理超时：防止长时间挂起的请求占用资源
+        timeout: 60_000,
       },
     },
   },

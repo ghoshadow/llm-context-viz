@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import type { CalibrationUsage, NormalizedCalibrationSummary } from './calibration-types';
 
-type JsonObject = Record<string, any>;
+type JsonObject = Record<string, unknown>;
 
 export interface ExtractedCodexConstants {
   source: 'codex';
@@ -20,12 +20,25 @@ export interface ExtractedCodexConstants {
   details?: Record<string, string>;
 }
 
+interface CodexProxyLogEntry {
+  request?: {
+    method?: string;
+    url?: string;
+    upstream_url?: string;
+    body?: Record<string, unknown>;
+    headers?: Record<string, unknown>;
+  };
+  response?: {
+    body?: unknown;
+  };
+}
+
 export function extractCodexConstants(logPath: string): ExtractedCodexConstants | null {
   const raw = readFileSync(logPath, 'utf-8');
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
-    let entry: JsonObject;
-    try { entry = JSON.parse(line); } catch { continue; }
+    let entry: CodexProxyLogEntry;
+    try { entry = JSON.parse(line) as CodexProxyLogEntry; } catch { continue; }
     if (entry.request?.method !== 'POST') continue;
     const url = String(entry.request?.url || entry.request?.upstream_url || '');
     if (!url.includes('/responses')) continue;
@@ -40,8 +53,8 @@ export function extractCodexConstants(logPath: string): ExtractedCodexConstants 
     const developer = classifyDeveloperInput(body.input);
     const usage = parseResponsesSseUsage(entry.response?.body);
     const toolNames = tools
-      .map((tool: any) => typeof tool?.name === 'string' ? tool.name : typeof tool?.function?.name === 'string' ? tool.function.name : '')
-      .filter(Boolean)
+      .map((tool) => typeof (tool as Record<string, unknown>)?.name === 'string' ? (tool as Record<string, unknown>).name : typeof (tool as Record<string, unknown>)?.function === 'object' ? ((tool as Record<string, unknown>).function as Record<string, unknown>)?.name : '')
+      .filter((name): name is string => typeof name === 'string' && name.length > 0)
       .sort();
     const cliVersion = parseCodexVersion(entry.request?.headers?.['user-agent']);
 
@@ -86,7 +99,7 @@ export function extractCodexConstants(logPath: string): ExtractedCodexConstants 
 
 export function parseResponsesSseUsage(body: unknown): CalibrationUsage {
   const text = typeof body === 'string' ? body : JSON.stringify(body ?? '');
-  let usage: any = null;
+  let usage: Record<string, unknown> | null = null;
   for (const line of text.split(/\r?\n/)) {
     if (!line.startsWith('data:')) continue;
     const payload = line.slice(5).trim();
@@ -100,9 +113,9 @@ export function parseResponsesSseUsage(body: unknown): CalibrationUsage {
   }
   return {
     firstRequestInputTokens: numberOrUndefined(usage?.input_tokens),
-    firstRequestCachedTokens: numberOrUndefined(usage?.input_tokens_details?.cached_tokens ?? usage?.cached_input_tokens),
+    firstRequestCachedTokens: numberOrUndefined((usage?.input_tokens_details as Record<string, unknown> | undefined)?.cached_tokens ?? usage?.cached_input_tokens),
     firstRequestOutputTokens: numberOrUndefined(usage?.output_tokens),
-    firstRequestReasoningTokens: numberOrUndefined(usage?.output_tokens_details?.reasoning_tokens ?? usage?.reasoning_output_tokens),
+    firstRequestReasoningTokens: numberOrUndefined((usage?.output_tokens_details as Record<string, unknown> | undefined)?.reasoning_tokens ?? usage?.reasoning_output_tokens),
   };
 }
 
@@ -143,7 +156,7 @@ function contentTexts(content: unknown): string[] {
   if (typeof content === 'string') return [content];
   if (!Array.isArray(content)) return [];
   return content
-    .map((block: any) => typeof block?.text === 'string' ? block.text : '')
+    .map((block) => typeof (block as { text?: string })?.text === 'string' ? (block as { text: string }).text : '')
     .filter(Boolean);
 }
 

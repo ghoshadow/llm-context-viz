@@ -41,59 +41,162 @@ export interface SSEHandlers {
   onError?: (data: { stage: string; message: string; detail?: string }) => void;
 }
 
+export interface SSEConsumeOptions {
+  /** 指数退避重连最大次数，默认 3 */
+  maxRetries?: number;
+  /** 缓冲区最大字节数，超过时清理旧数据，0 表示不限制，默认 512KB */
+  maxBufferSize?: number;
+  /** 外部 AbortSignal 用于取消 */
+  signal?: AbortSignal;
+}
+
+/** 默认最大重试次数 */
+const DEFAULT_MAX_RETRIES = 3;
+/** 指数退避重试间隔（毫秒） */
+const RETRY_BACKOFF_MS = [1_000, 2_000, 4_000];
+/** 默认缓冲区最大字节数 */
+const DEFAULT_MAX_BUFFER_SIZE = 512 * 1024; // 512KB
+
 /**
  * Consume a Server-Sent Events stream from a POST endpoint.
+ *
+ * 支持指数退避断线重连，缓冲区上限管理。
  *
  * @param url      - The endpoint URL.
  * @param body     - JSON-serialisable request body.
  * @param handlers - Callbacks for each SSE event type.
- * @param signal   - Optional AbortSignal for cancellation.
+ * @param options  - 可选配置：重连次数、缓冲区上限、AbortSignal
  */
 export async function consumeSSE(
   url: string,
   body: Record<string, unknown>,
   handlers: SSEHandlers,
-  signal?: AbortSignal,
+  options?: SSEConsumeOptions,
 ): Promise<void> {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  await consumeSSEWithRetry(url, body, handlers, options ?? {});
+}
 
-  if (!response.ok) {
-    let errorBody = '';
+/**
+ * 内部实现：带重连的 SSE 消费
+ */
+async function consumeSSEWithRetry(
+  url: string,
+  body: Record<string, unknown>,
+  handlers: SSEHandlers,
+  options: SSEConsumeOptions,
+): Promise<void> {
+  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const maxBufferSize = options.maxBufferSize ?? DEFAULT_MAX_BUFFER_SIZE;
+  const signal = options.signal;
+  let lastEventId: string | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // 检查是否已被取消
+    if (signal?.aborted) return;
+
     try {
-      errorBody = await response.text();
-    } catch {
-      // ignore — response body may not be readable
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      };
+      // 断线重连时发送 Last-Event-ID
+      if (lastEventId) {
+        headers['Last-Event-ID'] = lastEventId;
+      }
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      });
+
+      if (!response.ok) {
+        const errorBody = await readErrorBody(response);
+        const detail = errorBody
+          ? `HTTP ${response.status}: ${errorBody}`
+          : `HTTP ${response.status}: ${response.statusText}`;
+        handlers.onError?.({
+          stage: 'connect',
+          message: `Request failed with status ${response.status}`,
+          detail,
+        });
+        throw new Error(detail);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        handlers.onError?.({
+          stage: 'connect',
+          message: 'Response body is not readable',
+        });
+        return;
+      }
+
+      // 流式处理，如果正常完成（收到 complete/error 事件）则返回
+      const streamResult = await readSSEStream(reader, handlers, maxBufferSize);
+      reader.releaseLock();
+      if (streamResult.lastEventId) {
+        lastEventId = streamResult.lastEventId;
+      }
+
+      if (streamResult.status === 'finished') {
+        return; // 正常结束
+      }
+
+      // streamResult.status === 'disconnected'：流异常断开，进入重连逻辑
+      if (attempt < maxRetries) {
+        handlers.onError?.({
+          stage: 'stream',
+          message: `连接中断，${(RETRY_BACKOFF_MS[attempt] ?? 8000) / 1000}s 后重连（第 ${attempt + 1} 次）`,
+        });
+        await sleep(RETRY_BACKOFF_MS[attempt] ?? 8000);
+        continue;
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // Aborted by caller — not an error
+        return;
+      }
+
+      if (attempt < maxRetries) {
+        handlers.onError?.({
+          stage: 'stream',
+          message: err instanceof Error ? err.message : String(err),
+          detail: `${(RETRY_BACKOFF_MS[attempt] ?? 8000) / 1000}s 后重连（第 ${attempt + 1} 次）`,
+        });
+        await sleep(RETRY_BACKOFF_MS[attempt] ?? 8000);
+        continue;
+      }
+
+      // 所有重试已用尽
+      handlers.onError?.({
+        stage: 'stream',
+        message: `连接失败，已达最大重试次数 (${maxRetries}): ${err instanceof Error ? err.message : String(err)}`,
+      });
+      throw err;
     }
-    const detail = errorBody
-      ? `HTTP ${response.status}: ${errorBody}`
-      : `HTTP ${response.status}: ${response.statusText}`;
-    handlers.onError?.({
-      stage: 'connect',
-      message: `Request failed with status ${response.status}`,
-      detail,
-    });
-    throw new Error(detail);
   }
 
-  const reader = response.body?.getReader();
-  if (!reader) {
-    handlers.onError?.({
-      stage: 'connect',
-      message: 'Response body is not readable',
-    });
-    return;
-  }
+  // 所有重试已用尽
+  handlers.onError?.({
+    stage: 'stream',
+    message: `重连失败，已达最大重试次数 (${maxRetries})`,
+  });
+}
 
+/**
+ * 读取 SSE 流并分发事件，返回 'finished'（正常完成）或 'disconnected'（异常断开）
+ */
+async function readSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  handlers: SSEHandlers,
+  maxBufferSize: number,
+): Promise<{ status: 'finished' | 'disconnected'; lastEventId: string | null }> {
   const decoder = new TextDecoder();
   let buffer = '';
+  let currentId: string | null = null;
+  let lastEventId: string | null = null;
   let currentEvent: string | null = null;
   let currentData: string | null = null;
   let closedCleanly = false;
@@ -106,6 +209,13 @@ export async function consumeSSE(
 
       buffer += decoder.decode(value, { stream: true });
 
+      // 限制缓冲区最大大小，防止内存无限增长
+      if (maxBufferSize > 0 && buffer.length > maxBufferSize) {
+        // 保留后半部分，丢弃前半部分
+        const keepStart = buffer.length - Math.floor(maxBufferSize / 2);
+        buffer = buffer.slice(keepStart);
+      }
+
       // Process complete lines
       const lines = buffer.split('\n');
       // The last element may be an incomplete line — keep it in the buffer
@@ -114,7 +224,9 @@ export async function consumeSSE(
       for (const rawLine of lines) {
         const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
 
-        if (line.startsWith('event: ')) {
+        if (line.startsWith('id: ')) {
+          currentId = line.slice(4).trim();
+        } else if (line.startsWith('event: ')) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith('data: ')) {
           currentData = line.slice(6);
@@ -122,10 +234,12 @@ export async function consumeSSE(
           // Empty line signals end of event
           if (currentEvent && currentData !== null) {
             dispatchEvent(currentEvent, currentData, handlers);
+            if (currentId) lastEventId = currentId;
             if (currentEvent === 'complete' || currentEvent === 'error') {
               closedCleanly = true;
             }
           }
+          currentId = null;
           currentEvent = null;
           currentData = null;
         }
@@ -137,7 +251,9 @@ export async function consumeSSE(
     if (buffer.length > 0) {
       const line =
         buffer.endsWith('\r') ? buffer.slice(0, -1).trim() : buffer.trim();
-      if (line.startsWith('event: ')) {
+      if (line.startsWith('id: ')) {
+        currentId = line.slice(4).trim();
+      } else if (line.startsWith('event: ')) {
         currentEvent = line.slice(7).trim();
       } else if (line.startsWith('data: ')) {
         currentData = line.slice(6);
@@ -147,6 +263,7 @@ export async function consumeSSE(
     // Flush the last pending event if any
     if (currentEvent && currentData !== null) {
       dispatchEvent(currentEvent, currentData, handlers);
+      if (currentId) lastEventId = currentId;
       if (currentEvent === 'complete' || currentEvent === 'error') {
         closedCleanly = true;
       }
@@ -159,23 +276,38 @@ export async function consumeSSE(
         message: 'Connection closed unexpectedly before receiving complete or error event',
       });
     }
+
+    return { status: closedCleanly ? 'finished' : 'disconnected', lastEventId };
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      // Aborted by caller — not an error
-      return;
+      return { status: 'finished', lastEventId }; // 被取消视为正常结束
     }
     handlers.onError?.({
       stage: 'stream',
       message: err instanceof Error ? err.message : String(err),
     });
-    throw err;
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // Lock may already be released
-    }
+    return { status: 'disconnected', lastEventId };
   }
+}
+
+/** Helper: safely extract a number from parsed SSE JSON. */
+function asNumber(v: unknown): number {
+  return typeof v === 'number' ? v : 0;
+}
+
+/** Helper: safely extract a string from parsed SSE JSON. */
+function asString(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+/** Helper: safely extract a number or undefined from parsed SSE JSON. */
+function asOptionalNumber(v: unknown): number | undefined {
+  return typeof v === 'number' ? v : undefined;
+}
+
+/** Helper: safely extract a string or undefined from parsed SSE JSON. */
+function asOptionalString(v: unknown): string | undefined {
+  return typeof v === 'string' ? v : undefined;
 }
 
 /**
@@ -203,47 +335,47 @@ function dispatchEvent(
   switch (event) {
     case 'extracted':
       handlers.onExtracted?.({
-        totalTurns: d.totalTurns as number,
-        shardCount: d.shardCount as number,
-        activeShards: d.activeShards as number | undefined,
-        rootDir: d.rootDir as string,
-        extractionDepth: d.extractionDepth as 'refined' | 'deep' | undefined,
-        shardSize: d.shardSize as number | undefined,
-        maxShardChars: d.maxShardChars as number | undefined,
-        shards: d.shards as Array<{
+        totalTurns: asNumber(d.totalTurns),
+        shardCount: asNumber(d.shardCount),
+        activeShards: asOptionalNumber(d.activeShards),
+        rootDir: asString(d.rootDir),
+        extractionDepth: typeof d.extractionDepth === 'string' && (d.extractionDepth === 'refined' || d.extractionDepth === 'deep') ? d.extractionDepth : undefined,
+        shardSize: asOptionalNumber(d.shardSize),
+        maxShardChars: asOptionalNumber(d.maxShardChars),
+        shards: Array.isArray(d.shards) ? d.shards as Array<{
           index: number;
           filename: string;
           turnRange: string;
           turnCount: number;
-        }>,
+        }> : [],
       });
       break;
     case 'start':
       handlers.onStart?.({
-        shards: d.shards as number,
-        totalTurns: d.totalTurns as number,
+        shards: asNumber(d.shards),
+        totalTurns: asNumber(d.totalTurns),
       });
       break;
     case 'shard-start':
-      handlers.onShardStart?.({ shardIndex: d.shardIndex as number });
+      handlers.onShardStart?.({ shardIndex: asNumber(d.shardIndex) });
       break;
     case 'shard-done':
       handlers.onShardDone?.({
-        shardIndex: d.shardIndex as number,
+        shardIndex: asNumber(d.shardIndex),
         candidates: d.candidates,
         relations: d.relations,
       });
       break;
     case 'shard-retry':
       handlers.onShardRetry?.({
-        shardIndex: d.shardIndex as number,
-        attempt: d.attempt as number,
+        shardIndex: asNumber(d.shardIndex),
+        attempt: asNumber(d.attempt),
       });
       break;
     case 'shard-error':
       handlers.onShardError?.({
-        shardIndex: d.shardIndex as number,
-        error: d.error as string,
+        shardIndex: asNumber(d.shardIndex),
+        error: asString(d.error),
       });
       break;
     case 'merge':
@@ -257,7 +389,7 @@ function dispatchEvent(
       break;
     case 'complete':
       handlers.onComplete?.({
-        sessionId: d.sessionId as string,
+        sessionId: asString(d.sessionId),
         meta: d.meta,
         stats: d.stats,
         data: d.data,
@@ -265,13 +397,27 @@ function dispatchEvent(
       break;
     case 'error':
       handlers.onError?.({
-        stage: d.stage as string,
-        message: d.message as string,
-        detail: d.detail as string | undefined,
+        stage: asString(d.stage),
+        message: asString(d.message),
+        detail: asOptionalString(d.detail),
       });
       break;
     default:
       // Unknown event type — silently ignored per SSE spec
       break;
+  }
+}
+
+/** 异步 sleep，用于指数退避等待 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 安全读取 HTTP 错误响应正文 */
+async function readErrorBody(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    return '';
   }
 }

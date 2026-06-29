@@ -68,6 +68,17 @@ export interface ExtractedConstants {
 // Main extraction
 // ---------------------------------------------------------------------------
 
+interface ProxyLogEntry {
+  request?: {
+    method?: string;
+    body?: Record<string, unknown>;
+    headers?: Record<string, unknown>;
+  };
+  response?: {
+    body?: unknown;
+  };
+}
+
 /**
  * Extract system constants from a captured API request log (JSONL).
  * Returns null if no valid POST request with a non-empty body is found.
@@ -77,8 +88,8 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
   const lines = raw.split('\n').filter((l: string) => l.trim());
 
   for (const line of lines) {
-    let entry: any;
-    try { entry = JSON.parse(line); } catch { continue; }
+    let entry: ProxyLogEntry;
+    try { entry = JSON.parse(line) as ProxyLogEntry; } catch { continue; }
     if (entry.request?.method !== 'POST') continue;
 
     const body = entry.request?.body;
@@ -109,8 +120,8 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
     const toolsChars = JSON.stringify(tools).length;
 
     // --- User message (<system-reminder>) ---
-    const userMsg = body.messages[0] as any;
-    const userContent = userMsg?.content;
+    const userMsg = body.messages[0] as Record<string, unknown>;
+    const userContent = userMsg?.content as { text?: string } | undefined;
     const userText: string = (Array.isArray(userContent) && userContent[0]?.text)
       ? userContent[0].text
       : '';
@@ -240,12 +251,12 @@ export function extractConstants(logPath: string): ExtractedConstants | null {
     }
 
     // --- Version & model ---
-    const ccHeader = entry.request?.headers?.['x-claude-code-session-id']
+    const ccHeader = String(entry.request?.headers?.['x-claude-code-session-id']
       || entry.request?.headers?.['user-agent']
-      || '';
-    const ccVersion = (entry.request?.headers?.['user-agent'] || '')
+      || '');
+    const ccVersion = (String(entry.request?.headers?.['user-agent'] || ''))
       .match(/claude-cli\/([\d.]+)/)?.[1] || 'unknown';
-    const model = body.model || 'unknown';
+    const model = String(body.model || 'unknown');
 
     return {
       source: 'claude',

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'fs';
+import { access, readFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db';
@@ -8,6 +9,7 @@ import type { SessionSummary, TurnData } from '../../src/types/session';
 import type Database from 'better-sqlite3';
 import { readCalibrationConstants } from './calibration-constants';
 import { memoryCategoryChars } from '../../src/pipeline/calibration-types';
+import type { ParseError } from '../../src/pipeline/parse-jsonl';
 
 // ============================================================================
 // Shared pipeline service — eliminates duplicated import/refresh logic across
@@ -18,8 +20,37 @@ import { memoryCategoryChars } from '../../src/pipeline/calibration-types';
  * Compute total memory character count from the global CLAUDE.md and,
  * optionally, a project-level `.claude/CLAUDE.md` derived from the first
  * JSONL line's `cwd` field.
+ *
+ * 使用异步 fs/promises API，避免阻塞事件循环。
  */
-export function computeMemoryChars(jsonlContent?: string): number {
+export async function computeMemoryChars(jsonlContent?: string): Promise<number> {
+  if (jsonlContent && isCodexJsonl(jsonlContent)) return 0;
+
+  let memChars = 0;
+  const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
+  try {
+    await access(globalMd);
+    const data = await readFile(globalMd, 'utf-8');
+    memChars += data.length;
+  } catch { /* keep default */ }
+
+  const cwd = extractCwdFromJsonl(jsonlContent);
+  if (cwd) {
+    const projMd = join(cwd, '.claude', 'CLAUDE.md');
+    try {
+      await access(projMd);
+      const data = await readFile(projMd, 'utf-8');
+      memChars += data.length;
+    } catch { /* ignore fs errors */ }
+  }
+  return memChars;
+}
+
+/**
+ * 同步版本：在 better-sqlite3 transaction 回调内部使用。
+ * 仍使用同步 fs API，但在事务中无法避免。
+ */
+export function computeMemoryCharsSync(jsonlContent?: string): number {
   if (jsonlContent && isCodexJsonl(jsonlContent)) return 0;
 
   let memChars = 0;
@@ -38,10 +69,19 @@ export function computeMemoryChars(jsonlContent?: string): number {
   return memChars;
 }
 
+/**
+ * 从 JSONL 内容中提取 cwd 字段。
+ *
+ * 优化：cwd 通常在前几条记录中，限制最多扫描前 50 行，
+ * 避免在大型 JSONL 文件上完整遍历。
+ */
 export function extractCwdFromJsonl(jsonlContent?: string): string {
   if (!jsonlContent) return '';
-  for (const line of jsonlContent.split('\n')) {
-    if (!line.trim()) continue;
+  const lines = jsonlContent.split('\n');
+  const limit = Math.min(lines.length, 50);
+  for (let i = 0; i < limit; i++) {
+    const line = lines[i];
+    if (!line || !line.trim()) continue;
     try {
       const parsed = JSON.parse(line);
       if (typeof parsed.cwd === 'string' && parsed.cwd) return parsed.cwd;
@@ -52,16 +92,18 @@ export function extractCwdFromJsonl(jsonlContent?: string): string {
 }
 
 /**
- * Run the full pipeline on raw JSONL content.
+ * Run the full pipeline on raw JSONL content (异步版本)。
  *
  * Side effects:
  * - Applies project-scoped calibrated constants from `<cwd>/.claude-trace/system-constants.json`
  * - Sets the global memory character count for context estimation
+ *
+ * 使用异步 I/O 读取 CLAUDE.md 文件，避免阻塞事件循环。
  */
-export function runPipelineOnContent(
+export async function runPipelineOnContent(
   jsonlContent: string,
   filename: string,
-): { summary: SessionSummary; turns: TurnData[] } {
+): Promise<{ summary: SessionSummary; turns: TurnData[]; errors: ParseError[] }> {
   if (isCodexJsonl(jsonlContent)) {
     const cwd = extractCwdFromJsonl(jsonlContent);
     const constants = cwd ? readCalibrationConstants(cwd, 'codex') : null;
@@ -72,7 +114,30 @@ export function runPipelineOnContent(
   const constants = cwd ? readCalibrationConstants(cwd, 'claude') : null;
   loadCalibratedConstants(constants);
   if (!memoryCategoryChars(constants)) {
-    setMemoryChars(computeMemoryChars(jsonlContent));
+    setMemoryChars(await computeMemoryChars(jsonlContent));
+  }
+  return runPipeline(jsonlContent, filename);
+}
+
+/**
+ * 同步版本：供 better-sqlite3 transaction 回调内部使用。
+ * 事务回调必须是同步的，因此 I/O 仍使用同步 API。
+ */
+export function runPipelineOnContentSync(
+  jsonlContent: string,
+  filename: string,
+): { summary: SessionSummary; turns: TurnData[]; errors: ParseError[] } {
+  if (isCodexJsonl(jsonlContent)) {
+    const cwd = extractCwdFromJsonl(jsonlContent);
+    const constants = cwd ? readCalibrationConstants(cwd, 'codex') : null;
+    return runCodexPipeline(jsonlContent, filename, constants);
+  }
+
+  const cwd = extractCwdFromJsonl(jsonlContent);
+  const constants = cwd ? readCalibrationConstants(cwd, 'claude') : null;
+  loadCalibratedConstants(constants);
+  if (!memoryCategoryChars(constants)) {
+    setMemoryChars(computeMemoryCharsSync(jsonlContent));
   }
   return runPipeline(jsonlContent, filename);
 }
@@ -82,6 +147,9 @@ export function runPipelineOnContent(
  *
  * The caller is responsible for wrapping this in a transaction alongside the
  * session INSERT or UPDATE.
+ *
+ * 优化：预序列化所有 JSON 字段，再逐条批量插入。
+ * 每次 JSON.stringify 只执行一次，避免重复序列化。
  */
 export function persistTurns(sessionId: string, turns: TurnData[]): void {
   const stmt = getDb().prepare(`
@@ -93,7 +161,17 @@ export function persistTurns(sessionId: string, turns: TurnData[]): void {
       step_count, comp_json, delta_json, tools_json, segs_json, longest_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+
+  // 预序列化：每条 turn 的 JSON 字段只序列化一次，避免重复调用 JSON.stringify
   for (const turn of turns) {
+    const cumTools = turn.cumTools;
+    const cumToolsJson = cumTools && Object.keys(cumTools).length > 0 ? JSON.stringify(cumTools) : null;
+    const compJson = JSON.stringify(turn.comp);
+    const deltaJson = JSON.stringify(turn.delta);
+    const toolsJson = JSON.stringify(turn.tools);
+    const segsJson = JSON.stringify(turn.segs);
+    const longestJson = JSON.stringify(turn.longest);
+
     stmt.run(
       `${sessionId}_${turn.i}`,
       sessionId,
@@ -107,19 +185,19 @@ export function persistTurns(sessionId: string, turns: TurnData[]): void {
       turn.maxReqStep ?? 0,
       turn.outTok,
       turn.cumTotal,
-      (turn as any).cumCacheHit ?? 0,
-      JSON.stringify((turn as any).cumTools ?? {}),
-      (turn as any).compressionReset ? 1 : 0,
+      turn.cumCacheHit ?? 0,
+      cumToolsJson,
+      turn.compressionReset ? 1 : 0,
       turn.durMs,
       turn.modelMs,
       turn.toolMs,
       turn.subMs,
       turn.stepCount,
-      JSON.stringify(turn.comp),
-      JSON.stringify(turn.delta),
-      JSON.stringify(turn.tools),
-      JSON.stringify(turn.segs),
-      JSON.stringify(turn.longest),
+      compJson,
+      deltaJson,
+      toolsJson,
+      segsJson,
+      longestJson,
     );
   }
 }
@@ -132,6 +210,7 @@ export interface ImportSessionResult {
   sessionId: string;
   summary: SessionSummary;
   turns: TurnData[];
+  errors: ParseError[];
 }
 
 /**
@@ -139,17 +218,25 @@ export interface ImportSessionResult {
  *
  * Used by POST /scanner/import to create a fresh session.
  * The caller is responsible for dedup checking.
+ *
+ * 异步版本：在事务之外预先计算管线结果和序列化 JSON，
+ * 事务内部只做纯 DB 写入（better-sqlite3 要求同步）。
  */
-export function createSession(opts: {
+export async function createSession(opts: {
   jsonlContent: string;
   filename: string;
   hash: string;
   aiTitle?: string;
   rawJsonl?: string | null;
-}): ImportSessionResult {
+}): Promise<ImportSessionResult> {
   const db = getDb();
-  const { summary, turns } = runPipelineOnContent(opts.jsonlContent, opts.filename);
+  const { summary, turns, errors } = await runPipelineOnContent(opts.jsonlContent, opts.filename);
   const sessionId = opts.hash.substring(0, 16);
+
+  // 在事务外预序列化 JSON 列
+  const categoriesJson = JSON.stringify(summary.categories);
+  const toolsJson = JSON.stringify(summary.tools);
+  const seriesJson = JSON.stringify(summary.series);
 
   const insertSession = db.prepare(`
     INSERT INTO sessions (
@@ -179,15 +266,15 @@ export function createSession(opts: {
       summary.session.contextLimit,
       turns.length,
       Buffer.byteLength(opts.jsonlContent, 'utf-8'),
-      JSON.stringify(summary.categories),
-      JSON.stringify(summary.tools),
-      JSON.stringify(summary.series),
+      categoriesJson,
+      toolsJson,
+      seriesJson,
       opts.rawJsonl ?? null,
     );
     persistTurns(sessionId, turns);
   })();
 
-  return { sessionId, summary, turns };
+  return { sessionId, summary, turns, errors };
 }
 
 /**
@@ -195,14 +282,22 @@ export function createSession(opts: {
  *
  * Runs the pipeline on the provided content, deletes old turns, inserts new
  * ones, and updates session metadata in a single transaction.
+ *
+ * 异步版本：在事务之外预先计算管线结果和序列化 JSON，
+ * 事务内部只做纯 DB 写入。
  */
-export function refreshSession(opts: {
+export async function refreshSession(opts: {
   sessionId: string;
   jsonlContent: string;
   filename: string;
-}): ImportSessionResult {
+}): Promise<ImportSessionResult> {
   const db = getDb();
-  const { summary, turns } = runPipelineOnContent(opts.jsonlContent, opts.filename);
+  const { summary, turns, errors } = await runPipelineOnContent(opts.jsonlContent, opts.filename);
+
+  // 在事务外预序列化 JSON 列
+  const categoriesJson = JSON.stringify(summary.categories);
+  const toolsJson = JSON.stringify(summary.tools);
+  const seriesJson = JSON.stringify(summary.series);
 
   const deleteTurns = db.prepare('DELETE FROM turns WHERE session_id = ?');
   const updateSession = db.prepare(`
@@ -227,12 +322,12 @@ export function refreshSession(opts: {
       summary.session.peakStep ?? 0,
       summary.session.totalOutput,
       summary.session.contextLimit,
-      JSON.stringify(summary.categories),
-      JSON.stringify(summary.tools),
-      JSON.stringify(summary.series),
+      categoriesJson,
+      toolsJson,
+      seriesJson,
       opts.sessionId,
     );
   })();
 
-  return { sessionId: opts.sessionId, summary, turns };
+  return { sessionId: opts.sessionId, summary, turns, errors };
 }

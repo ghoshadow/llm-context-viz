@@ -7,6 +7,8 @@ import type {
   UserLine,
   AssistantLine,
   SystemLine,
+  AttachmentLine,
+  AttachmentSummary,
   TurnGroup,
   ContentBlock,
 } from '../types/session';
@@ -65,8 +67,8 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
   let currentAsstLines: AssistantLine[] = [];
   let currentSystemLines: SystemLine[] = [];
   let currentToolResultLines: UserLine[] = [];
-  let currentAttachmentLines: Array<{ type: string; content: any; timestamp: string }> = [];
-  let preTurnAttachments: Array<{ type: string; content: any; timestamp: string }> = [];
+  let currentAttachmentLines: AttachmentSummary[] = [];
+  let preTurnAttachments: AttachmentSummary[] = [];
   let currentStartTs = '';
   let currentEndTs = '';
   let turnIndex = 0;
@@ -129,7 +131,8 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
     } else if (line.type === 'system') {
       currentSystemLines.push(line as SystemLine);
     } else if (line.type === 'attachment') {
-      const att = (line as any).attachment;
+      const attLine = line as AttachmentLine;
+      const att = attLine.attachment;
       if (att && (att.type === 'skill_listing' || att.type === 'task_reminder' || att.type === 'mcp_instructions_delta' || att.type === 'ultra_effort_enter')) {
         const target = currentUser ? currentAttachmentLines : preTurnAttachments;
         target.push({

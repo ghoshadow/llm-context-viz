@@ -7,6 +7,24 @@ import {
   type ObsidianOntologyDataLike,
 } from '../obsidian/card-context';
 import { callLLM } from '../llm/client';
+import { DEFAULT_MODEL } from '../llm/config';
+import {
+  finishCardSummarySuccess,
+  finishCardSummaryError,
+} from '../repositories/ontology-repository';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
+
+/**
+ * 转义 XML 特殊字符，防止用户数据中的 XML 标签破坏 prompt 结构
+ */
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
 
 // ============================================================================
 // Types
@@ -84,7 +102,7 @@ export function buildKnowledgeCardSummaryPrompt(data: OntologyDataLike, topicId:
       `- [${ontologyTypeLabel(data, node.type)}] ${node.label}`,
       `  id: ${node.id}`,
       `  首现: 第${node.firstTurn}轮；出现轮次: ${(node.turns || [node.firstTurn]).join(', ')}`,
-      `  知识内容: ${nodeText(node as any)}`,
+      `  知识内容: ${nodeText(node)}`,
       evidence ? `  证据:\n${evidence}` : '',
     ].filter(Boolean).join('\n');
   }).join('\n\n');
@@ -110,15 +128,18 @@ export function buildKnowledgeCardSummaryPrompt(data: OntologyDataLike, topicId:
 5. 总结要具体、可读，适合放在右侧详情面板，控制在 500-900 字。
 6. 末尾给出 3-5 条"可复用要点"，每条一句话。
 
-知识卡片：
-标题：${aggregate?.label || topic.label}
-轮次范围：${aggregate ? `第${aggregate.startTurn}-${aggregate.endTurn}轮` : `围绕第${topic.firstTurn}轮`}
+<user_card_data>
+<card_title>${escapeXml(String(aggregate?.label || topic.label))}</card_title>
+<turn_range>${escapeXml(String(aggregate ? `第${aggregate.startTurn}-${aggregate.endTurn}轮` : `围绕第${topic.firstTurn}轮`))}</turn_range>
 
-节点：
+<card_nodes>
 ${nodesText}
+</card_nodes>
 
-关系：
+<card_edges>
 ${edgesText || '无显式关系'}
+</card_edges>
+</user_card_data>
 
 请直接输出总结正文，不要输出 JSON，不要解释你的生成过程。`;
 }
@@ -193,7 +214,7 @@ export function startCardSummaryJob(sessionId: string, topicId: string, prompt: 
   if (cardSummaryJobs.has(jobKey)) return;
 
   cardSummaryJobs.add(jobKey);
-  const model = process.env.LLM_MODEL || 'deepseek-v4-pro';
+  const model = process.env.LLM_MODEL || DEFAULT_MODEL;
   const promptHash = crypto.createHash('sha1').update(prompt).digest('hex');
   const db = getDb();
   db.prepare(`
@@ -208,25 +229,32 @@ export function startCardSummaryJob(sessionId: string, topicId: string, prompt: 
       started_at = datetime('now'), completed_at = NULL, updated_at = datetime('now')
   `).run(sessionId, topicId, model, promptHash);
 
-  void (async () => {
-    try {
-      const summary = await runKnowledgeSummaryLLM(prompt);
-      getDb().prepare(`
-        UPDATE ontology_card_summaries
-        SET status = 'done', summary = ?, error = NULL,
-            completed_at = datetime('now'), updated_at = datetime('now')
-        WHERE session_id = ? AND topic_id = ?
-      `).run(summary, sessionId, topicId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      getDb().prepare(`
-        UPDATE ontology_card_summaries
-        SET status = 'error', error = ?,
-            completed_at = datetime('now'), updated_at = datetime('now')
-        WHERE session_id = ? AND topic_id = ?
-      `).run(message, sessionId, topicId);
-    } finally {
+  // 使用 setImmediate + try-catch 包裹，防止 fire-and-forget 中的未处理异常
+  // 导致进程崩溃（unhandled rejection）
+  setImmediate(() => {
+    (async () => {
+      try {
+        const summary = await runKnowledgeSummaryLLM(prompt);
+        try {
+          finishCardSummarySuccess(sessionId, topicId, summary);
+        } catch (dbErr) {
+          console.error('更新知识总结状态(done)失败:', sanitizeForLog(dbErr instanceof Error ? dbErr.message : String(dbErr)));
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('知识总结生成失败:', sanitizeForLog(message));
+        try {
+          finishCardSummaryError(sessionId, topicId, message);
+        } catch (dbErr) {
+          console.error('更新知识总结状态(error)失败:', sanitizeForLog(dbErr instanceof Error ? dbErr.message : String(dbErr)));
+        }
+      } finally {
+        cardSummaryJobs.delete(jobKey);
+      }
+    })().catch((outerErr) => {
+      // 兜底：即使 finally 中的 delete 抛出异常，也不会升级为 unhandled rejection
+      console.error('知识总结后台任务外层异常:', sanitizeForLog(outerErr instanceof Error ? outerErr.message : String(outerErr)));
       cardSummaryJobs.delete(jobKey);
-    }
-  })();
+    });
+  });
 }

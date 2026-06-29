@@ -1,15 +1,32 @@
 import { Router } from 'express';
-import { getDb } from '../db';
 import { refreshSession } from '../services/pipeline-service';
 import { callTranslationLLM } from '../llm/translation-client';
 import { enrichWithSubAgents } from './scanner';
-import { readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { getSessionSource } from '../../src/utils/sessionSource';
 
 import { findJsonlFile } from './shared';
 import ontologyRouter from './ontology';
 import { parseTurnListPagination } from './pagination';
 import type { SessionSource } from '../../src/utils/sessionSource';
+import { validateBody, TranslateRequestSchema } from '../middleware/validate.js';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
+import {
+  getAllSessions,
+  getSessionById,
+  deleteSession,
+  getSessionTurns,
+  getTurnCount,
+  getTurnByIndex,
+  getSessionBrief,
+  getSessionForRefresh,
+  getCachedTranslation,
+  upsertTurnTranslation,
+  getProjectConstantTranslation,
+  upsertProjectConstantTranslation,
+  getTurnTranslations,
+  getProjectConstantTranslationBatch,
+} from '../repositories/session-repository';
 
 const router = Router();
 
@@ -25,18 +42,10 @@ router.use('/:id/ontology', ontologyRouter);
 
 router.get('/', (_req, res) => {
   try {
-    const db = getDb();
-    const rows = db
-      .prepare(
-        `SELECT id, filename, cwd, model, version, ai_title, total_requests, peak_tokens, turn_count, created_at
-         FROM sessions
-         ORDER BY created_at DESC`,
-      )
-      .all() as Array<Record<string, unknown>>;
-
+    const rows = getAllSessions();
     return res.json(rows.map((row) => ({ ...row, source: getSessionSource(row) })));
   } catch (err) {
-    console.error('GET / error:', err);
+    console.error('GET / error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
     return res.status(500).json({ error: '获取会话列表时出错' });
   }
 });
@@ -47,18 +56,7 @@ router.get('/', (_req, res) => {
 
 router.get('/:id', (req, res) => {
   try {
-    const db = getDb();
-    const row = db.prepare(
-      `SELECT id, filename, file_hash, model, version, ai_title, cwd,
-              total_requests, peak_index, peak_tokens, peak_cache_hit,
-              peak_turn_idx, peak_step, total_output, context_limit,
-              turn_count, raw_size, categories_json, tools_json, series_json,
-              created_at, updated_at
-       FROM sessions
-       WHERE id = ?`,
-    ).get(req.params.id) as
-      | Record<string, unknown>
-      | undefined;
+    const row = getSessionById(req.params.id);
 
     if (!row) {
       return res.status(404).json({ error: '会话不存在' });
@@ -70,11 +68,7 @@ router.get('/:id', (req, res) => {
       tools_json,
       series_json,
       ...rest
-    } = row as Record<string, unknown> & {
-      categories_json?: string;
-      tools_json?: string;
-      series_json?: string;
-    };
+    } = row;
 
     const detail = {
       ...rest,
@@ -86,7 +80,7 @@ router.get('/:id', (req, res) => {
 
     return res.json(detail);
   } catch (err) {
-    console.error('GET /:id error:', err);
+    console.error('GET /:id error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
     return res.status(500).json({ error: '获取会话详情时出错' });
   }
 });
@@ -95,17 +89,16 @@ router.get('/:id', (req, res) => {
 // POST /:id/refresh — re-parse the original JSONL and update DB turns
 // ============================================================================
 
-router.post('/:id/refresh', (req, res) => {
+router.post('/:id/refresh', async (req, res) => {
   try {
-    const db = getDb();
-    const session = db.prepare('SELECT id, filename, file_hash, raw_jsonl FROM sessions WHERE id = ?').get(req.params.id) as { id: string; filename: string; file_hash: string; raw_jsonl?: string } | undefined;
+    const session = getSessionForRefresh(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
 
     let content: string;
     let sessDir: string;
-    const filePath = findJsonlFile(session.filename);
+    const filePath = await findJsonlFile(session.filename);
     if (filePath) {
-      content = readFileSync(filePath, 'utf-8');
+      content = await readFile(filePath, 'utf-8');
       sessDir = filePath.replace(/\.jsonl$/, '');
     } else if (session.raw_jsonl) {
       content = session.raw_jsonl;
@@ -114,7 +107,7 @@ router.post('/:id/refresh', (req, res) => {
       return res.status(404).json({ error: '找不到原始 JSONL 数据' });
     }
 
-    const { turns } = refreshSession({
+    const { turns } = await refreshSession({
       sessionId: session.id,
       jsonlContent: content,
       filename: session.filename,
@@ -134,29 +127,24 @@ router.post('/:id/refresh', (req, res) => {
 
 router.get('/:id/turns', (req, res) => {
   try {
-    const db = getDb();
     const page = parseTurnListPagination(req.query);
-    const selectSql = `SELECT id, turn_index, prompt, timestamp, asst_reqs, max_input, max_cache_hit, max_req_idx, max_req_step, out_tok, cum_total, cum_cache_hit, compression_reset, dur_ms, step_count
-       FROM turns
-       WHERE session_id = ?
-       ORDER BY turn_index DESC`;
     const rows = page.all
-      ? db.prepare(selectSql).all(req.params.id)
-      : db.prepare(`${selectSql} LIMIT ? OFFSET ?`).all(req.params.id, page.limit, page.offset);
+      ? getSessionTurns(req.params.id)
+      : getSessionTurns(req.params.id, { limit: page.limit, offset: page.offset });
 
     if (page.all) return res.json(rows);
 
-    const totalRow = db.prepare('SELECT COUNT(*) AS total FROM turns WHERE session_id = ?').get(req.params.id) as { total: number };
+    const total = getTurnCount(req.params.id);
 
     return res.json({
       items: rows,
-      total: totalRow.total,
+      total,
       limit: page.limit,
       offset: page.offset,
-      hasMore: page.offset + rows.length < totalRow.total,
+      hasMore: page.offset + rows.length < total,
     });
   } catch (err) {
-    console.error('GET /:id/turns error:', err);
+    console.error('GET /:id/turns error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
     return res.status(500).json({ error: '获取轮次列表时出错' });
   }
 });
@@ -167,15 +155,12 @@ router.get('/:id/turns', (req, res) => {
 
 router.get('/:id/turns/:turnIndex', (req, res) => {
   try {
-    const db = getDb();
     const turnIndex = parseInt(req.params.turnIndex, 10);
     if (isNaN(turnIndex)) {
       return res.status(400).json({ error: '无效的轮次索引' });
     }
 
-    const row = db
-      .prepare('SELECT * FROM turns WHERE session_id = ? AND turn_index = ?')
-      .get(req.params.id, turnIndex) as Record<string, unknown> | undefined;
+    const row = getTurnByIndex(req.params.id, turnIndex);
 
     if (!row) {
       return res.status(404).json({ error: '轮次不存在' });
@@ -189,13 +174,7 @@ router.get('/:id/turns/:turnIndex', (req, res) => {
       segs_json,
       longest_json,
       ...rest
-    } = row as Record<string, unknown> & {
-      comp_json?: string;
-      delta_json?: string;
-      tools_json?: string;
-      segs_json?: string;
-      longest_json?: string;
-    };
+    } = row;
 
     const detail = {
       ...rest,
@@ -208,7 +187,7 @@ router.get('/:id/turns/:turnIndex', (req, res) => {
 
     return res.json(detail);
   } catch (err) {
-    console.error('GET /:id/turns/:turnIndex error:', err);
+    console.error('GET /:id/turns/:turnIndex error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
     return res.status(500).json({ error: '获取轮次详情时出错' });
   }
 });
@@ -219,16 +198,15 @@ router.get('/:id/turns/:turnIndex', (req, res) => {
 
 router.delete('/:id', (req, res) => {
   try {
-    const db = getDb();
-    const result = db.prepare('DELETE FROM sessions WHERE id = ?').run(req.params.id);
+    const changes = deleteSession(req.params.id);
 
-    if (result.changes === 0) {
+    if (changes === 0) {
       return res.status(404).json({ error: '会话不存在' });
     }
 
     return res.status(204).send();
   } catch (err) {
-    console.error('DELETE /:id error:', err);
+    console.error('DELETE /:id error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
     return res.status(500).json({ error: '删除会话时出错' });
   }
 });
@@ -237,11 +215,40 @@ router.delete('/:id', (req, res) => {
 // POST /:id/translate — translate thinking / reply text to Chinese
 // ============================================================================
 
+/**
+ * 进行中的翻译请求映射表，按 (text, targetLang) 去重。
+ * 相同文本同时只发送一次翻译请求，其他请求复用已存在的 Promise。
+ */
+const inFlightTranslations = new Map<string, Promise<string>>();
+
+function translationKey(text: string): string {
+  // 使用完整文本作为去重键。翻译请求量小（每 turn 一次），Map Key 中存完整文本不会造成显著内存压力
+  // （最多几十个 in-flight 请求），相比前 200 字符截断的错误缓存风险，完整 Key 更为安全。
+  return text;
+}
+
 export async function translateRequestText(
   text: string,
   callLLM: (prompt: string) => Promise<string> = callTranslationLLM,
 ): Promise<string> {
-  return callLLM(text);
+  const key = translationKey(text);
+
+  // 复用已存在的进行中请求
+  const existing = inFlightTranslations.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = (async () => {
+    try {
+      return await callLLM(text);
+    } finally {
+      inFlightTranslations.delete(key);
+    }
+  })();
+
+  inFlightTranslations.set(key, promise);
+  return promise;
 }
 
 export function isConstantTranslationSlot(stepIndex: number): boolean {
@@ -271,21 +278,12 @@ export function parseConstantTranslationSections(value: unknown): number[] {
   return [...sections];
 }
 
-router.post('/:id/translate', async (req, res) => {
+router.post('/:id/translate', validateBody(TranslateRequestSchema), async (req, res) => {
   try {
-    const { text, turnIndex, stepIndex, sectionIndex } = req.body || {};
-    if (typeof text !== 'string' || !text.trim()) {
-      return res.status(400).json({ error: 'text 不能为空' });
-    }
-    if (typeof turnIndex !== 'number' || typeof stepIndex !== 'number' || typeof sectionIndex !== 'number') {
-      return res.status(400).json({ error: 'turnIndex / stepIndex / sectionIndex 不能为空' });
-    }
+    const { text, turnIndex, stepIndex, sectionIndex } = req.body;
 
     const sessionId = req.params.id!;
-    const db = getDb();
-    const session = db.prepare('SELECT id, cwd, model, filename, version FROM sessions WHERE id = ?').get(sessionId) as
-      | { id: string; cwd?: string | null; model?: string | null; filename?: string | null; version?: string | null }
-      | undefined;
+    const session = getSessionBrief(sessionId);
     const projectKey = session?.cwd && isConstantTranslationSlot(stepIndex)
       ? normalizeTranslationProjectKey(session.cwd, getSessionSource(session))
       : null;
@@ -297,20 +295,14 @@ router.post('/:id/translate', async (req, res) => {
     // Check cache (skip when force=true)
     if (!req.body?.force) {
       if (projectKey) {
-        const projectCached = db.prepare(
-          'SELECT translated_text FROM project_constant_translations WHERE project_cwd = ? AND source = ? AND section_index = ?'
-        ).get(projectKey.project_cwd, projectKey.source, sectionIndex) as { translated_text: string } | undefined;
+        const projectCached = getProjectConstantTranslation(projectKey.project_cwd, projectKey.source, sectionIndex);
         if (projectCached) {
-          db.prepare(
-            'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
-          ).run(sessionId, turnIndex, stepIndex, sectionIndex, projectCached.translated_text);
+          upsertTurnTranslation(sessionId, turnIndex, stepIndex, sectionIndex, projectCached.translated_text);
           return res.json({ translated: projectCached.translated_text });
         }
       }
 
-      const cached = db.prepare(
-        'SELECT translated_text FROM turn_translations WHERE session_id = ? AND turn_index = ? AND step_index = ? AND section_index = ?'
-      ).get(sessionId, turnIndex, stepIndex, sectionIndex) as { translated_text: string } | undefined;
+      const cached = getCachedTranslation(sessionId, turnIndex, stepIndex, sectionIndex);
       if (cached) return res.json({ translated: cached.translated_text });
     }
 
@@ -322,21 +314,14 @@ router.post('/:id/translate', async (req, res) => {
       return res.status(500).json({ error: '翻译失败: ' + message });
     }
 
-    db.prepare(
-      'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
-    ).run(sessionId, turnIndex, stepIndex, sectionIndex, translated);
+    upsertTurnTranslation(sessionId, turnIndex, stepIndex, sectionIndex, translated);
     if (projectKey) {
-      db.prepare(
-        `INSERT INTO project_constant_translations (project_cwd, source, section_index, translated_text, updated_at)
-         VALUES (?, ?, ?, ?, datetime('now'))
-         ON CONFLICT(project_cwd, source, section_index)
-         DO UPDATE SET translated_text = excluded.translated_text, updated_at = datetime('now')`
-      ).run(projectKey.project_cwd, projectKey.source, sectionIndex, translated);
+      upsertProjectConstantTranslation(projectKey.project_cwd, projectKey.source, sectionIndex, translated);
     }
 
     return res.json({ translated });
   } catch (err) {
-    console.error('POST /:id/translate error:', err);
+    console.error('POST /:id/translate error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
     return res.status(500).json({ error: '翻译失败: ' + (err as Error).message });
   }
 });
@@ -345,13 +330,8 @@ router.post('/:id/translate', async (req, res) => {
 router.get('/:id/translations/:turnIndex', (req, res) => {
   try {
     const { id: sessionId, turnIndex } = req.params;
-    const db = getDb();
-    const session = db.prepare('SELECT id, cwd, model, filename, version FROM sessions WHERE id = ?').get(sessionId) as
-      | { id: string; cwd?: string | null; model?: string | null; filename?: string | null; version?: string | null }
-      | undefined;
-    const rows = db.prepare(
-      'SELECT step_index, section_index, translated_text FROM turn_translations WHERE session_id = ? AND turn_index = ?'
-    ).all(sessionId!, parseInt(turnIndex!, 10)) as Array<{ step_index: number; section_index: number; translated_text: string }>;
+    const session = getSessionBrief(sessionId);
+    const rows = getTurnTranslations(sessionId, parseInt(turnIndex!, 10));
 
     const map: Record<number, Record<number, string>> = {};
     for (const r of rows) {
@@ -362,26 +342,22 @@ router.get('/:id/translations/:turnIndex', (req, res) => {
     const constantSections = parseConstantTranslationSections(req.query.constantSections);
     if (session?.cwd && constantSections.length > 0) {
       const projectKey = normalizeTranslationProjectKey(session.cwd, getSessionSource(session));
-      const stmt = db.prepare(
-        'SELECT section_index, translated_text FROM project_constant_translations WHERE project_cwd = ? AND source = ? AND section_index = ?'
+      const cachedRows = getProjectConstantTranslationBatch(
+        projectKey.project_cwd,
+        projectKey.source,
+        constantSections,
       );
-      for (const sectionIndex of constantSections) {
-        if (map[-100]?.[sectionIndex]) continue;
-        const cached = stmt.get(projectKey.project_cwd, projectKey.source, sectionIndex) as
-          | { section_index: number; translated_text: string }
-          | undefined;
-        if (!cached) continue;
+      for (const cached of cachedRows) {
+        if (map[-100]?.[cached.section_index]) continue;
         if (!map[-100]) map[-100] = {};
-        map[-100][sectionIndex] = cached.translated_text;
-        db.prepare(
-          'INSERT OR REPLACE INTO turn_translations (session_id, turn_index, step_index, section_index, translated_text) VALUES (?, ?, ?, ?, ?)'
-        ).run(sessionId, parseInt(turnIndex!, 10), -100, sectionIndex, cached.translated_text);
+        map[-100][cached.section_index] = cached.translated_text;
+        upsertTurnTranslation(sessionId, parseInt(turnIndex!, 10), -100, cached.section_index, cached.translated_text);
       }
     }
 
     return res.json({ translations: map });
   } catch (err) {
-    console.error('GET /:id/translations/:turnIndex error:', err);
+    console.error('GET /:id/translations/:turnIndex error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
     return res.status(500).json({ error: String(err) });
   }
 });

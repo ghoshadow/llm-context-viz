@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getDb } from '../db';
 import { validateConfig, DEFAULT_FILENAME_TEMPLATE, type ObsidianConfig } from '../obsidian/sync';
 import { rejectUntrustedLocalRequest } from '../obsidian/local-request';
+import { sanitizeForLog } from '../utils/log-sanitizer.js';
 
 const router = Router();
 
@@ -40,6 +41,7 @@ router.get('/config', (_req, res) => {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error('GET /obsidian/config error:', sanitizeForLog(message));
     return res.status(500).json({ error: '获取 Obsidian 配置失败: ' + message });
   }
 });
@@ -78,6 +80,7 @@ router.put('/config', (req, res) => {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error('PUT /obsidian/config error:', sanitizeForLog(message));
     return res.status(500).json({ error: '保存 Obsidian 配置失败: ' + message });
   }
 });

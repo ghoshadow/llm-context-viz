@@ -52,11 +52,14 @@ export function fmtDur(ms: number): string {
 
 /**
  * Format an ISO timestamp as "MM-DD HH:MM".
+ * 对无效日期输入返回空字符串，避免渲染 NaN。
  *
  * @example fmtDate("2026-06-15T14:30:00Z") => "06-15 14:30"
  */
 export function fmtDate(iso: string): string {
+  if (!iso) return '';
   const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
   const MM = String(d.getMonth() + 1).padStart(2, '0');
   const DD = String(d.getDate()).padStart(2, '0');
   const HH = String(d.getHours()).padStart(2, '0');
@@ -66,12 +69,15 @@ export function fmtDate(iso: string): string {
 
 /**
  * Format an ISO timestamp as date only (zh-CN locale).
+ * 对无效日期输入返回空字符串。
  *
  * @example fmtDateOnly("2026-06-15T14:30:00Z") => "2026/06/15"
  */
 export function fmtDateOnly(iso: string): string {
+  if (!iso) return '';
   try {
     const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
     return d.toLocaleDateString('zh-CN', {
       year: 'numeric',
       month: '2-digit',
@@ -84,10 +90,13 @@ export function fmtDateOnly(iso: string): string {
 
 /**
  * Compact "M/D HH:MM" format — used where space is tight.
+ * 对无效日期输入返回空字符串。
  *
  * @example fmtDateShort("2026-06-15T14:30:00Z") => "6/15 14:30"
  */
 export function fmtDateShort(iso: string): string {
+  if (!iso) return '';
   const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }

@@ -137,8 +137,8 @@ export function getKnowledgeCardContext(data: ObsidianOntologyDataLike, topicId:
   const turns = nodes.flatMap((node) => (
     node.turns && node.turns.length > 0 ? node.turns : [node.firstTurn]
   ));
-  const startTurn = aggregate?.startTurn ?? Math.min(...turns, topic.firstTurn);
-  const endTurn = aggregate?.endTurn ?? Math.max(...turns, topic.firstTurn);
+  const startTurn = aggregate?.startTurn ?? (turns.length > 0 ? Math.min(...turns, topic.firstTurn) : topic.firstTurn);
+  const endTurn = aggregate?.endTurn ?? (turns.length > 0 ? Math.max(...turns, topic.firstTurn) : topic.firstTurn);
 
   return {
     topic,
