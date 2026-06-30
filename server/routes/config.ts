@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { homedir } from 'os';
 import { readModelConfig, writeModelConfig } from '../services/env-file';
 
 const router = Router();
@@ -39,6 +40,11 @@ router.put('/model', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: '保存配置失败' });
   }
+});
+
+/** GET /api/config/home — 返回用户 home 目录（前端用于路径显示） */
+router.get('/home', (_req, res) => {
+  res.json({ homeDir: homedir() });
 });
 
 export default router;

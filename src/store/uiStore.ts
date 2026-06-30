@@ -7,6 +7,10 @@ interface UIStore {
   page: Page;
   setPage: (page: Page) => void;
 
+  // Home directory (from server, for path display)
+  homeDir: string | null;
+  setHomeDir: (dir: string) => void;
+
   // Hover state (shared across treemap, bar segments, legend rows)
   hoveredCategory: string | null;
   setHoveredCategory: (key: string | null) => void;
@@ -28,6 +32,9 @@ interface UIStore {
 export const useUIStore = create<UIStore>((set) => ({
   page: 'home',
   setPage: (page) => set({ page }),
+
+  homeDir: null,
+  setHomeDir: (homeDir) => set({ homeDir }),
 
   hoveredCategory: null,
   setHoveredCategory: (key) => set({ hoveredCategory: key }),

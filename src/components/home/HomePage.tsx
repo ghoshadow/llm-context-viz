@@ -310,7 +310,8 @@ function SessionCard({ session, onSelect, onDelete }: {
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const projectPath = getSessionProjectPathText(session);
+  const homeDir = useUIStore(s => s.homeDir);
+  const projectPath = getSessionProjectPathText(session, homeDir);
   const titleDisplay = getSessionCardTitleDisplay(session.ai_title, session.model);
   const titleToneSuffix = titleDisplay.kind === 'structured'
     ? titleDisplay.tone === 'command'

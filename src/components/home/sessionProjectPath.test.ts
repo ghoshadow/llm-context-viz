@@ -8,13 +8,20 @@ const home = homedir();
 
 test('replaces home directory with tilde', () => {
   assert.equal(
-    getSessionProjectPathText({ cwd: join(home, 'Documents', 'my-project') }),
+    getSessionProjectPathText({ cwd: join(home, 'Documents', 'my-project') }, home),
     '~/Documents/my-project',
   );
 });
 
 test('shortens a bare home directory to tilde', () => {
-  assert.equal(getSessionProjectPathText({ cwd: home }), '~');
+  assert.equal(getSessionProjectPathText({ cwd: home }, home), '~');
+});
+
+test('returns absolute path when no homeDir provided', () => {
+  assert.equal(
+    getSessionProjectPathText({ cwd: join(home, 'work') }),
+    join(home, 'work'),
+  );
 });
 
 test('falls back when a session list item has no recorded cwd', () => {
@@ -24,7 +31,7 @@ test('falls back when a session list item has no recorded cwd', () => {
 
 test('returns absolute path for paths outside home', () => {
   assert.equal(
-    getSessionProjectPathText({ cwd: '/opt/some-tool/data' }),
+    getSessionProjectPathText({ cwd: '/opt/some-tool/data' }, home),
     '/opt/some-tool/data',
   );
 });
