@@ -20,6 +20,7 @@ interface FoundFile {
   requests?: number;
   peakTokens?: number;
   turnCount?: number;
+  cwd?: string;
 }
 
 const S = {
@@ -378,6 +379,7 @@ export default function ScannerModal() {
                       )}
                     </div>
                     {f.title && <div style={{ fontSize: 10, color: SEMANTIC.textMuted, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.path}>{f.name}</div>}
+                    {f.cwd && <div style={{ fontSize: 10, color: 'oklch(0.55 0.02 265)', marginTop: 1, fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.cwd}>📁 {f.cwd.replace(/^\/Users\/[^/]+/, '~')}</div>}
                     {!f.imported && f.requests != null && (
                       <div style={{ display: 'flex', gap: 10, marginTop: 3 }}>
                         <span style={{ fontSize: 11, color: SEMANTIC.textMuted }}>{f.model || 'unknown'}</span>

@@ -18,6 +18,7 @@ import {
 } from '../../styles/theme';
 import { fmt, fmtK, fmtDur, fmtDate } from '../../utils/format';
 import { post, get, API_BASE } from '../../api/client';
+import ModelConfigModal from './ModelConfigModal';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { ContentRenderer } from '../shared/ContentRenderer';
 import { CommandMessageBlock } from '../shared/CommandMessageBlock';
@@ -1363,6 +1364,7 @@ export default function TurnInspector() {
   const toggleStep = useUIStore((s) => s.toggleStep);
   const [showPeakDetail, setShowPeakDetail] = useState(false);
   const [showCumDetail, setShowCumDetail] = useState(false);
+  const [showModelConfig, setShowModelConfig] = useState(false);
   const setSelectedStepIndex = useUIStore((s) => s.setSelectedStepIndex);
   const setPage = useUIStore((s) => s.setPage);
 
@@ -1546,6 +1548,25 @@ export default function TurnInspector() {
           >
             逐轮检查
           </span>
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setShowModelConfig(true);
+            }}
+            style={{
+              textDecoration: 'none',
+              border: `1px solid ${SEMANTIC.borderColor}`,
+              borderRadius: 9,
+              padding: '9px 14px',
+              color: SEMANTIC.textSecondary,
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 12,
+              background: 'oklch(0.20 0.01 265 / 0.6)',
+            }}
+          >
+            模型配置
+          </a>
         </div>
       </header>
 
@@ -1912,6 +1933,9 @@ export default function TurnInspector() {
         />
         );
       })()}
+
+      {/* 模型配置 Modal */}
+      {showModelConfig && <ModelConfigModal onClose={() => setShowModelConfig(false)} />}
     </>
   );
 }

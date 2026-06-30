@@ -3,9 +3,13 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 const API_PORT = process.env.PORT || '4137';
+const isTauriBuild = !!process.env.TAURI_ENV_TARGET_TRIPLE;
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __API_BASE__: JSON.stringify(isTauriBuild ? `http://localhost:${API_PORT}/api` : '/api'),
+  },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },
   },

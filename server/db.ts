@@ -1,13 +1,18 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { mkdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let db: Database.Database | null = null;
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'llm-context.db');
+// 生产环境使用系统标准数据目录 (Tauri 侧通过 LLM_CONTEXT_VIZ_DATA_DIR 传入)
+// 开发环境使用项目本地 data/ 目录
+const DATA_DIR = process.env.LLM_CONTEXT_VIZ_DATA_DIR || path.join(__dirname, '..', 'data');
+const DB_PATH = path.join(DATA_DIR, 'llm-context.db');
+mkdirSync(DATA_DIR, { recursive: true });
 
 export function getDb(): Database.Database {
   if (db) return db;
@@ -172,6 +177,7 @@ export function initDb(): void {
       peak_tokens INTEGER,
       peak_cache_hit INTEGER DEFAULT 0,
       turn_count INTEGER,
+      cwd TEXT,
       last_seen TEXT DEFAULT (datetime('now'))
     );
 
@@ -301,6 +307,7 @@ export function migrate(): void {
         peak_tokens INTEGER,
         peak_cache_hit INTEGER DEFAULT 0,
         turn_count INTEGER,
+        cwd TEXT,
         last_seen TEXT DEFAULT (datetime('now'))
       );
     `);
@@ -369,6 +376,12 @@ export function migrate(): void {
   if (userVersion < 7) {
     migrateTurnTranslationsV7(conn);
     conn.pragma('user_version = 7');
+  }
+
+  // v7 → v8: scanned_files 增加 cwd 列
+  if (userVersion < 8) {
+    try { conn.exec('ALTER TABLE scanned_files ADD COLUMN cwd TEXT'); } catch { /* 已存在 */ }
+    conn.pragma('user_version = 8');
   }
 }
 

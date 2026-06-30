@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { get, post, del } from '../api/client';
 import { consumeSSE } from '../utils/sse.js';
+import { API_BASE } from '../api/client';
 import type {
   SessionListItem,
   SessionDetail,
@@ -30,7 +31,7 @@ export interface SessionStore {
   scannerOpen: boolean;
 
   // Scan result cache
-  scanFiles: { path: string; name: string; size: number; modified: string; source?: 'claude' | 'codex'; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number }[];
+  scanFiles: { path: string; name: string; size: number; modified: string; source?: 'claude' | 'codex'; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number; cwd?: string }[];
   scanStatus: string;
   setScanFiles: (files: { path: string; name: string; size: number; modified: string; source?: 'claude' | 'codex'; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number }[], status: string) => void;
 
@@ -240,7 +241,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
 
     try {
       await consumeSSE(
-        '/api/sessions/' + currentSessionId + '/ontology/extract',
+        `${API_BASE}/sessions/${currentSessionId}/ontology/extract`,
         {
           shardSize: options?.shardSize,
           maxShardChars: options?.maxShardChars,

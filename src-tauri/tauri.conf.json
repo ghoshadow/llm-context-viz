@@ -1,0 +1,62 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "LLM Context Viz",
+  "version": "0.1.0",
+  "identifier": "com.llm-context-viz.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5179",
+    "beforeDevCommand": "npm run tauri:dev",
+    "beforeBuildCommand": "npm run build && npm run tauri:build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LLM Context Viz",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "trayIcon": {
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": true,
+      "tooltip": "LLM Context Viz"
+    },
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:4137; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": [
+      "../dist-server/**/*"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "shell": {
+      "scope": [
+        {
+          "name": "node",
+          "cmd": "node",
+          "args": true
+        }
+      ]
+    }
+  }
+}
