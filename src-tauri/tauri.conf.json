@@ -34,6 +34,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "macOS": {
+      "minimumSystemVersion": "10.13",
+      "infoPlist": "Info.plist"
+    },
     "externalBin": [
       "binaries/node"
     ],
