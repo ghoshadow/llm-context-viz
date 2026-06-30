@@ -20,6 +20,7 @@ const BINARIES_DIR = join(__dirname, '..', 'src-tauri', 'binaries');
 const NODE_VERSION = '22.12.0';
 const p = process.platform;
 const a = process.arch;
+const target = process.env.TAURI_TARGET;
 
 const MAP = {
   'darwin-arm64': { p: 'darwin', a: 'arm64',  triple: 'aarch64-apple-darwin',  ext: 'tar.gz' },
@@ -28,8 +29,8 @@ const MAP = {
   'win32-x64':    { p: 'win',    a: 'x64',    triple: 'x86_64-pc-windows-msvc', ext: 'zip' },
 };
 
-const cfg = MAP[`${p}-${a}`];
-if (!cfg) { console.error(`不支持平台: ${p}-${a}`); process.exit(1); }
+const cfg = target ? Object.values(MAP).find((item) => item.triple === target) : MAP[`${p}-${a}`];
+if (!cfg) { console.error(`不支持平台: ${target || `${p}-${a}`}`); process.exit(1); }
 
 const BIN_NAME = `node-${cfg.triple}${cfg.ext === 'zip' ? '.exe' : ''}`;
 const binPath = join(BINARIES_DIR, BIN_NAME);

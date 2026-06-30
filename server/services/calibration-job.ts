@@ -9,7 +9,6 @@ import type { AgentSource, NormalizedCalibration } from '../../src/pipeline/cali
 import { normalizeAgentSource } from '../../src/pipeline/calibration-types';
 import { extractConstants } from '../../src/pipeline/extract-constants';
 import { extractCodexConstants } from '../../src/pipeline/extract-codex-constants';
-import { buildCalibrationProxyArgs } from './calibration-launchers';
 import { readClaudeBaseUrl } from './claude-config';
 import { readCodexBaseUrl, readCodexTargetHost } from './codex-config';
 
@@ -150,6 +149,30 @@ export function defaultCalibrationTarget(
   readClaudeTarget = readClaudeBaseUrl,
 ): string {
   return source === 'codex' ? readCodexTarget() : readClaudeTarget();
+}
+
+export function buildCalibrationProxyArgs(options: {
+  source: AgentSource;
+  scriptPath: string;
+  cwd: string;
+  targetHost: string;
+  port: number;
+  timeoutMs: number;
+  prompt: string;
+}): string[] {
+  const base = [
+    options.scriptPath,
+    '--source', options.source,
+    '--cwd', options.cwd,
+    '--target-host', options.targetHost,
+    '--port', String(options.port),
+    '--timeout-ms', String(options.timeoutMs),
+    '--',
+  ];
+
+  return options.source === 'codex'
+    ? [...base, options.prompt]
+    : [...base, '-p', options.prompt];
 }
 
 export async function startCalibrationJob(options: StartCalibrationJobOptions): Promise<CalibrationJobSnapshot> {

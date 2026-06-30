@@ -15,7 +15,7 @@ export interface LLMCallOptions {
 }
 
 export function resolveLLMRequestConfig(
-  env: Pick<NodeJS.ProcessEnv, 'LLM_MODEL' | 'LLM_BASE_URL'>,
+  env: Partial<Pick<NodeJS.ProcessEnv, 'LLM_MODEL' | 'LLM_BASE_URL'>>,
   options: LLMCallOptions = {},
 ): { model: string; baseUrl: string } {
   return {

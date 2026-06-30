@@ -3,8 +3,6 @@
  *
  * 从 JSONL 会话转录中提取自然语言内容（用户消息、模型回复、推理摘要），
  * 用于喂给 LLM 做本体提取。
- *
- * 本模块从 scripts/extract-session-content.ts 提取核心逻辑。
  */
 
 import { isCodexJsonl, runCodexPipeline } from '../../src/pipeline/codex-jsonl';

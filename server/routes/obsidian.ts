@@ -36,7 +36,7 @@ router.get('/config', (_req, res) => {
       notesDir: config.notesDir,
       filenameTemplate: config.filenameTemplate,
       configured: validation.ok,
-      error: validation.ok ? null : validation.error,
+      error: validation.ok === true ? null : validation.error,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -57,7 +57,7 @@ router.put('/config', (req, res) => {
     };
 
     const validation = validateConfig(next);
-    if (!validation.ok) return res.status(400).json({ error: validation.error });
+    if (validation.ok === false) return res.status(400).json({ error: validation.error });
 
     getDb().prepare(`
       INSERT INTO obsidian_config (id, vault_path, notes_dir, filename_template, updated_at)

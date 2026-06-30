@@ -1,7 +1,7 @@
 // ============================================================================
 // Extract system constants from a captured API request log.
 //
-// Reads a JSONL file produced by scripts/transparent-proxy.js, finds the first
+// Reads a JSONL file produced by the calibration proxy, finds the first
 // POST request, and measures the character counts for each system component:
 //
 //   - system blocks (billing header, agent identity, harness prompt)

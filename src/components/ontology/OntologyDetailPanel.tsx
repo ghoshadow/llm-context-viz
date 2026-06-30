@@ -3,6 +3,7 @@ import { SEMANTIC } from '../../styles/theme';
 import type { OntologyData, OntologyNode, OntologyEvidence } from '../../types/ontology';
 import { sortOntologyTypes } from './typeOrder';
 import { get, post, put } from '../../api/client';
+import { MarkdownBlock } from '../shared/MarkdownBlock';
 
 interface OntologyDetailPanelProps {
   data: OntologyData;
@@ -118,164 +119,6 @@ function getCardNodes(topic: OntologyNode, data: OntologyData): OntologyNode[] {
     if (e.t === topic.id) relatedIds.add(e.s);
   });
   return data.nodes.filter((n) => relatedIds.has(n.id));
-}
-
-function renderInlineMarkdown(text: string, keyPrefix: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
-    const token = match[0];
-    const key = `${keyPrefix}-${match.index}`;
-
-    if (token.startsWith('**')) {
-      nodes.push(<strong key={key} style={{ color: 'oklch(0.90 0.01 265)', fontWeight: 650 }}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith('`')) {
-      nodes.push(
-        <code key={key} style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '0.92em', color: 'oklch(0.84 0.10 165)', background: 'oklch(0.24 0.012 265)', borderRadius: 4, padding: '1px 4px' }}>
-          {token.slice(1, -1)}
-        </code>,
-      );
-    } else {
-      const linkMatch = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
-      if (linkMatch) {
-        nodes.push(
-          <a key={key} href={linkMatch[2]} target="_blank" rel="noreferrer" style={{ color: 'oklch(0.78 0.12 165)', textDecoration: 'none' }}>
-            {linkMatch[1]}
-          </a>,
-        );
-      }
-    }
-    lastIndex = match.index + token.length;
-  }
-
-  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
-  return nodes;
-}
-
-function MarkdownSummary({ text }: { text: string }) {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const blocks: React.ReactNode[] = [];
-  let paragraph: string[] = [];
-  let list: Array<{ ordered: boolean; text: string }> = [];
-  let code: string[] | null = null;
-
-  const flushParagraph = () => {
-    if (paragraph.length === 0) return;
-    const content = paragraph.join(' ').trim();
-    if (content) {
-      blocks.push(
-        <p key={`p-${blocks.length}`} style={{ margin: '0 0 10px', lineHeight: 1.68 }}>
-          {renderInlineMarkdown(content, `p-${blocks.length}`)}
-        </p>,
-      );
-    }
-    paragraph = [];
-  };
-
-  const flushList = () => {
-    if (list.length === 0) return;
-    const ordered = list[0]!.ordered;
-    const Tag = ordered ? 'ol' : 'ul';
-    blocks.push(
-      <Tag key={`list-${blocks.length}`} style={{ margin: '0 0 10px', paddingLeft: 18, lineHeight: 1.6 }}>
-        {list.map((item, idx) => (
-          <li key={idx} style={{ marginBottom: 5 }}>
-            {renderInlineMarkdown(item.text, `li-${blocks.length}-${idx}`)}
-          </li>
-        ))}
-      </Tag>,
-    );
-    list = [];
-  };
-
-  lines.forEach((rawLine) => {
-    const line = rawLine.trimEnd();
-    const trimmed = line.trim();
-
-    if (trimmed.startsWith('```')) {
-      flushParagraph();
-      flushList();
-      if (code) {
-        blocks.push(
-          <pre key={`code-${blocks.length}`} style={{ margin: '0 0 10px', padding: '9px 10px', borderRadius: 8, overflowX: 'auto', background: 'oklch(0.15 0.008 265)', border: '1px solid oklch(0.28 0.012 265)', color: 'oklch(0.82 0.01 265)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, lineHeight: 1.55 }}>
-            <code>{code.join('\n')}</code>
-          </pre>,
-        );
-        code = null;
-      } else {
-        code = [];
-      }
-      return;
-    }
-
-    if (code) {
-      code.push(rawLine);
-      return;
-    }
-
-    if (!trimmed) {
-      flushParagraph();
-      flushList();
-      return;
-    }
-
-    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      const level = heading[1]!.length;
-      const fontSize = level === 1 ? 14.5 : level === 2 ? 13.5 : 12.5;
-      blocks.push(
-        <div key={`h-${blocks.length}`} style={{ margin: blocks.length === 0 ? '0 0 8px' : '13px 0 8px', fontSize, fontWeight: 700, color: 'oklch(0.88 0.01 265)' }}>
-          {renderInlineMarkdown(heading[2]!, `h-${blocks.length}`)}
-        </div>,
-      );
-      return;
-    }
-
-    const quote = trimmed.match(/^>\s?(.+)$/);
-    if (quote) {
-      flushParagraph();
-      flushList();
-      blocks.push(
-        <blockquote key={`q-${blocks.length}`} style={{ margin: '0 0 10px', padding: '5px 0 5px 10px', borderLeft: '2px solid oklch(0.45 0.09 165)', color: SEMANTIC.textMuted, lineHeight: 1.6 }}>
-          {renderInlineMarkdown(quote[1]!, `q-${blocks.length}`)}
-        </blockquote>,
-      );
-      return;
-    }
-
-    const unordered = trimmed.match(/^[-*]\s+(.+)$/);
-    const ordered = trimmed.match(/^\d+\.\s+(.+)$/);
-    if (unordered || ordered) {
-      flushParagraph();
-      const isOrdered = Boolean(ordered);
-      if (list.length > 0 && list[0]!.ordered !== isOrdered) flushList();
-      list.push({ ordered: isOrdered, text: (unordered?.[1] || ordered?.[1] || '').trim() });
-      return;
-    }
-
-    flushList();
-    paragraph.push(trimmed);
-  });
-
-  flushParagraph();
-  flushList();
-
-  const openCode = code as string[] | null;
-  if (openCode) {
-    blocks.push(
-      <pre key={`code-${blocks.length}`} style={{ margin: '0 0 10px', padding: '9px 10px', borderRadius: 8, overflowX: 'auto', background: 'oklch(0.15 0.008 265)', border: '1px solid oklch(0.28 0.012 265)', color: 'oklch(0.82 0.01 265)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, lineHeight: 1.55 }}>
-        <code>{openCode.join('\n')}</code>
-      </pre>,
-    );
-  }
-
-  return <div style={{ fontSize: 12.5, color: 'oklch(0.82 0.01 265)' }}>{blocks}</div>;
 }
 
 // ─── Empty State ────────────────────────────────────────────────────────────
@@ -797,7 +640,7 @@ function SelectedEntity({
                           编辑
                         </button>
                       </div>
-                      <MarkdownSummary text={summaryStatus.summary} />
+                      <MarkdownBlock text={summaryStatus.summary} />
                     </>
                   )}
                   {summaryStatus.summary && summaryEditing && (

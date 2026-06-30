@@ -81,7 +81,7 @@ function normalizeEvidenceSource(value: unknown): unknown {
   return 'reasoning_summary';
 }
 
-export const EvidenceSchema = z.object({
+const EvidenceSchema = z.object({
   turn: z.number().int().describe('证据所在轮次（1-based）'),
   source: z.preprocess(
     normalizeEvidenceSource,
@@ -95,7 +95,7 @@ export type Evidence = z.infer<typeof EvidenceSchema>;
 
 // ── 实体 ──────────────────────────────────────────────────────────────────
 
-export const CandidateSchema = z.object({
+const CandidateSchema = z.object({
   id: z.string().describe('唯一标识，英文小写下划线（如 context_compression）'),
   label: z.string().describe('中文显示名（如 "上下文压缩"）'),
   type: z.enum(['topic', 'how_to', 'why', 'pitfall', 'heuristic', 'technique']).describe('实体类型 key'),
@@ -114,7 +114,7 @@ export type Candidate = z.infer<typeof CandidateSchema>;
 
 // ── 关系 ──────────────────────────────────────────────────────────────────
 
-export const RelationSchema = z.object({
+const RelationSchema = z.object({
   s: z.string().describe('源实体 id'),
   t: z.string().describe('目标实体 id'),
   label: z.string().describe('关系描述，简短中文（"根因"、"依赖"、"修复"、"派发"）'),
@@ -128,7 +128,7 @@ export type Relation = z.infer<typeof RelationSchema>;
 
 // ── 配置 ──────────────────────────────────────────────────────────────────
 
-export const ConfigSchema = z.object({
+const ConfigSchema = z.object({
   keepTypes: z.array(z.string()).optional().describe('保留的实体类型'),
   reclassify: z.record(z.string(), z.string()).optional().describe('实体类型重映射，key 为实体 id，value 为新的类型 key'),
   pruneOrphans: z.boolean().optional().describe('是否剪枝孤立节点'),

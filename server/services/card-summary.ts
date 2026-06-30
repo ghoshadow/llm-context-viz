@@ -3,7 +3,6 @@ import { getDb } from '../db';
 import {
   nodeText,
   type ObsidianNodeLike,
-  type ObsidianEdgeLike,
   type ObsidianOntologyDataLike,
 } from '../obsidian/card-context';
 import { callLLM } from '../llm/client';
@@ -27,20 +26,15 @@ export interface CardSummaryRecord {
   completed_at: string | null;
 }
 
-// Re-export Obsidian types for consumers that previously used the local definitions.
-export type OntologyNodeLike = ObsidianNodeLike;
-export type OntologyEdgeLike = ObsidianEdgeLike;
-export type OntologyDataLike = ObsidianOntologyDataLike;
-
 // ============================================================================
 // Prompt building
 // ============================================================================
 
-export function ontologyTypeLabel(data: OntologyDataLike, type: string): string {
+export function ontologyTypeLabel(data: ObsidianOntologyDataLike, type: string): string {
   return data.types?.find((t) => t.key === type)?.label || type;
 }
 
-function getOntologyCardNodes(topic: OntologyNodeLike, data: OntologyDataLike): OntologyNodeLike[] {
+function getOntologyCardNodes(topic: ObsidianNodeLike, data: ObsidianOntologyDataLike): ObsidianNodeLike[] {
   const aggregateNodes = topic.aggregateId
     ? data.nodes.filter((n) => n.aggregateId === topic.aggregateId)
     : [];
@@ -54,7 +48,7 @@ function getOntologyCardNodes(topic: OntologyNodeLike, data: OntologyDataLike): 
   return data.nodes.filter((n) => relatedIds.has(n.id));
 }
 
-export function buildKnowledgeCardSummaryPrompt(data: OntologyDataLike, topicId: string): string {
+export function buildKnowledgeCardSummaryPrompt(data: ObsidianOntologyDataLike, topicId: string): string {
   const topic = data.nodes.find((n) => n.id === topicId);
   if (!topic) throw new Error('主题节点不存在');
   if (topic.type !== 'topic') throw new Error('只有问题/主题节点可以生成知识总结');

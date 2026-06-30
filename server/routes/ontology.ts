@@ -7,7 +7,6 @@ import { resolveObsidianNotePath, validateConfig, writeObsidianCard } from '../o
 import { getObsidianConfig } from './obsidian';
 import { findJsonlFile } from './shared';
 import {
-  type OntologyDataLike,
   buildKnowledgeCardSummaryPrompt,
   getCardSummaryStatus,
   startCardSummaryJob,
@@ -56,7 +55,7 @@ function syncRecordMatchesCurrentVault(row: ObsidianSyncRecord | undefined, conf
 // ── Shared DB helpers (eliminates repeated query patterns) ────────────────
 
 /** Retrieve and parse the ontology JSON for a session, or null. */
-function getOntologyData(sessionId: string): OntologyDataLike | null {
+function getOntologyData(sessionId: string): ObsidianOntologyDataLike | null {
   const row = getDb().prepare(
     'SELECT ontology_json FROM ontology WHERE session_id = ?'
   ).get(sessionId) as { ontology_json: string } | undefined;
@@ -229,7 +228,7 @@ router.post('/summarize-card', (req, res) => {
       .get(id) as { ontology_json: string } | undefined;
     if (!row) return res.status(404).json({ error: '该会话尚无本体数据' });
 
-    const data = JSON.parse(row.ontology_json) as OntologyDataLike;
+    const data = JSON.parse(row.ontology_json) as ObsidianOntologyDataLike;
     if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
       return res.status(400).json({ error: '本体数据结构不完整' });
     }
@@ -258,7 +257,7 @@ router.get('/obsidian-card/:topicId', (req, res) => {
     const validation = validateConfig(config);
     let status = row?.status || 'not_synced';
     let notePath = row?.note_path || null;
-    let error = row?.error || (validation.ok ? null : validation.error);
+    let error = row?.error || (validation.ok === true ? null : validation.error);
 
     if (row && validation.ok) {
       if (!syncRecordMatchesCurrentVault(row, config)) {
@@ -267,7 +266,7 @@ router.get('/obsidian-card/:topicId', (req, res) => {
         const resolved = resolveObsidianNotePath(config, row.note_path);
         if (!resolved.ok || !existsSync(resolved.absolutePath)) {
           status = 'not_synced'; notePath = row.note_path;
-          error = resolved.ok ? '上次同步的 Obsidian 笔记文件不存在' : resolved.error;
+          error = resolved.ok === true ? '上次同步的 Obsidian 笔记文件不存在' : resolved.error;
         }
       }
     }
@@ -459,7 +458,7 @@ router.post('/extract', async (req, res) => {
       }
       saveOntology(sessionId, data, meta.maxTurn);
       send('complete', { sessionId, maxTurn: meta.maxTurn, stats: result.shardStats });
-    } else {
+    } else if (result.success === false) {
       send('error', { message: result.message, detail: result.detail, stage: result.stage });
     }
   } catch (err) {

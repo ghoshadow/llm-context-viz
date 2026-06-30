@@ -17,6 +17,7 @@ import * as esbuild from 'esbuild';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const DIST_SERVER = join(ROOT, 'dist-server');
+const TARGET_ARCH = process.env.TAURI_TARGET === 'x86_64-apple-darwin' ? 'x64' : process.env.TAURI_TARGET === 'aarch64-apple-darwin' ? 'arm64' : undefined;
 
 // Step 1: 下载 Node.js 二进制
 console.log('[tauri-build] 下载便携 Node.js...');
@@ -50,8 +51,7 @@ const rootPkg = JSON.parse(
 );
 
 // 只保留 server 运行时需要的依赖
-const serverDeps = ['better-sqlite3', 'express', 'dotenv', 'zod', 'zod-to-json-schema',
-  '@anthropic-ai/claude-agent-sdk'];
+const serverDeps = ['better-sqlite3', 'express', 'dotenv', 'zod', '@anthropic-ai/claude-agent-sdk'];
 const deps = {};
 for (const name of serverDeps) {
   if (rootPkg.dependencies[name]) deps[name] = rootPkg.dependencies[name];
@@ -67,6 +67,7 @@ console.log('[tauri-build] 安装生产依赖...');
 spawnSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], {
   cwd: DIST_SERVER,
   stdio: 'inherit',
+  env: TARGET_ARCH ? { ...process.env, npm_config_arch: TARGET_ARCH, npm_config_platform: 'darwin' } : process.env,
 });
 
 // 不复制 .env — 生产环境 API key 由用户自行配置，防止泄露

@@ -21,7 +21,7 @@ import { post, get, API_BASE } from '../../api/client';
 import ModelConfigModal from './ModelConfigModal';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { ContentRenderer } from '../shared/ContentRenderer';
-import { CommandMessageBlock } from '../shared/CommandMessageBlock';
+import { StructuredTextBlock } from '../shared/StructuredTextBlock';
 import { getStructuredTextPreview, hasStructuredText } from '../shared/structuredText';
 import type { TurnDetail, TurnSummary, TimelineSegment, SegmentDetail } from '../../types/session';
 
@@ -810,7 +810,7 @@ function UserPromptSection({ prompt }: { prompt: string }) {
         </span>
       </div>
       {hasStructuredText(prompt) ? (
-        <CommandMessageBlock
+        <StructuredTextBlock
           text={prompt}
           fontFamily="'IBM Plex Sans', system-ui, sans-serif"
           fontSize={13}
@@ -827,23 +827,9 @@ function UserPromptSection({ prompt }: { prompt: string }) {
           markdown
         />
       )}
-      {!open && (
-        <div onClick={() => setOpen(true)} style={{
-          padding: '6px 0', textAlign: 'center', cursor: 'pointer',
-          border: `1px solid ${SEMANTIC.borderSubtle1}`, borderTop: 'none',
-          borderRadius: '0 0 8px 8px',
-          background: 'oklch(0.20 0.01 265 / 0.5)',
-        }}>
-          <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>展开剩余内容</span>
-        </div>
-      )}
-      {open && (
-        <div onClick={() => setOpen(false)} style={{
-          padding: '6px 0', textAlign: 'center', cursor: 'pointer',
-        }}>
-          <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>收起</span>
-        </div>
-      )}
+      <div className={`content-collapse-toggle${open ? '' : ' attached'}`} onClick={() => setOpen((value) => !value)}>
+        <span>{open ? '收起' : '展开剩余内容'}</span>
+      </div>
     </div>
   );
 }
@@ -1134,15 +1120,6 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
               const maxH = isExpandable && !isOpen ? COLLAPSED_H : 'none';
               const ovf = isExpandable && !isOpen ? 'auto' : 'visible';
 
-              const toggle = (open: boolean) => (
-                <div onClick={() => setExpanded((p) => { const n = new Set(p); open ? n.delete(si) : n.add(si); return n; })}
-                  style={{ padding: '6px 0', textAlign: 'center', cursor: 'pointer' }}>
-                  <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>
-                    {open ? '收起' : '展开剩余内容'}
-                  </span>
-                </div>
-              );
-
               return (
                 <>
                   <ContentRenderer
@@ -1156,7 +1133,18 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
                     toolName={sec.toolName}
                     preserveNewlines={sec.preserveNewlines}
                   />
-                  {isExpandable && toggle(isOpen)}
+                  {isExpandable && (
+                    <div
+                      className="content-collapse-toggle"
+                      onClick={() => setExpanded((p) => {
+                        const n = new Set(p);
+                        isOpen ? n.delete(si) : n.add(si);
+                        return n;
+                      })}
+                    >
+                      <span>{isOpen ? '收起' : '展开剩余内容'}</span>
+                    </div>
+                  )}
                 </>
               );
             })()}
@@ -1174,26 +1162,10 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
                 );
               }
               return (
-              <div className="block-body"
-                style={{
-                  fontFamily: sec.font,
-                  marginTop: 8,
-                  padding: '12px 14px',
-                  borderRadius: 6,
-                  border: '1px solid oklch(0.45 0.08 150 / 0.25)',
-                  background: 'oklch(0.55 0.08 150 / 0.04)',
-                }}
-              >
-                <div style={{ fontSize: 10, fontWeight: 600, color: SEMANTIC.textGreen, marginBottom: 6 }}>
-                  中文翻译
+                <div className="block-body translation-block" style={{ fontFamily: sec.font }}>
+                  <div className="translation-title">中文翻译</div>
+                  <ContentRenderer text={translations[si]!} fontFamily={sec.font} fontSize={12} markdown />
                 </div>
-                <ContentRenderer
-                  text={translations[si]!}
-                  fontFamily={sec.font}
-                  fontSize={12}
-                  markdown
-                />
-              </div>
               );
             })()}
           </div>
