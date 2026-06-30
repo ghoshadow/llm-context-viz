@@ -22,7 +22,6 @@ import type {
 import { parseJsonl } from './parse-jsonl';
 import { identifyTurns } from './identify-turns';
 import { computeContext } from './compute-context';
-import { computeDeltas } from './compute-deltas';
 import { computeTimeline } from './compute-timeline';
 import { aggregateSession } from './aggregate-session';
 import { estimateTokens, extractPromptText } from './utils';
@@ -40,7 +39,6 @@ export { identifyTurns } from './identify-turns';
 export { computeContext, setMemoryChars } from './compute-context';
 // Re-export for server-side use
 export { loadCalibratedConstants } from './compute-context';
-export { computeDeltas } from './compute-deltas';
 export { computeTimeline } from './compute-timeline';
 export { aggregateSession } from './aggregate-session';
 // Re-export shared utilities
@@ -97,6 +95,40 @@ export function runPipeline(jsonlText: string, filename: string): {
   const turns: TurnData[] = assembleTurns(groups, compositions, deltas, timelines);
 
   return { summary, turns, errors };
+}
+
+export function computeDeltas(
+  compositions: TurnContextComposition[],
+): TurnDelta[] {
+  const deltas: TurnDelta[] = [];
+
+  for (let i = 1; i < compositions.length; i++) {
+    const prev = compositions[i - 1]!;
+    const curr = compositions[i]!;
+    const delta: TurnDelta = {};
+
+    for (const key of Object.keys(curr)) {
+      const diff = (curr[key] ?? 0) - (prev[key] ?? 0);
+      if (diff > 0 && isTurnDeltaKey(key)) delta[key] = diff;
+    }
+
+    deltas.push(delta);
+  }
+
+  return deltas;
+}
+
+const TURN_DELTA_KEYS: ReadonlySet<string> = new Set([
+  'thinking',
+  'asstText',
+  'toolCalls',
+  'toolResults',
+  'userMsgs',
+  'subagent',
+] satisfies (keyof TurnDelta)[]);
+
+function isTurnDeltaKey(key: string): key is keyof TurnDelta {
+  return TURN_DELTA_KEYS.has(key);
 }
 
 // ---------------------------------------------------------------------------

@@ -3,10 +3,20 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "strict": true,
-    "lib": ["ESNext", "DOM"],
+    "jsx": "react-jsx",
+    "strict": false,
     "skipLibCheck": true,
-    "outDir": "dist-server"
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "outDir": "dist-server",
+    "rootDir": ".",
+    "baseUrl": "."
   },
-  "include": ["server"]
+  "include": ["server", "src", "shared"],
+  "exclude": [
+    "server/**/*.test.ts",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "node_modules"
+  ]
 }

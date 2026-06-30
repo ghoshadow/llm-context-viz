@@ -23,7 +23,7 @@ export function validateBody<T extends z.ZodTypeAny>(schema: T) {
       next();
     } catch (err) {
       if (err instanceof ZodError) {
-        const messages = err.errors.map((e) => {
+        const messages = err.issues.map((e) => {
           const path = e.path.join('.');
           return path ? `${path}: ${e.message}` : e.message;
         });
@@ -46,7 +46,7 @@ export function validateQuery<T extends z.ZodTypeAny>(schema: T) {
       next();
     } catch (err) {
       if (err instanceof ZodError) {
-        const messages = err.errors.map((e) => {
+        const messages = err.issues.map((e) => {
           const path = e.path.join('.');
           return path ? `${path}: ${e.message}` : e.message;
         });

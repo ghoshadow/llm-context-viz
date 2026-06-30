@@ -11,3 +11,10 @@ src/pipeline/system-constants.json
 .env
 tsconfig.tsbuildinfo
 .playwright-mcp/
+.agents/
+.codex/
+AGENTS.md
+CC_CLI_PROGRESSING/
+dist-server/
+.trellis/
+src-tauri/binaries/

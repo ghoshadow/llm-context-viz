@@ -27,6 +27,14 @@ export interface ObsidianWriteResult {
   skipped: boolean;
 }
 
+type ObsidianConfigValidation =
+  | { ok: true; vaultRoot: string; notesDir: string; filenameTemplate: string }
+  | { ok: false; error: string };
+
+type ObsidianNotePathResolution =
+  | { ok: true; absolutePath: string; vaultRoot: string }
+  | { ok: false; error: string };
+
 export const DEFAULT_FILENAME_TEMPLATE = '第{{startTurn}}-{{endTurn}}轮 - {{title}} - {{topicHash}}.md';
 
 export function normalizeFilenameTemplate(template: string | null | undefined): string {
@@ -35,12 +43,7 @@ export function normalizeFilenameTemplate(template: string | null | undefined): 
   return value.replace(/\.md$/i, ' - {{topicHash}}.md');
 }
 
-export function validateConfig(config: ObsidianConfig): {
-  ok: true;
-  vaultRoot: string;
-  notesDir: string;
-  filenameTemplate: string;
-} | { ok: false; error: string } {
+export function validateConfig(config: ObsidianConfig): ObsidianConfigValidation {
   if (!config.vaultPath || !config.vaultPath.trim()) {
     return { ok: false, error: '尚未配置 Obsidian Vault 路径' };
   }
@@ -82,13 +85,9 @@ function ensureInside(root: string, target: string): void {
   }
 }
 
-export function resolveObsidianNotePath(config: ObsidianConfig, relativePath: string): {
-  ok: true;
-  absolutePath: string;
-  vaultRoot: string;
-} | { ok: false; error: string } {
+export function resolveObsidianNotePath(config: ObsidianConfig, relativePath: string): ObsidianNotePathResolution {
   const validation = validateConfig(config);
-  if (!validation.ok) return validation;
+  if (validation.ok === false) return { ok: false, error: validation.error };
   if (!relativePath || path.isAbsolute(relativePath)) {
     return { ok: false, error: 'Obsidian 笔记路径必须是 Vault 内的相对路径' };
   }
@@ -132,7 +131,7 @@ export function writeObsidianCard(params: {
   previousRelativePath?: string | null;
 }): ObsidianWriteResult {
   const validation = validateConfig(params.config);
-  if (!validation.ok) throw new Error(validation.error);
+  if (validation.ok === false) throw new Error(validation.error);
 
   try {
     ensureOntologyGraphColorGroups(validation.vaultRoot);
@@ -163,7 +162,7 @@ export function writeObsidianCard(params: {
 
   if (params.previousRelativePath && isPathInNotesDir(params.previousRelativePath, validation.notesDir)) {
     const resolvedPrevious = resolveObsidianNotePath(params.config, params.previousRelativePath);
-    if (!resolvedPrevious.ok) throw new Error(resolvedPrevious.error);
+    if (resolvedPrevious.ok === false) throw new Error(resolvedPrevious.error);
 
     if (existsSync(resolvedPrevious.absolutePath)) {
       const existing = readFileSync(resolvedPrevious.absolutePath, 'utf-8');

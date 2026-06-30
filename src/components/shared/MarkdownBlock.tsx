@@ -258,7 +258,7 @@ const CODE_BLOCK_STYLE: React.CSSProperties = {
   lineHeight: 1.55,
 };
 
-function CodeBlock({ code, lang }: { code: string; lang: string }) {
+export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   // If a language is specified, use syntax highlighting.
   if (lang && lang.length > 0) {
     try {

@@ -1,8 +1,6 @@
 import React from 'react';
-import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import { DiffView } from './DiffView';
-import { MarkdownBlock } from './MarkdownBlock';
+import { CodeBlock, MarkdownBlock } from './MarkdownBlock';
 import { decideContentRender, formatSyntaxBody } from './contentRenderStrategy';
 
 export interface ContentRendererProps {
@@ -54,24 +52,7 @@ export function ContentRenderer({
     const body = formatSyntaxBody(text, decision.language);
     return (
       <div className={className} style={wrapStyle}>
-        <SyntaxHighlighter
-          className="thin-scrollbar"
-          language={decision.language}
-          style={atomOneDark}
-          customStyle={{
-            margin: 0,
-            borderRadius: 6,
-            border: '1px solid oklch(0.28 0.012 265)',
-            fontSize: 11,
-            lineHeight: 1.55,
-            background: 'oklch(0.15 0.008 265)',
-            maxHeight: maxHeight === 'none' ? undefined : maxHeight,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {body}
-        </SyntaxHighlighter>
+        <CodeBlock code={body} lang={decision.language ?? ''} />
       </div>
     );
   }

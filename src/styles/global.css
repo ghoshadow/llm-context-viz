@@ -221,6 +221,12 @@ body {
   font-family: 'IBM Plex Mono', monospace;
 }
 
+.content-collapse-toggle { padding: 6px 0; text-align: center; cursor: pointer; }
+.content-collapse-toggle.attached { border: 1px solid oklch(0.24 0.012 265); border-top: none; border-radius: 0 0 8px 8px; background: oklch(0.20 0.01 265 / 0.5); }
+.content-collapse-toggle span { font-size: 11px; color: oklch(0.50 0.012 265); }
+.translation-block { margin-top: 8px; padding: 12px 14px; border-radius: 6px; border: 1px solid oklch(0.45 0.08 150 / 0.25); background: oklch(0.55 0.08 150 / 0.04); }
+.translation-block .translation-title { margin-bottom: 6px; font-size: 10px; font-weight: 600; color: oklch(0.70 0.13 150); }
+
 /* --------------------------------------------------------------------------
    12. Typography
    -------------------------------------------------------------------------- */
@@ -258,6 +264,8 @@ h2 {
   font-size: 10.5px;
   color: oklch(0.54 0.012 265);
 }
+
+.estimate-badge { margin-left: 6px; border: 1px solid oklch(0.40 0.012 265); border-radius: 4px; padding: 1px 5px; color: oklch(0.55 0.012 265); font-size: 10px; font-weight: 400; }
 
 /* --------------------------------------------------------------------------
    14. Legend Row (used in TurnInspector context structure)

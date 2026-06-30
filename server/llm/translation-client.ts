@@ -100,7 +100,12 @@ export async function callTranslationLLM(
       }
 
       if (!response.ok) {
-        const message = body?.error?.message || body?.message || raw || response.statusText;
+        const errorBody = body?.error;
+        const apiMessage = errorBody && typeof errorBody === 'object' && 'message' in errorBody
+          ? String((errorBody as { message?: unknown }).message ?? '')
+          : '';
+        const bodyMessage = typeof body?.message === 'string' ? body.message : '';
+        const message = apiMessage || bodyMessage || raw || response.statusText;
         const statusCode = response.status;
 
         // 429 或 5xx 错误可重试

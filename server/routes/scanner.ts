@@ -86,8 +86,23 @@ interface FoundFile extends ScannedFile {
   requests?: number;
   peakTokens?: number;
   turnCount?: number;
+  cwd?: string;
   hash: string;
   imported: boolean;
+}
+
+/** Extract cwd from first 50 lines of JSONL without full pipeline. */
+function quickCwd(raw: string): string {
+  const lines = raw.split('\n');
+  for (let i = 0; i < Math.min(lines.length, 50); i++) {
+    try {
+      const obj = JSON.parse(lines[i]!);
+      if (typeof obj.cwd === 'string' && obj.cwd) return obj.cwd;
+      // Codex 格式：cwd 在 payload 内
+      if (typeof obj.payload?.cwd === 'string' && obj.payload.cwd) return obj.payload.cwd;
+    } catch { /* skip */ }
+  }
+  return '';
 }
 
 /** Quick metadata extraction from JSONL without running the full pipeline. */
@@ -235,11 +250,11 @@ router.get('/scan', async (_req, res) => {
     allFiles.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
 
     // Load cached scan results
-    const cache = new Map<string, { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number; hash: string; modified: string }>();
+    const cache = new Map<string, { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number; cwd?: string; hash: string; modified: string }>();
     try {
       const rows = getAllScannedFiles();
       for (const r of rows) {
-        cache.set(r.path, { title: r.title, model: r.model, requests: r.requests ?? 0, peakTokens: r.peak_tokens ?? 0, turnCount: r.turn_count ?? 0, hash: r.hash ?? '', modified: r.modified ?? '' });
+        cache.set(r.path, { title: r.title, model: r.model, requests: r.requests ?? 0, peakTokens: r.peak_tokens ?? 0, turnCount: r.turn_count ?? 0, cwd: r.cwd, hash: r.hash ?? '', modified: r.modified ?? '' });
       }
     } catch { /* table might not exist yet */ }
 
@@ -272,19 +287,22 @@ router.get('/scan', async (_req, res) => {
         } else {
           let hash = '';
           let meta: ReturnType<typeof quickMeta> = { requests: 0, peakTokens: 0, turnCount: 0 };
+          let cwd = '';
           try {
             const content = await readFile(f.path, 'utf-8');
             hash = crypto.createHash('sha256').update(content).digest('hex');
             meta = quickMeta(f.path, content);
+            cwd = quickCwd(content);
           } catch { /* can't read */ }
           try {
             upsertScannedFile({
               path: f.path, name: f.name, size: f.size, modified: f.modified, hash,
               title: meta.title || null, model: meta.model || null,
               requests: meta.requests, peakTokens: meta.peakTokens, turnCount: meta.turnCount,
+              cwd: cwd || null,
             });
           } catch { }
-          result = { ...f, ...meta, hash, imported: dbImported.has(f.name) };
+          result = { ...f, ...meta, cwd: cwd || undefined, hash, imported: dbImported.has(f.name) };
         }
 
         // Filter out sessions with 0 turns and 0 requests

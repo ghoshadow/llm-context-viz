@@ -6,6 +6,7 @@ import { SEMANTIC } from '../../styles/theme';
 import { fmtK, fmtDateOnly } from '../../utils/format';
 import { getSessionSource, type SessionSource } from '../../utils/sessionSource';
 import { getSessionProjectPathText } from './sessionProjectPath';
+import { getSessionCardTitleDisplay, type SessionCardTitleDisplay } from './sessionTitle';
 
 // ─── Styles (inline objects) ────────────────────────────────────────────
 
@@ -149,6 +150,81 @@ const cardS = {
     whiteSpace: 'nowrap' as const,
   },
 
+  structuredTitle: {
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 9,
+  },
+
+  structuredIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 13,
+    fontWeight: 700,
+  } as React.CSSProperties,
+
+  structuredIconCommand: {
+    color: 'oklch(0.88 0.10 165)',
+    background: 'oklch(0.38 0.10 165 / 0.22)',
+    border: '1px solid oklch(0.42 0.10 165 / 0.30)',
+  },
+
+  structuredIconWarning: {
+    color: 'oklch(0.85 0.13 80)',
+    background: 'oklch(0.64 0.10 80 / 0.16)',
+    border: '1px solid oklch(0.64 0.10 80 / 0.30)',
+  },
+
+  structuredIconPlugin: {
+    color: 'oklch(0.82 0.09 285)',
+    background: 'oklch(0.50 0.10 285 / 0.18)',
+    border: '1px solid oklch(0.50 0.10 285 / 0.32)',
+  },
+
+  structuredTextWrap: {
+    minWidth: 0,
+    flex: 1,
+  },
+
+  structuredName: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+    fontSize: 16,
+    fontWeight: 650,
+    fontFamily: "'IBM Plex Mono', monospace",
+  },
+
+  structuredNameCommand: {
+    color: 'oklch(0.86 0.09 165)',
+  },
+
+  structuredNameWarning: {
+    color: 'oklch(0.86 0.10 80)',
+  },
+
+  structuredNamePlugin: {
+    color: 'oklch(0.86 0.08 285)',
+  },
+
+  structuredDetail: {
+    display: 'block',
+    marginTop: 2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+    fontSize: 12,
+    color: 'oklch(0.61 0.012 265)',
+  },
+
   filename: {
     fontSize: 13,
     color: 'oklch(0.55 0.012 265)',
@@ -235,6 +311,14 @@ function SessionCard({ session, onSelect, onDelete }: {
   onDelete: (id: string) => void;
 }) {
   const projectPath = getSessionProjectPathText(session);
+  const titleDisplay = getSessionCardTitleDisplay(session.ai_title, session.model);
+  const titleToneSuffix = titleDisplay.kind === 'structured'
+    ? titleDisplay.tone === 'command'
+      ? 'Command'
+      : titleDisplay.tone === 'plugin'
+        ? 'Plugin'
+        : 'Warning'
+    : null;
 
   return (
     <div
@@ -271,7 +355,11 @@ function SessionCard({ session, onSelect, onDelete }: {
       </button>
 
       {/* Title (ai-title) or model fallback */}
-      <div style={cardS.model}>{session.ai_title || session.model || 'unknown'}</div>
+      {titleDisplay.kind === 'structured' ? (
+        <StructuredSessionTitle title={titleDisplay} toneSuffix={titleToneSuffix!} />
+      ) : (
+        <div style={cardS.model}>{titleDisplay.text}</div>
+      )}
 
       {/* Filename */}
       <div style={cardS.filename} title={session.filename}>
@@ -302,6 +390,27 @@ function SessionCard({ session, onSelect, onDelete }: {
 
       {/* Created date */}
       <div style={cardS.date}>{fmtDateOnly(session.created_at)}</div>
+    </div>
+  );
+}
+
+function StructuredSessionTitle({
+  title,
+  toneSuffix,
+}: {
+  title: Extract<SessionCardTitleDisplay, { kind: 'structured' }>;
+  toneSuffix: 'Command' | 'Plugin' | 'Warning';
+}) {
+  const iconStyle = cardS[`structuredIcon${toneSuffix}` as const];
+  const nameStyle = cardS[`structuredName${toneSuffix}` as const];
+
+  return (
+    <div style={cardS.structuredTitle} title={title.tooltip}>
+      <span style={{ ...cardS.structuredIcon, ...iconStyle }}>{title.icon}</span>
+      <span style={cardS.structuredTextWrap}>
+        <span style={{ ...cardS.structuredName, ...nameStyle }}>{title.label}</span>
+        {title.detail && <span style={cardS.structuredDetail}>{title.detail}</span>}
+      </span>
     </div>
   );
 }

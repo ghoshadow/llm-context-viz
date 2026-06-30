@@ -4,9 +4,13 @@ import path from 'path';
 
 const API_PORT = process.env.PORT || '4137';
 const DEV_SERVER_PORT = parseInt(process.env.VITE_PORT || '5173');
+const isTauriBuild = !!process.env.TAURI_ENV_TARGET_TRIPLE;
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __API_BASE__: JSON.stringify(isTauriBuild ? `http://localhost:${API_PORT}/api` : '/api'),
+  },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },
   },

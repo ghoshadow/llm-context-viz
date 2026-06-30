@@ -301,6 +301,47 @@ async function main() {
       if (host === opts.targetHost && port === 443) handleMitm(clientSocket);
       else tunnelRaw(clientSocket, req.url);
     });
+
+    // ponytail: 同时拦截 HTTP 明文请求（Codex Desktop 等使用 HTTP 时走这里）
+    server.on("request", (req, res) => {
+      const hostHeader = (req.headers.host || "").split(":")[0];
+      const targetHostname = opts.targetHost.split(":")[0];
+      const isTarget = hostHeader === targetHostname || hostHeader === "127.0.0.1" || hostHeader === "localhost";
+      if (!isTarget) return;
+
+      const url = `http://${opts.targetHost}${req.url}`;
+      log(`MITM HTTP: ${req.method} ${url}`);
+      let body = "";
+      req.on("data", (c) => { body += c.toString("utf-8"); });
+      req.on("end", () => {
+        const [upstreamHost, portStr] = opts.targetHost.split(":");
+        const upstreamPort = parseInt(portStr || "80", 10);
+        const proxyReq = (upstreamPort === 443 ? https : http).request({
+          hostname: upstreamHost, port: upstreamPort, path: req.url, method: req.method,
+          headers: cleanForwardHeaders(req.headers, upstreamHost),
+        }, (proxyRes) => {
+          let resBody = "";
+          proxyRes.on("data", (c) => { resBody += c.toString("utf-8"); });
+          proxyRes.on("end", () => {
+            writePair(logFile, {
+              timestamp: Date.now() / 1000, method: req.method, url,
+              headers: redactHeaders(req.headers),
+              body: tryParse(req.headers["content-type"], body),
+            }, {
+              timestamp: Date.now() / 1000, status_code: proxyRes.statusCode,
+              headers: redactHeaders(proxyRes.headers),
+              body: tryParse(proxyRes.headers["content-type"], resBody),
+            });
+            captured = true;
+            res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+            res.end(resBody);
+          });
+        });
+        proxyReq.on("error", (e) => { log(`HTTP forward: ${errorSummary(e)}`); if (!res.headersSent) res.writeHead(502); res.end(); });
+        if (body) proxyReq.write(body);
+        proxyReq.end();
+      });
+    });
   }
 
   await new Promise((resolve, reject) => {
@@ -313,15 +354,19 @@ async function main() {
   const cliName = opts.source === "codex" ? "codex" : "claude";
   const cliPath = resolveCliPath(cliName);
   const childArgs = opts.source === "codex"
-    ? [
-        "exec",
-        "--ephemeral",
-        "--json",
-        "-c", `model_providers.OpenAI.base_url="${proxyUrl}"`,
-        "-s", "read-only",
-        "-C", opts.cwd,
-        ...(opts.claudeArgs.length ? opts.claudeArgs : ['Calibration probe: reply with "ok".']),
-      ]
+    ? captureTarget.mode === "base-url"
+      ? [
+          "exec", "--ephemeral", "--json", "--skip-git-repo-check",
+          "-c", `model_providers.OpenAI.base_url="${proxyUrl}"`,
+          "-s", "read-only", "-C", opts.cwd,
+          ...(opts.claudeArgs.length ? opts.claudeArgs : ['Calibration probe: reply with "ok".']),
+        ]
+      : [
+          "exec", "--json", "--skip-git-repo-check",
+          "-c", `model_providers.OpenAI.base_url="${proxyUrl}"`,
+          "-s", "read-only", "-C", opts.cwd,
+          ...(opts.claudeArgs.length ? opts.claudeArgs : ['Calibration probe: reply with "ok".']),
+        ]
     : opts.claudeArgs;
   const modeLabel = captureTarget.mode === "base-url"
     ? `mode=base-url upstream=${captureTarget.upstreamBaseUrl}`

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseTurnListPagination } from './pagination';
+import { parseTurnListPagination } from './sessions';
 
 test('defaults turn list pagination to the most recent 200 turns', () => {
   assert.deepEqual(parseTurnListPagination({}), {

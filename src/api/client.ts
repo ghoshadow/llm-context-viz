@@ -1,4 +1,14 @@
-const BASE = '/api';
+/**
+ * API client — 统一的 HTTP 请求封装。
+ *
+ * 浏览器模式 (npm run dev): /api → Vite proxy → localhost:4137
+ * Tauri 模式 (npx tauri build): 构建时注入绝对地址
+ */
+
+// 构建时注入（vite.config.ts define），运行时是常量字符串
+declare const __API_BASE__: string;
+
+const BASE = typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : '/api';
 
 /** 默认请求超时时间（毫秒） */
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -36,13 +46,13 @@ export async function get<T>(path: string, timeoutMs?: number): Promise<T> {
     try {
       const parsed = await res.json();
       if (parsed?.error) detail = parsed.error;
-    } catch {
-      // Keep HTTP status when response body is not JSON.
-    }
+    } catch { /* ok */ }
     throw new Error(`GET ${path} failed: ${detail}`);
   }
   return res.json();
 }
+
+export const API_BASE = BASE;
 
 export async function post<T>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
   const res = await fetchWithTimeout(`${BASE}${path}`, {

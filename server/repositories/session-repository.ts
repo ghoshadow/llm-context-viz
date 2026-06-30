@@ -91,6 +91,7 @@ export interface ScannedFileRow {
   requests: number;
   peak_tokens: number;
   turn_count: number;
+  cwd: string | null;
   hash: string;
   modified: string;
 }
@@ -241,15 +242,17 @@ export function upsertScannedFile(record: {
   requests: number;
   peakTokens: number;
   turnCount: number;
+  cwd?: string | null;
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO scanned_files (path, name, size, modified, hash, title, model, requests, peak_tokens, turn_count, last_seen)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `INSERT INTO scanned_files (path, name, size, modified, hash, title, model, requests, peak_tokens, turn_count, cwd, last_seen)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(path) DO UPDATE SET
          size=excluded.size, modified=excluded.modified, hash=excluded.hash,
          title=excluded.title, model=excluded.model, requests=excluded.requests,
          peak_tokens=excluded.peak_tokens, turn_count=excluded.turn_count,
+         cwd=excluded.cwd,
          last_seen=excluded.last_seen`,
     )
     .run(
@@ -263,6 +266,7 @@ export function upsertScannedFile(record: {
       record.requests,
       record.peakTokens,
       record.turnCount,
+      record.cwd ?? null,
     );
 }
 

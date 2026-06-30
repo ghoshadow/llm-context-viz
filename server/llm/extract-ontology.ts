@@ -16,6 +16,7 @@ import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { extractToFiles, extractIncremental, type ExtractionManifest, type ShardFile } from '../content/extract-to-files.js';
 import { buildOntology, type OntologyBuildOutput } from '../../src/pipeline/build-ontology.js';
 import type { CandidateEntity, SemanticRelation, OntologyBuildConfig } from '../../src/pipeline/build-ontology.js';
+import type { OntologyEvidence } from '../../src/types/ontology.js';
 import { buildEntityExtractorDef, buildOrchestratorPrompt, type ExtractionDepth } from './orchestrator-prompt.js';
 import { SubmitExtractionSchema } from './schema.js';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
@@ -100,6 +101,13 @@ function formatValidationError(err: unknown): string {
       .join('; ');
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+function toOntologyEvidence(evidence: Array<OntologyEvidence | (Omit<OntologyEvidence, 'source'> & { source?: OntologyEvidence['source'] })>): OntologyEvidence[] {
+  return evidence.map((e) => ({
+    ...e,
+    source: e.source ?? 'reasoning_summary',
+  }));
 }
 
 function collectParsedItems(parsed: unknown): unknown[] {
@@ -785,7 +793,12 @@ export async function extractAndBuild(
       const shardEnd = shard?.endTurn ?? manifest.totalTurns;
       const validatedCandidates = r.candidates.map((c) => ({
         ...c,
+        evidence: toOntologyEvidence(c.evidence),
         turns: c.turns.filter((t) => t >= shardStart && t <= shardEnd),
+      }));
+      const validatedRelations = r.relations.map((relation) => ({
+        ...relation,
+        evidence: toOntologyEvidence(relation.evidence),
       }));
       const withoutPrevious = shardResults.filter((x) => x.shardIndex !== shardIdx);
       shardResults.length = 0;
@@ -793,7 +806,7 @@ export async function extractAndBuild(
         shardIndex: shardIdx,
         phaseTheme: theme,
         candidates: validatedCandidates,
-        relations: r.relations,
+        relations: validatedRelations,
         config: r.config,
       });
       phaseThemes.push({ shardIndex: shardIdx, startTurn: shardStart, theme });

@@ -212,6 +212,7 @@ function normalizeLoadedConstants(
       constantsSource: 'project',
       path,
       cwd,
+      categories: data.categories,
     }, homeDir);
   }
 

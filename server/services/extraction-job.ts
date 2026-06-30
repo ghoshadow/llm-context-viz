@@ -1,5 +1,6 @@
 import { getDb } from '../db';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
+import type { ShardResult } from '../llm/extract-ontology.js';
 
 // ============================================================================
 // Types
@@ -109,10 +110,7 @@ export function loadOntologyShardCache(
   shardSize: number,
   maxShardChars: number,
 ): {
-  previousShardResults: Array<{
-    shardIndex: number; phaseTheme?: string;
-    candidates: unknown[]; relations: unknown[]; config?: Record<string, unknown>;
-  }>;
+  previousShardResults: ShardResult[];
   failedShardIndices: number[];
 } {
   try {
@@ -135,8 +133,8 @@ export function loadOntologyShardCache(
       .map((row) => ({
         shardIndex: row.shard_index,
         phaseTheme: row.phase_theme || undefined,
-        candidates: JSON.parse(row.candidates_json || '[]'),
-        relations: JSON.parse(row.relations_json || '[]'),
+        candidates: JSON.parse(row.candidates_json || '[]') as ShardResult['candidates'],
+        relations: JSON.parse(row.relations_json || '[]') as ShardResult['relations'],
         config: row.config_json ? JSON.parse(row.config_json) : undefined,
       }));
 

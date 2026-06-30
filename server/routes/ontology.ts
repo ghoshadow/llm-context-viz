@@ -7,7 +7,6 @@ import { resolveObsidianNotePath, validateConfig, writeObsidianCard } from '../o
 import { getObsidianConfig } from './obsidian';
 import { findJsonlFile } from './shared';
 import {
-  type OntologyDataLike,
   buildKnowledgeCardSummaryPrompt,
   getCardSummaryStatus,
   startCardSummaryJob,
@@ -39,9 +38,6 @@ import {
   getSessionRawJsonlMeta,
   sessionExists,
 } from '../repositories/session-repository';
-
-import { Router, type Request } from 'express';
-
 const router = Router({ mergeParams: true });
 
 function params(req: Request): { id: string } { return req.params as { id: string }; }
@@ -84,11 +80,11 @@ router.get('/', (req, res) => {
     const data = JSON.parse(row.ontology_json) as OntologyData;
     // 动态补全 aggregates（旧数据兼容）
     if (!data.aggregates && data.nodes?.some((n) => n.aggregateId != null)) {
-      const aggMap = new Map<string, { id: string; label: string; startTurn: number; endTurn: number; nodeIds: string[] }>();
+      const aggMap = new Map<string, { id: string; label: string; startTurn: number; endTurn: number; shardIndices: number[]; nodeIds: string[] }>();
       for (const n of data.nodes) {
         if (!n.aggregateId) continue;
         if (!aggMap.has(n.aggregateId)) {
-          aggMap.set(n.aggregateId, { id: n.aggregateId, label: n.aggregateId, startTurn: n.firstTurn, endTurn: n.firstTurn, nodeIds: [] });
+          aggMap.set(n.aggregateId, { id: n.aggregateId, label: n.aggregateId, startTurn: n.firstTurn, endTurn: n.firstTurn, shardIndices: [], nodeIds: [] });
         }
         const a = aggMap.get(n.aggregateId)!;
         a.nodeIds.push(n.id); a.startTurn = Math.min(a.startTurn, n.firstTurn); a.endTurn = Math.max(a.endTurn, n.firstTurn);
@@ -174,7 +170,7 @@ router.put('/summarize-card/:topicId', (req, res) => {
     if (typeof summary !== 'string' || !summary.trim()) {
       return res.status(400).json({ error: '知识总结内容不能为空' });
     }
-    const data: OntologyDataLike | null = getOntologyData(id);
+    const data: OntologyData | null = getOntologyData(id);
     if (!data) return res.status(404).json({ error: '该会话尚无本体数据' });
 
     const topic = Array.isArray(data.nodes) ? data.nodes.find((n) => n.id === topicId) : undefined;
@@ -215,7 +211,7 @@ router.post('/summarize-card', (req, res) => {
     const rawJson = getOntologyJsonRaw(id);
     if (!rawJson) return res.status(404).json({ error: '该会话尚无本体数据' });
 
-    const data = JSON.parse(rawJson) as OntologyDataLike;
+    const data = JSON.parse(rawJson) as ObsidianOntologyDataLike;
     if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
       return res.status(400).json({ error: '本体数据结构不完整' });
     }
@@ -244,7 +240,7 @@ router.get('/obsidian-card/:topicId', (req, res) => {
     const validation = validateConfig(config);
     let status = row?.status || 'not_synced';
     let notePath = row?.note_path || null;
-    let error = row?.error || (validation.ok ? null : validation.error);
+    let error = row?.error || (validation.ok === true ? null : validation.error);
 
     if (row && validation.ok) {
       if (!syncRecordMatchesCurrentVault(row, config)) {
@@ -253,7 +249,7 @@ router.get('/obsidian-card/:topicId', (req, res) => {
         const resolved = resolveObsidianNotePath(config, row.note_path);
         if (!resolved.ok || !existsSync(resolved.absolutePath)) {
           status = 'not_synced'; notePath = row.note_path;
-          error = resolved.ok ? '上次同步的 Obsidian 笔记文件不存在' : resolved.error;
+          error = resolved.ok === true ? '上次同步的 Obsidian 笔记文件不存在' : resolved.error;
         }
       }
     }
@@ -475,7 +471,7 @@ router.post('/extract', async (req, res) => {
       }
       saveOntology(sessionId, data, meta.maxTurn);
       send('complete', { sessionId, maxTurn: meta.maxTurn, stats: result.shardStats });
-    } else {
+    } else if (result.success === false) {
       send('error', { message: result.message, detail: result.detail, stage: result.stage });
     }
   } catch (err) {

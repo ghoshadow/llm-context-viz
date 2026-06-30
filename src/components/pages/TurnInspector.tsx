@@ -17,10 +17,13 @@ import {
   ERROR_TEXT,
 } from '../../styles/theme';
 import { fmt, fmtK, fmtDur, fmtDate } from '../../utils/format';
-import { post, get } from '../../api/client';
+import { post, get, API_BASE } from '../../api/client';
+import ModelConfigModal from './ModelConfigModal';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { ContentRenderer } from '../shared/ContentRenderer';
 import type { TurnDetail, TurnSummary, TimelineSegment, SegmentDetail, RawToolEntry } from '../../types/session';
+import { StructuredTextBlock } from '../shared/StructuredTextBlock';
+import { getStructuredTextPreview, hasStructuredText } from '../shared/structuredText';
 
 // ============================================================================
 // Helpers
@@ -86,6 +89,20 @@ function TurnListItem({
 }: TurnListItemProps) {
   const loadPct = ctxLimit > 0 ? Math.max(2, (cumTotal / ctxLimit) * 100) : 100;
   const peakColor = maxInput >= 120000 ? 'oklch(0.76 0.13 60)' : SEMANTIC.textDesc2;
+  const structuredPreview = getStructuredTextPreview(prompt);
+  const isCommandPreview = structuredPreview?.kind === 'command';
+  const isPluginPreview = structuredPreview?.kind === 'plugin-reference';
+  const previewIcon = isCommandPreview ? '/' : isPluginPreview ? '@' : '!';
+  const previewAccent = isCommandPreview
+    ? 'oklch(0.86 0.09 165)'
+    : isPluginPreview
+      ? 'oklch(0.86 0.08 285)'
+      : 'oklch(0.86 0.10 80)';
+  const previewIconBg = isCommandPreview
+    ? 'oklch(0.38 0.10 165 / 0.22)'
+    : isPluginPreview
+      ? 'oklch(0.50 0.10 285 / 0.18)'
+      : 'oklch(0.64 0.10 80 / 0.16)';
 
   return (
     <button
@@ -162,13 +179,67 @@ function TurnListItem({
           fontSize: 12.5,
           lineHeight: 1.45,
           color: isSelected ? SEMANTIC.textPrimary : SEMANTIC.textSecondary,
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
+          display: structuredPreview ? 'flex' : '-webkit-box',
+          alignItems: structuredPreview ? 'center' : undefined,
+          gap: structuredPreview ? 7 : undefined,
+          minHeight: structuredPreview ? 35 : undefined,
+          WebkitLineClamp: structuredPreview ? undefined : 2,
+          WebkitBoxOrient: structuredPreview ? undefined : 'vertical',
           overflow: 'hidden',
         }}
       >
-        {prompt}
+        {structuredPreview ? (
+          <>
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 6,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 11,
+                fontWeight: 700,
+                color: previewAccent,
+                background: previewIconBg,
+              }}
+            >
+              {previewIcon}
+            </span>
+            <span style={{ minWidth: 0 }}>
+              <span
+                style={{
+                  display: 'block',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  color: previewAccent,
+                  fontWeight: 650,
+                }}
+              >
+                {structuredPreview.label}
+              </span>
+              {structuredPreview.detail && (
+                <span
+                  style={{
+                    display: 'block',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontSize: 11,
+                    color: SEMANTIC.textMiniLabel,
+                    marginTop: 1,
+                  }}
+                >
+                  {structuredPreview.detail}
+                </span>
+              )}
+            </span>
+          </>
+        ) : prompt}
       </div>
       <div
         style={{
@@ -738,31 +809,27 @@ function UserPromptSection({ prompt }: { prompt: string }) {
           {copied ? '已复制' : '复制'}
         </span>
       </div>
-      <ContentRenderer
-        text={prompt}
-        fontFamily="'IBM Plex Sans', system-ui, sans-serif"
-        fontSize={13}
-        maxHeight={open ? 'none' : COLLAPSED_H}
-        overflowY={open ? 'visible' : 'auto'}
-        markdown
-      />
-      {!open && (
-        <div onClick={() => setOpen(true)} style={{
-          padding: '6px 0', textAlign: 'center', cursor: 'pointer',
-          border: `1px solid ${SEMANTIC.borderSubtle1}`, borderTop: 'none',
-          borderRadius: '0 0 8px 8px',
-          background: 'oklch(0.20 0.01 265 / 0.5)',
-        }}>
-          <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>展开剩余内容</span>
-        </div>
+      {hasStructuredText(prompt) ? (
+        <StructuredTextBlock
+          text={prompt}
+          fontFamily="'IBM Plex Sans', system-ui, sans-serif"
+          fontSize={13}
+          maxHeight={open ? 'none' : COLLAPSED_H}
+          overflowY={open ? 'visible' : 'auto'}
+        />
+      ) : (
+        <ContentRenderer
+          text={prompt}
+          fontFamily="'IBM Plex Sans', system-ui, sans-serif"
+          fontSize={13}
+          maxHeight={open ? 'none' : COLLAPSED_H}
+          overflowY={open ? 'visible' : 'auto'}
+          markdown
+        />
       )}
-      {open && (
-        <div onClick={() => setOpen(false)} style={{
-          padding: '6px 0', textAlign: 'center', cursor: 'pointer',
-        }}>
-          <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>收起</span>
-        </div>
-      )}
+      <div className={`content-collapse-toggle${open ? '' : ' attached'}`} onClick={() => setOpen((value) => !value)}>
+        <span>{open ? '收起' : '展开剩余内容'}</span>
+      </div>
     </div>
   );
 }
@@ -1053,15 +1120,6 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
               const maxH = isExpandable && !isOpen ? COLLAPSED_H : 'none';
               const ovf = isExpandable && !isOpen ? 'auto' : 'visible';
 
-              const toggle = (open: boolean) => (
-                <div onClick={() => setExpanded((p) => { const n = new Set(p); open ? n.delete(si) : n.add(si); return n; })}
-                  style={{ padding: '6px 0', textAlign: 'center', cursor: 'pointer' }}>
-                  <span style={{ fontSize: 11, color: SEMANTIC.textMuted2 }}>
-                    {open ? '收起' : '展开剩余内容'}
-                  </span>
-                </div>
-              );
-
               return (
                 <>
                   <ContentRenderer
@@ -1075,7 +1133,18 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
                     toolName={sec.toolName}
                     preserveNewlines={sec.preserveNewlines}
                   />
-                  {isExpandable && toggle(isOpen)}
+                  {isExpandable && (
+                    <div
+                      className="content-collapse-toggle"
+                      onClick={() => setExpanded((p) => {
+                        const n = new Set(p);
+                        isOpen ? n.delete(si) : n.add(si);
+                        return n;
+                      })}
+                    >
+                      <span>{isOpen ? '收起' : '展开剩余内容'}</span>
+                    </div>
+                  )}
                 </>
               );
             })()}
@@ -1093,26 +1162,10 @@ function StepDetailPanel({ seg, index, prompt }: StepDetailPanelProps) {
                 );
               }
               return (
-              <div className="block-body"
-                style={{
-                  fontFamily: sec.font,
-                  marginTop: 8,
-                  padding: '12px 14px',
-                  borderRadius: 6,
-                  border: '1px solid oklch(0.45 0.08 150 / 0.25)',
-                  background: 'oklch(0.55 0.08 150 / 0.04)',
-                }}
-              >
-                <div style={{ fontSize: 10, fontWeight: 600, color: SEMANTIC.textGreen, marginBottom: 6 }}>
-                  中文翻译
+                <div className="block-body translation-block" style={{ fontFamily: sec.font }}>
+                  <div className="translation-title">中文翻译</div>
+                  <ContentRenderer text={translations[si]!} fontFamily={sec.font} fontSize={12} markdown />
                 </div>
-                <ContentRenderer
-                  text={translations[si]!}
-                  fontFamily={sec.font}
-                  fontSize={12}
-                  markdown
-                />
-              </div>
               );
             })()}
           </div>
@@ -1283,6 +1336,7 @@ export default function TurnInspector() {
   const toggleStep = useUIStore((s) => s.toggleStep);
   const [showPeakDetail, setShowPeakDetail] = useState(false);
   const [showCumDetail, setShowCumDetail] = useState(false);
+  const [showModelConfig, setShowModelConfig] = useState(false);
   const setSelectedStepIndex = useUIStore((s) => s.setSelectedStepIndex);
   const setPage = useUIStore((s) => s.setPage);
 
@@ -1471,6 +1525,25 @@ export default function TurnInspector() {
           >
             逐轮检查
           </span>
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setShowModelConfig(true);
+            }}
+            style={{
+              textDecoration: 'none',
+              border: `1px solid ${SEMANTIC.borderColor}`,
+              borderRadius: 9,
+              padding: '9px 14px',
+              color: SEMANTIC.textSecondary,
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 12,
+              background: 'oklch(0.20 0.01 265 / 0.6)',
+            }}
+          >
+            模型配置
+          </a>
         </div>
       </header>
 
@@ -1524,7 +1597,7 @@ export default function TurnInspector() {
                 onClick={async () => {
                   if (!currentSessionId) return;
                   try {
-                    await fetch('/api/sessions/' + currentSessionId + '/refresh', { method: 'POST' });
+                    await fetch(`${API_BASE}/sessions/${currentSessionId}/refresh`, { method: 'POST' });
                     fetchTurns(currentSessionId);
                   } catch { fetchTurns(currentSessionId); }
                 }}
@@ -1841,6 +1914,9 @@ export default function TurnInspector() {
         />
         );
       })()}
+
+      {/* 模型配置 Modal */}
+      {showModelConfig && <ModelConfigModal onClose={() => setShowModelConfig(false)} />}
     </>
   );
 }

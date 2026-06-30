@@ -3,6 +3,9 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useUIStore } from '../../store/uiStore';
 import { SEMANTIC } from '../../styles/theme';
 import { fmtK, fmtDateShort } from '../../utils/format';
+import { API_BASE } from '../../api/client';
+import { filterScannerFiles } from './scannerFileFilters';
+import { getScannerFileTitleDisplay, type ScannerFileTitleDisplay } from './scannerFileTitle';
 
 interface FoundFile {
   path: string;
@@ -17,6 +20,7 @@ interface FoundFile {
   requests?: number;
   peakTokens?: number;
   turnCount?: number;
+  cwd?: string;
 }
 
 const S = {
@@ -54,6 +58,68 @@ const S = {
     background: 'oklch(0.18 0.008 265 / 0.5)',
   } as React.CSSProperties,
   fileName: { flex: 1, fontSize: 12.5, color: SEMANTIC.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as React.CSSProperties,
+  structuredTitle: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+  } as React.CSSProperties,
+  structuredIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 11,
+    fontWeight: 700,
+  } as React.CSSProperties,
+  structuredIconCommand: {
+    color: 'oklch(0.88 0.10 165)',
+    background: 'oklch(0.38 0.10 165 / 0.22)',
+  },
+  structuredIconWarning: {
+    color: 'oklch(0.85 0.13 80)',
+    background: 'oklch(0.64 0.10 80 / 0.16)',
+  },
+  structuredIconPlugin: {
+    color: 'oklch(0.82 0.09 285)',
+    background: 'oklch(0.50 0.10 285 / 0.18)',
+  },
+  structuredTextWrap: {
+    minWidth: 0,
+    flex: 1,
+  } as React.CSSProperties,
+  structuredName: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 12,
+    fontWeight: 650,
+  } as React.CSSProperties,
+  structuredNameCommand: {
+    color: 'oklch(0.86 0.09 165)',
+  },
+  structuredNameWarning: {
+    color: 'oklch(0.86 0.10 80)',
+  },
+  structuredNamePlugin: {
+    color: 'oklch(0.86 0.08 285)',
+  },
+  structuredDetail: {
+    display: 'block',
+    marginTop: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: 10.5,
+    color: SEMANTIC.textMuted,
+  } as React.CSSProperties,
   meta: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: SEMANTIC.textMuted, whiteSpace: 'nowrap' } as React.CSSProperties,
   importBtn: {
     padding: '5px 14px', fontSize: 11.5, fontWeight: 500, borderRadius: 5,
@@ -104,12 +170,50 @@ const S = {
     background: 'oklch(0.74 0.13 60 / 0.14)',
     color: SEMANTIC.textAccent2,
   } as React.CSSProperties,
+  filterRow: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+  } as React.CSSProperties,
+  filterToggle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 7,
+    fontSize: 11.5,
+    color: SEMANTIC.textMuted,
+    cursor: 'pointer',
+    userSelect: 'none',
+    fontFamily: "'IBM Plex Mono', monospace",
+  } as React.CSSProperties,
+  filterCheckbox: {
+    width: 13,
+    height: 13,
+    accentColor: 'oklch(0.74 0.13 60)',
+    cursor: 'pointer',
+  } as React.CSSProperties,
 };
+
+function StructuredScannerTitle({ title }: { title: Extract<ScannerFileTitleDisplay, { kind: 'structured' }> }) {
+  const toneSuffix = title.tone === 'command' ? 'Command' : title.tone === 'plugin' ? 'Plugin' : 'Warning';
+  const iconStyle = S[`structuredIcon${toneSuffix}` as const];
+  const nameStyle = S[`structuredName${toneSuffix}` as const];
+
+  return (
+    <div style={S.structuredTitle} title={title.tooltip}>
+      <span style={{ ...S.structuredIcon, ...iconStyle }}>{title.icon}</span>
+      <span style={S.structuredTextWrap}>
+        <span style={{ ...S.structuredName, ...nameStyle }}>{title.label}</span>
+        {title.detail && <span style={S.structuredDetail}>{title.detail}</span>}
+      </span>
+    </div>
+  );
+}
 
 export default function ScannerModal() {
   const [scanning, setScanning] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<'claude' | 'codex'>('claude');
+  const [hideShortSessions, setHideShortSessions] = useState(false);
 
   const files = useSessionStore(s => s.scanFiles);
   const status = useSessionStore(s => s.scanStatus);
@@ -127,13 +231,17 @@ export default function ScannerModal() {
     () => files.filter((f) => f.source === 'codex'),
     [files],
   );
-  const visibleFiles = activeSource === 'codex' ? codexFiles : claudeFiles;
+  const sourceFiles = activeSource === 'codex' ? codexFiles : claudeFiles;
+  const visibleFiles = useMemo(
+    () => filterScannerFiles(files, { source: activeSource, hideShortSessions }),
+    [files, activeSource, hideShortSessions],
+  );
 
   const doScan = useCallback(async (force?: boolean) => {
     setScanning(true);
     setScanFiles(files, '正在扫描本地会话目录…');
     try {
-      const url = force ? '/api/scanner/scan?force=1' : '/api/scanner/scan';
+      const url = force ? `${API_BASE}/scanner/scan?force=1` : `${API_BASE}/scanner/scan`;
       const resp = await fetch(url);
       const data = await resp.json();
       const cachedNote = data.cached > 0 ? `（${data.cached} 个命中缓存）` : '';
@@ -155,7 +263,7 @@ export default function ScannerModal() {
   const doImport = useCallback(async (file: FoundFile) => {
     setImporting(file.path);
     try {
-      const resp = await fetch('/api/scanner/import', {
+      const resp = await fetch(`${API_BASE}/scanner/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: file.path }),
@@ -204,26 +312,39 @@ export default function ScannerModal() {
         {status && <div style={S.status}>{status}</div>}
 
         {files.length > 0 && (
-          <div style={S.tabs} role="tablist" aria-label="日志来源">
-            {([
-              ['claude', `Claude Code (${claudeFiles.length})`],
-              ['codex', `Codex (${codexFiles.length})`],
-            ] as const).map(([source, label]) => {
-              const active = activeSource === source;
-              return (
-                <button
-                  key={source}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  style={{ ...S.tabBtn, ...(active ? S.tabBtnActive : {}) }}
-                  onClick={() => setActiveSource(source)}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+          <>
+            <div style={S.tabs} role="tablist" aria-label="日志来源">
+              {([
+                ['claude', `Claude Code (${claudeFiles.length})`],
+                ['codex', `Codex (${codexFiles.length})`],
+              ] as const).map(([source, label]) => {
+                const active = activeSource === source;
+                return (
+                  <button
+                    key={source}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    style={{ ...S.tabBtn, ...(active ? S.tabBtnActive : {}) }}
+                    onClick={() => setActiveSource(source)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={S.filterRow}>
+              <label style={S.filterToggle}>
+                <input
+                  type="checkbox"
+                  checked={hideShortSessions}
+                  onChange={(event) => setHideShortSessions(event.currentTarget.checked)}
+                  style={S.filterCheckbox}
+                />
+                隐藏少于 5 轮
+              </label>
+            </div>
+          </>
         )}
 
         {scanning && (
@@ -234,45 +355,56 @@ export default function ScannerModal() {
 
         {files.length > 0 && visibleFiles.length === 0 && !scanning && (
           <div style={{ ...S.status, marginTop: 18 }}>
-            {activeSource === 'codex' ? '未发现 Codex 日志' : '未发现 Claude Code 日志'}
+            {sourceFiles.length === 0
+              ? activeSource === 'codex' ? '未发现 Codex 日志' : '未发现 Claude Code 日志'
+              : '当前筛选条件下没有会话'}
           </div>
         )}
 
         {visibleFiles.length > 0 && (
           <div className="tl" style={S.list}>
-            {visibleFiles.map((f) => (
-              <div key={f.path} style={S.fileItem}>
-                <span style={{ fontSize: 16, flexShrink: 0 }}>📄</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                    <span style={S.sourceTag}>{f.source === 'codex' ? 'Codex' : 'Claude'}</span>
-                    <div style={S.fileName} title={f.path}>{f.title || f.name}</div>
-                  </div>
-                  {f.title && <div style={{ fontSize: 10, color: SEMANTIC.textMuted, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.path}>{f.name}</div>}
-                  {!f.imported && f.requests != null && (
-                    <div style={{ display: 'flex', gap: 10, marginTop: 3 }}>
-                      <span style={{ fontSize: 11, color: SEMANTIC.textMuted }}>{f.model || 'unknown'}</span>
-                      <span style={{ fontSize: 11, color: SEMANTIC.textMuted }}>{f.requests} 请求</span>
-                      <span style={{ fontSize: 11, color: 'oklch(0.74 0.13 60)' }}>峰值 {fmtK(f.peakTokens ?? 0)}</span>
-                      <span style={{ fontSize: 11, color: SEMANTIC.textMuted }}>{f.turnCount} 轮</span>
+            {visibleFiles.map((f) => {
+              const titleDisplay = getScannerFileTitleDisplay(f.title, f.name);
+
+              return (
+                <div key={f.path} style={S.fileItem}>
+                  <span style={{ fontSize: 16, flexShrink: 0 }}>📄</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                      <span style={S.sourceTag}>{f.source === 'codex' ? 'Codex' : 'Claude'}</span>
+                      {titleDisplay.kind === 'structured' ? (
+                        <StructuredScannerTitle title={titleDisplay} />
+                      ) : (
+                        <div style={S.fileName} title={f.path}>{titleDisplay.text}</div>
+                      )}
                     </div>
+                    {f.title && <div style={{ fontSize: 10, color: SEMANTIC.textMuted, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.path}>{f.name}</div>}
+                    {f.cwd && <div style={{ fontSize: 10, color: 'oklch(0.55 0.02 265)', marginTop: 1, fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.cwd}>📁 {f.cwd.replace(/^\/Users\/[^/]+/, '~')}</div>}
+                    {!f.imported && f.requests != null && (
+                      <div style={{ display: 'flex', gap: 10, marginTop: 3 }}>
+                        <span style={{ fontSize: 11, color: SEMANTIC.textMuted }}>{f.model || 'unknown'}</span>
+                        <span style={{ fontSize: 11, color: SEMANTIC.textMuted }}>{f.requests} 请求</span>
+                        <span style={{ fontSize: 11, color: 'oklch(0.74 0.13 60)' }}>峰值 {fmtK(f.peakTokens ?? 0)}</span>
+                        <span style={{ fontSize: 11, color: SEMANTIC.textMuted }}>{f.turnCount} 轮</span>
+                      </div>
+                    )}
+                  </div>
+                  <span style={S.meta}>{fmtK(f.size)}B</span>
+                  <span style={S.meta}>{fmtDateShort(f.modified)}</span>
+                  {f.imported ? (
+                    <span style={S.importedTag}>已导入</span>
+                  ) : (
+                    <button
+                      style={S.importBtn}
+                      disabled={importing === f.path}
+                      onClick={() => doImport(f)}
+                    >
+                      {importing === f.path ? '导入中…' : '导入'}
+                    </button>
                   )}
                 </div>
-                <span style={S.meta}>{fmtK(f.size)}B</span>
-                <span style={S.meta}>{fmtDateShort(f.modified)}</span>
-                {f.imported ? (
-                  <span style={S.importedTag}>已导入</span>
-                ) : (
-                  <button
-                    style={S.importBtn}
-                    disabled={importing === f.path}
-                    onClick={() => doImport(f)}
-                  >
-                    {importing === f.path ? '导入中…' : '导入'}
-                  </button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

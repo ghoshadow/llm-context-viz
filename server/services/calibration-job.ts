@@ -9,9 +9,8 @@ import type { AgentSource, NormalizedCalibration } from '../../src/pipeline/cali
 import { normalizeAgentSource } from '../../src/pipeline/calibration-types';
 import { extractConstants } from '../../src/pipeline/extract-constants';
 import { extractCodexConstants } from '../../src/pipeline/extract-codex-constants';
-import { buildCalibrationProxyArgs } from './calibration-launchers';
 import { readClaudeBaseUrl } from './claude-config';
-import { readCodexBaseUrl } from './codex-config';
+import { readCodexBaseUrl, readCodexTargetHost } from './codex-config';
 
 type ProxyUtils = {
   pickPort: (host?: string) => Promise<number>;
@@ -19,7 +18,18 @@ type ProxyUtils = {
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const require = createRequire(import.meta.url);
-const { pickPort } = require('../../scripts/calibration-proxy-utils.cjs') as ProxyUtils;
+let pickPort: (host?: string) => Promise<number>;
+try {
+  ({ pickPort } = require('../../scripts/calibration-proxy-utils.cjs') as ProxyUtils);
+} catch {
+  // ponytail: 打包环境路径不同，回退到内置端口选择
+  const { createServer } = await import('net');
+  pickPort = (host = '127.0.0.1') => new Promise((resolve, reject) => {
+    const s = createServer();
+    s.listen(0, host, () => { const port = (s.address() as any)?.port; s.close(() => resolve(port)); });
+    s.on('error', reject);
+  });
+}
 
 export type CalibrationJobStatus =
   | 'starting'
@@ -63,8 +73,11 @@ export interface StartCalibrationJobOptions {
 const jobs = new Map<string, CalibrationJob>();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = join(__filename, '..');
-const PROJECT_ROOT = resolve(join(__dirname, '..', '..'));
-const SCRIPT_PATH = join(PROJECT_ROOT, 'scripts', 'calibration-proxy.cjs');
+// ponytail: 开发环境: server/services/ → ../../scripts/
+//           打包环境: dist-server/ → ./scripts/
+const DEV_SCRIPT = resolve(join(__dirname, '..', '..', 'scripts', 'calibration-proxy.cjs'));
+const BUNDLE_SCRIPT = resolve(join(__dirname, 'scripts', 'calibration-proxy.cjs'));
+const SCRIPT_PATH = existsSync(DEV_SCRIPT) ? DEV_SCRIPT : BUNDLE_SCRIPT;
 const MAX_OUTPUT_LINES = 80;
 const JOB_RETENTION_MS = 15 * 60 * 1000;
 
@@ -76,7 +89,7 @@ function appendOutput(job: CalibrationJob, text: string): void {
       const match = line.match(/\slog=(.+)$/);
       if (match?.[1]) job.logFile = match[1].trim();
       job.status = 'running';
-      job.message = 'waiting for Claude Code request';
+      job.message = `waiting for ${job.source === 'codex' ? 'Codex' : 'Claude Code'} request`;
     }
     if (line.includes('CAPTURED') && line.includes(' log=')) {
       const match = line.match(/\slog=(.+)$/);
@@ -111,7 +124,18 @@ function scheduleCleanup(job: CalibrationJob): void {
 }
 
 async function choosePort(preferred?: number): Promise<number> {
-  if (preferred && Number.isFinite(preferred) && preferred > 0) return preferred;
+  if (preferred && Number.isFinite(preferred) && preferred > 0) {
+    // 尝试使用指定端口，被占用则回退
+    const { createServer } = await import('net');
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const s = createServer();
+        s.once('error', reject);
+        s.listen(preferred, '127.0.0.1', () => { s.close(() => resolve()); });
+      });
+      return preferred;
+    } catch { /* 端口占用，回退到随机 */ }
+  }
   return pickPort('127.0.0.1');
 }
 
@@ -121,10 +145,34 @@ export function defaultCalibrationPrompt(source: AgentSource): string {
 
 export function defaultCalibrationTarget(
   source: AgentSource,
-  readCodexTarget = readCodexBaseUrl,
+  readCodexTarget = readCodexTargetHost,
   readClaudeTarget = readClaudeBaseUrl,
 ): string {
   return source === 'codex' ? readCodexTarget() : readClaudeTarget();
+}
+
+export function buildCalibrationProxyArgs(options: {
+  source: AgentSource;
+  scriptPath: string;
+  cwd: string;
+  targetHost: string;
+  port: number;
+  timeoutMs: number;
+  prompt: string;
+}): string[] {
+  const base = [
+    options.scriptPath,
+    '--source', options.source,
+    '--cwd', options.cwd,
+    '--target-host', options.targetHost,
+    '--port', String(options.port),
+    '--timeout-ms', String(options.timeoutMs),
+    '--',
+  ];
+
+  return options.source === 'codex'
+    ? [...base, options.prompt]
+    : [...base, '-p', options.prompt];
 }
 
 export async function startCalibrationJob(options: StartCalibrationJobOptions): Promise<CalibrationJobSnapshot> {
@@ -169,9 +217,15 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
     prompt,
   });
 
+  // 打包环境下 claude CLI 在 node_modules 中，不在 PATH 里
+  const claudePath = join(__dirname, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-darwin-arm64', 'claude');
+  const env: Record<string, string> = { ...process.env as Record<string, string> };
+  if (existsSync(claudePath)) env.CLAUDE_CLI_PATH = claudePath;
+
   const child = spawn(process.execPath, args, {
-    cwd: PROJECT_ROOT,
+    cwd: __dirname,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env,
   });
   job.child = child;
 

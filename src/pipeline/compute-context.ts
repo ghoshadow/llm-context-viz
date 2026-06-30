@@ -33,7 +33,7 @@ export interface TokenEstimator {
 /**
  * Flattened per-turn context: category key -> cumulative tokens.
  *
- * This is the primary pipeline output consumed by compute-deltas,
+ * This is the primary pipeline output consumed by delta computation,
  * compute-timeline, aggregate-session, and assembleTurns.
  */
 export type TurnContextComposition = Record<string, number>;

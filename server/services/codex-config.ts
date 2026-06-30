@@ -57,3 +57,13 @@ export function readCodexBaseUrl(configPath = resolveCodexConfigPath()): string 
   if (!existsSync(configPath)) return 'https://api.openai.com/v1';
   return resolveCodexBaseUrlFromConfigText(readFileSync(configPath, 'utf-8'));
 }
+
+/** 返回 MITM 用的 hostname:port（去掉 http(s):// 前缀） */
+export function readCodexTargetHost(configPath = resolveCodexConfigPath()): string {
+  const url = readCodexBaseUrl(configPath);
+  try {
+    const u = new URL(url);
+    const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+    return `${u.hostname}:${port}`;
+  } catch { return 'api.openai.com:443'; }
+}

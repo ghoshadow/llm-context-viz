@@ -7,7 +7,6 @@ import { getSessionSource } from '../../src/utils/sessionSource';
 
 import { findJsonlFile } from './shared';
 import ontologyRouter from './ontology';
-import { parseTurnListPagination } from './pagination';
 import type { SessionSource } from '../../src/utils/sessionSource';
 import { validateBody, TranslateRequestSchema } from '../middleware/validate.js';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
@@ -29,6 +28,40 @@ import {
 } from '../repositories/session-repository';
 
 const router = Router();
+
+export interface TurnListPagination {
+  all: boolean;
+  limit: number | null;
+  offset: number;
+}
+
+const DEFAULT_TURN_LIMIT = 200;
+const MAX_TURN_LIMIT = 500;
+
+function firstQueryValue(value: unknown): string | undefined {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : undefined;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function parseNonNegativeInt(value: unknown, fallback: number): number {
+  const raw = firstQueryValue(value);
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+export function parseTurnListPagination(query: Record<string, unknown>): TurnListPagination {
+  if (firstQueryValue(query.all) === '1') {
+    return { all: true, limit: null, offset: 0 };
+  }
+
+  const requestedLimit = parseNonNegativeInt(query.limit, DEFAULT_TURN_LIMIT);
+  return {
+    all: false,
+    limit: Math.min(Math.max(requestedLimit, 1), MAX_TURN_LIMIT),
+    offset: parseNonNegativeInt(query.offset, 0),
+  };
+}
 
 // ============================================================================
 // Mount ontology sub-router
@@ -280,9 +313,15 @@ export function parseConstantTranslationSections(value: unknown): number[] {
 
 router.post('/:id/translate', validateBody(TranslateRequestSchema), async (req, res) => {
   try {
-    const { text, turnIndex, stepIndex, sectionIndex } = req.body;
+    const { text, turnIndex, stepIndex, sectionIndex, force } = req.body as {
+      text: string;
+      turnIndex: number;
+      stepIndex: number;
+      sectionIndex: number;
+      force?: boolean;
+    };
 
-    const sessionId = req.params.id!;
+    const sessionId = String(req.params.id);
     const session = getSessionBrief(sessionId);
     const projectKey = session?.cwd && isConstantTranslationSlot(stepIndex)
       ? normalizeTranslationProjectKey(session.cwd, getSessionSource(session))
@@ -293,7 +332,7 @@ router.post('/:id/translate', validateBody(TranslateRequestSchema), async (req, 
     }
 
     // Check cache (skip when force=true)
-    if (!req.body?.force) {
+    if (!force) {
       if (projectKey) {
         const projectCached = getProjectConstantTranslation(projectKey.project_cwd, projectKey.source, sectionIndex);
         if (projectCached) {

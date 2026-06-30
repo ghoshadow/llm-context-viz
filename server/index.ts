@@ -8,6 +8,8 @@ import sessionsRouter from './routes/sessions';
 import scannerRouter from './routes/scanner';
 import calibrateRouter from './routes/calibrate';
 import obsidianRouter from './routes/obsidian';
+import monitorRouter from './monitor/routes';
+import configRouter from './routes/config';
 import { initDb, migrate } from './db';
 import { sanitizeForLog } from './utils/log-sanitizer.js';
 
@@ -64,11 +66,13 @@ app.use('/api/sessions', sessionsRouter);
 app.use('/api/scanner', scannerRouter);
 app.use('/api/calibrate', calibrateRouter);
 app.use('/api/obsidian', obsidianRouter);
+app.use('/api/monitor', monitorRouter);
+app.use('/api/config', configRouter);
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', db: 'connected', projectRoot: PROJECT_ROOT });
+  res.json({ status: 'ok', db: 'connected', projectRoot: PROJECT_ROOT, dataDir: process.env.LLM_CONTEXT_VIZ_DATA_DIR || '(default)' });
 });
 
 // In production, serve the built frontend

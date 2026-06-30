@@ -15,6 +15,7 @@ import {
 } from './calibrationDetailModal';
 import {
   type AgentSource,
+  type CalibrationCategoryRow,
   type CalibrationCategoryMap,
   type CalibrationDetails,
   type NormalizedCalibrationSummaryLike,
@@ -421,6 +422,23 @@ export default function CalibratePage() {
     }
   }, [currentSessionId, currentTurnIndex, detailDisplay, detailModal, detailTranslating, detailTranslations, detailTranslationSlot]);
 
+  const renderCategoryRows = (rows: CalibrationCategoryRow[], valueSize: number, withTokens = false) => (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+      {rows.map((row) => (
+        <div key={row.key}>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>{row.label}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontFamily: MONO, fontSize: valueSize, fontWeight: 600 }}>{row.chars.toLocaleString()}</div>
+            <DetailButton disabled={!row.detail} onClick={() => openDetail(row.detailKey, row.detail, row.label)} />
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>
+            {withTokens ? `${row.detailKey} · ≈ ${estTok(row.chars)} tok` : row.detailKey}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 0', fontFamily: SANS, color: 'oklch(0.93 0.006 265)' }}>
       {detailModal && (
@@ -734,23 +752,7 @@ export default function CalibratePage() {
             background: 'oklch(0.74 0.13 60 / 0.08)', marginBottom: 16,
           }}>
             <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: 'oklch(0.74 0.13 60)' }}>将应用的常量</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
-              {resultRows.map((row) => (
-                <div key={row.key}>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>{row.label}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600 }}>{row.chars.toLocaleString()}</div>
-                    <DetailButton
-                      disabled={!row.detail}
-                      onClick={() => openDetail(row.detailKey, row.detail, row.label)}
-                    />
-                  </div>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>
-                    {row.detailKey} · ≈ {estTok(row.chars)} tok
-                  </div>
-                </div>
-              ))}
-            </div>
+            {renderCategoryRows(resultRows, 18, true)}
           </div>
 
           {/* Apply button */}
@@ -806,21 +808,7 @@ export default function CalibratePage() {
                   {currentConstants.note}
                 </div>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
-                {currentRows.map((row) => (
-                  <div key={row.key}>
-                    <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>{row.label}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ fontFamily: MONO, fontSize: 15, fontWeight: 600 }}>{row.chars.toLocaleString()}</div>
-                      <DetailButton
-                        disabled={!row.detail}
-                        onClick={() => openDetail(row.detailKey, row.detail, row.label)}
-                      />
-                    </div>
-                    <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>{row.detailKey}</div>
-                  </div>
-                ))}
-              </div>
+              {renderCategoryRows(currentRows, 15)}
             </>
           ) : (
             <div style={{ fontSize: 13, color: S.textDesc3 }}>

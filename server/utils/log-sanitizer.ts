@@ -102,7 +102,7 @@ export function sanitizeForLog(input: unknown): unknown {
  */
 export function filterEnv(
   env: Record<string, string | undefined>,
-  allowedKeys: Set<string> = ALLOWED_ENV_KEYS,
+  allowedKeys: ReadonlySet<string> = ALLOWED_ENV_KEYS,
 ): Record<string, string> {
   const filtered: Record<string, string> = {};
   for (const key of allowedKeys) {

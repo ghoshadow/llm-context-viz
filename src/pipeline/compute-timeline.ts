@@ -679,7 +679,7 @@ export function computeTimeline(
       }
     }
 
-    // 8. Build delta (delegated to compute-deltas stage).
+    // 8. Build delta.
     const delta = {};
 
     // 9. Accumulate cumulative tools, with per-step snapshots.
