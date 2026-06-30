@@ -1,7 +1,10 @@
+import { homedir } from 'os';
+
 export function getSessionProjectPathText(session: { cwd?: string | null }): string {
   const cwd = session.cwd?.trim();
   if (!cwd) return '未记录项目目录';
 
-  if (cwd === '/Users/link') return '~';
-  return cwd.startsWith('/Users/link/') ? `~/${cwd.slice('/Users/link/'.length)}` : cwd;
+  const home = homedir();
+  if (cwd === home) return '~';
+  return cwd.startsWith(home + '/') ? `~/${cwd.slice(home.length + 1)}` : cwd;
 }
