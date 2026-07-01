@@ -6,7 +6,7 @@
  */
 
 import { getDb } from '../db';
-import type { OntologyData } from '../../src/types/ontology';
+import type { OntologyData } from '../../shared/types/ontology';
 
 // ── 类型 ────────────────────────────────────────────────────────────────────
 

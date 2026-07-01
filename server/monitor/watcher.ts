@@ -11,7 +11,7 @@ import { readFile } from 'fs/promises';
 import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { runPipeline } from '../../src/pipeline/index';
+import { runPipeline } from '../../shared/pipeline/index';
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────
 

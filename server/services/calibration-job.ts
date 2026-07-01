@@ -5,10 +5,10 @@ import type { Readable } from 'stream';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
-import type { AgentSource, NormalizedCalibration } from '../../src/pipeline/calibration-types';
-import { normalizeAgentSource } from '../../src/pipeline/calibration-types';
-import { extractConstants } from '../../src/pipeline/extract-constants';
-import { extractCodexConstants } from '../../src/pipeline/extract-codex-constants';
+import type { AgentSource, NormalizedCalibration } from '../../shared/pipeline/calibration-types';
+import { normalizeAgentSource } from '../../shared/pipeline/calibration-types';
+import { extractConstants } from '../../shared/pipeline/extract-constants';
+import { extractCodexConstants } from '../../shared/pipeline/extract-codex-constants';
 import { readClaudeBaseUrl } from './claude-config';
 import { readCodexBaseUrl, readCodexTargetHost } from './codex-config';
 

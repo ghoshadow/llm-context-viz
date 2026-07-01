@@ -5,8 +5,8 @@
  * 用于喂给 LLM 做本体提取。
  */
 
-import { isCodexJsonl, runCodexPipeline } from '../../src/pipeline/codex-jsonl';
-import type { TimelineSegment, TurnData } from '../../src/types/session';
+import { isCodexJsonl, runCodexPipeline } from '../../shared/pipeline/codex-jsonl';
+import type { TimelineSegment, TurnData } from '../../shared/types/session';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
 
 /** 单个 turn 的结构化内容 */

@@ -14,9 +14,9 @@
 
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { extractToFiles, extractIncremental, type ExtractionManifest, type ShardFile } from '../content/extract-to-files.js';
-import { buildOntology, type OntologyBuildOutput } from '../../src/pipeline/build-ontology.js';
-import type { CandidateEntity, SemanticRelation, OntologyBuildConfig } from '../../src/pipeline/build-ontology.js';
-import type { OntologyEvidence } from '../../src/types/ontology.js';
+import { buildOntology, type OntologyBuildOutput } from '../../shared/pipeline/build-ontology.js';
+import type { CandidateEntity, SemanticRelation, OntologyBuildConfig } from '../../shared/pipeline/build-ontology.js';
+import type { OntologyEvidence } from '../../shared/types/ontology.js';
 import { buildEntityExtractorDef, buildOrchestratorPrompt, type ExtractionDepth } from './orchestrator-prompt.js';
 import { SubmitExtractionSchema } from './schema.js';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';

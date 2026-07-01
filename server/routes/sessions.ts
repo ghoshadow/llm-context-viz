@@ -3,11 +3,11 @@ import { refreshSession } from '../services/pipeline-service';
 import { callTranslationLLM } from '../llm/translation-client';
 import { enrichWithSubAgents } from './scanner';
 import { readFile } from 'fs/promises';
-import { getSessionSource } from '../../src/utils/sessionSource';
+import { getSessionSource } from '../../shared/session-source';
 
 import { findJsonlFile } from './shared';
 import ontologyRouter from './ontology';
-import type { SessionSource } from '../../src/utils/sessionSource';
+import type { SessionSource } from '../../shared/session-source';
 import { validateBody, TranslateRequestSchema } from '../middleware/validate.js';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
 import {

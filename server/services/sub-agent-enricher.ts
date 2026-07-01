@@ -10,7 +10,7 @@
 import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
-import type { TurnData, TimelineSegment } from '../../src/types/session';
+import type { TurnData, TimelineSegment } from '../../shared/types/session';
 
 /** 从原始日志中提取的子代理信息 */
 export interface SubAgentInfo {

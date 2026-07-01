@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { normalizeAgentSource } from '../../src/pipeline/calibration-types';
-import type { NormalizedCalibrationSummary } from '../../src/pipeline/calibration-types';
+import { normalizeAgentSource } from '../../shared/pipeline/calibration-types';
+import type { NormalizedCalibrationSummary } from '../../shared/pipeline/calibration-types';
 import {
   readCalibrationConstants,
   writeCalibrationConstants,

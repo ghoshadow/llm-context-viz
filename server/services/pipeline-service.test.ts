@@ -143,7 +143,7 @@ test('computeMemoryCharsSync 空输入不崩溃', () => {
 
 // ── persistTurns 测试 ────────────────────────────────────────────────────
 
-import type { TurnData } from '../../src/types/session';
+import type { TurnData } from '../../shared/types/session';
 
 function makeTurn(overrides?: Partial<TurnData>): TurnData {
   return {

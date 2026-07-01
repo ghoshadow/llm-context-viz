@@ -11,7 +11,7 @@ import {
   legacyClaudeSummaryToNormalized,
   normalizeAgentSource,
   normalizedToLegacyClaudeSummary,
-} from '../../src/pipeline/calibration-types';
+} from '../../shared/pipeline/calibration-types';
 
 export const DEFAULT_CALIBRATION_CONSTANTS = {
   SYS_PROMPT_FALLBACK_CHARS: CALIBRATION_DEFAULTS.SYS_PROMPT_CHARS,

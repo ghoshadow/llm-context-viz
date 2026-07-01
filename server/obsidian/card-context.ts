@@ -1,4 +1,4 @@
-import type { OntologyEvidence } from '../../src/types/ontology';
+import type { OntologyEvidence } from '../../shared/types/ontology';
 
 export interface ObsidianNodeLike {
   id: string;

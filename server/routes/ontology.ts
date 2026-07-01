@@ -21,7 +21,7 @@ import {
   updateExtractJob,
 } from '../services/extraction-job';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
-import type { OntologyData } from '../../src/types/ontology';
+import type { OntologyData } from '../../shared/types/ontology';
 import { validateBody, OntologyDataSchema } from '../middleware/validate.js';
 import {
   getOntologyData,

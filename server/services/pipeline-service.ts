@@ -3,13 +3,13 @@ import { access, readFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db';
-import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../src/pipeline/index';
-import { isCodexJsonl, runCodexPipeline } from '../../src/pipeline/codex-jsonl';
-import type { SessionSummary, TurnData } from '../../src/types/session';
+import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../shared/pipeline/index';
+import { isCodexJsonl, runCodexPipeline } from '../../shared/pipeline/codex-jsonl';
+import type { SessionSummary, TurnData } from '../../shared/types/session';
 import type Database from 'better-sqlite3';
 import { readCalibrationConstants } from './calibration-constants';
-import { memoryCategoryChars } from '../../src/pipeline/calibration-types';
-import type { ParseError } from '../../src/pipeline/parse-jsonl';
+import { memoryCategoryChars } from '../../shared/pipeline/calibration-types';
+import type { ParseError } from '../../shared/pipeline/parse-jsonl';
 
 // ============================================================================
 // Shared pipeline service — eliminates duplicated import/refresh logic across
