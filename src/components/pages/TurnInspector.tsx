@@ -17,7 +17,7 @@ import {
   ERROR_TEXT,
 } from '../../styles/theme';
 import { fmt, fmtK, fmtDur, fmtDate } from '../../utils/format';
-import { post, get, API_BASE } from '../../api/client';
+import { post, get } from '../../api/client';
 import ModelConfigModal from './ModelConfigModal';
 import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { ContentRenderer } from '../shared/ContentRenderer';
@@ -1597,7 +1597,7 @@ export default function TurnInspector() {
                 onClick={async () => {
                   if (!currentSessionId) return;
                   try {
-                    await fetch(`${API_BASE}/sessions/${currentSessionId}/refresh`, { method: 'POST' });
+                    await post(`/sessions/${currentSessionId}/refresh`);
                     fetchTurns(currentSessionId);
                   } catch { fetchTurns(currentSessionId); }
                 }}

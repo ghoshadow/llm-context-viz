@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SEMANTIC } from '../../styles/theme';
-import { API_BASE } from '../../api/client';
+import { get, put } from '../../api/client';
 
 interface ModelConfigData {
   LLM_BASE_URL: string;
@@ -66,8 +66,7 @@ export default function ModelConfigModal({ onClose }: Props) {
   const [msg, setMsg] = useState('');
 
   const load = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/config/model`);
-    const data = await res.json();
+    const data = await get<ModelConfigData>('/config/model');
     setConfig(data);
     setForm({
       LLM_BASE_URL: data.LLM_BASE_URL || '',
@@ -95,19 +94,10 @@ export default function ModelConfigModal({ onClose }: Props) {
       // 只在用户输入了新的 key 时才发送
       if (form.LLM_API_KEY?.trim()) body.LLM_API_KEY = form.LLM_API_KEY.trim();
 
-      const res = await fetch(`${API_BASE}/config/model`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMsg('保存成功');
-        setConfig(data);
-        setForm((prev) => ({ ...prev, LLM_API_KEY: '' }));  // 清空输入
-      } else {
-        setMsg(data.error || '保存失败');
-      }
+      const data = await put<ModelConfigData>('/config/model', body);
+      setMsg('保存成功');
+      setConfig(data);
+      setForm((prev) => ({ ...prev, LLM_API_KEY: '' }));  // 清空输入
     } catch {
       setMsg('网络错误');
     } finally {

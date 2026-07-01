@@ -6,7 +6,15 @@
 
 import { useEffect, useRef } from 'react';
 
-import { API_BASE } from '../api/client';
+import { get } from '../api/client';
+
+interface MonitorSnapshot {
+  active?: boolean;
+  contextPct: number;
+  alerts?: Array<{ message: string }>;
+  turnCount: number;
+  compressionReset?: boolean;
+}
 
 // ponytail: Tauri invoke 在浏览器模式下不可用，静默降级
 let tauriInvoke: ((cmd: string, args: Record<string, unknown>) => Promise<void>) | null = null;
@@ -26,12 +34,12 @@ export function useMonitor() {
 
     async function poll() {
       try {
-        const res = await fetch(`${API_BASE}/monitor/snapshot`);
-        const snap = await res.json();
+        const snap = await get<MonitorSnapshot>('/monitor/snapshot');
 
         if (snap.active) {
           const pct: number = snap.contextPct;
-          const alertText: string = snap.alerts?.length > 0 ? ` — ${snap.alerts[0].message}` : '';
+          const firstAlert = snap.alerts?.[0]?.message;
+          const alertText: string = firstAlert ? ` — ${firstAlert}` : '';
           let trayText = `上下文 ${pct}% | ${snap.turnCount} 轮`;
           if (snap.compressionReset) trayText += ' | ⚡压缩';
           trayText += alertText;

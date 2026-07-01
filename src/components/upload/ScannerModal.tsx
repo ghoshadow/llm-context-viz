@@ -3,7 +3,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useUIStore } from '../../store/uiStore';
 import { SEMANTIC } from '../../styles/theme';
 import { fmtK, fmtDateShort } from '../../utils/format';
-import { API_BASE } from '../../api/client';
+import { get, post } from '../../api/client';
 import { filterScannerFiles } from './scannerFileFilters';
 import { getScannerFileTitleDisplay, type ScannerFileTitleDisplay } from './scannerFileTitle';
 
@@ -21,6 +21,18 @@ interface FoundFile {
   peakTokens?: number;
   turnCount?: number;
   cwd?: string;
+}
+
+interface ScannerResponse {
+  files?: FoundFile[];
+  totalFiles: number;
+  importedCount: number;
+  cached?: number;
+}
+
+interface ImportResponse {
+  imported?: boolean;
+  sessionId: string;
 }
 
 const S = {
@@ -241,10 +253,9 @@ export default function ScannerModal() {
     setScanning(true);
     setScanFiles(files, '正在扫描本地会话目录…');
     try {
-      const url = force ? `${API_BASE}/scanner/scan?force=1` : `${API_BASE}/scanner/scan`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-      const cachedNote = data.cached > 0 ? `（${data.cached} 个命中缓存）` : '';
+      const data = await get<ScannerResponse>(force ? '/scanner/scan?force=1' : '/scanner/scan');
+      const cached = data.cached ?? 0;
+      const cachedNote = cached > 0 ? `（${cached} 个命中缓存）` : '';
       const codexCount = Array.isArray(data.files) ? data.files.filter((f: FoundFile) => f.source === 'codex').length : 0;
       const sourceNote = codexCount > 0 ? `，包含 ${codexCount} 个 Codex 日志` : '';
       setScanFiles(data.files || [], `发现 ${data.totalFiles} 个有效文件，其中 ${data.importedCount} 个已导入${sourceNote}${cachedNote}`);
@@ -263,12 +274,7 @@ export default function ScannerModal() {
   const doImport = useCallback(async (file: FoundFile) => {
     setImporting(file.path);
     try {
-      const resp = await fetch(`${API_BASE}/scanner/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: file.path }),
-      });
-      const data = await resp.json();
+      const data = await post<ImportResponse>('/scanner/import', { path: file.path });
       if (data.imported || data.sessionId) {
         closeScanner();
         await fetchSessions();
