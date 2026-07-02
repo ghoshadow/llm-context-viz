@@ -1,14 +1,13 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useUIStore } from '../../store/uiStore';
 import { useSessionStore } from '../../store/sessionStore';
-import { post, put, get } from '../../api/client';
+import { put, get } from '../../api/client';
 import { SEMANTIC } from '../../styles/theme';
 import { fmt } from '../../utils/format';
 import { getCalibrationFailureNotice } from './calibrationFailureNotice';
 import {
   getCalibrationDetailDisplay,
   getCalibrationDetailLayout,
-  getCalibrationDetailTranslationBlockReason,
   getCalibrationDetailTranslationSlot,
 } from './calibrationDetailModal';
 import {
@@ -21,7 +20,6 @@ import {
   sumCalibrationCategoryChars,
 } from './calibrationCategories';
 import {
-  buildAutoCalibrationStartBody,
   captureTargetPlaceholderText,
   defaultCalibrationPromptInput,
   defaultCalibrationTargetInput,
@@ -35,19 +33,22 @@ import {
   estimateCalibrationTokens,
   type CalibrationDetailModalState,
 } from './calibrationPagePanels';
+import { useCurrentCalibrationConstants } from './useCurrentCalibrationConstants';
+import { useAutoCalibrationJob } from './useAutoCalibrationJob';
+import { useCalibrationDetailTranslation } from './useCalibrationDetailTranslation';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface SystemBlocks {
+export interface SystemBlocks {
   total: number;
   billing: number;
   agentIdentity: number;
   harness: number;
 }
 
-interface UserMessageParts {
+export interface UserMessageParts {
   total: number;
   chrome: number;
   globalClaudeMd: number;
@@ -58,7 +59,7 @@ interface UserMessageParts {
   sessionGuidance: number;
 }
 
-interface ExtractedResult {
+export interface ExtractedResult {
   schemaVersion?: 1;
   source?: AgentSource;
   constantsSource?: 'project' | 'defaults';
@@ -89,33 +90,9 @@ interface ExtractedResult {
 }
 
 type ConstantKey = string;
-type ConstantDetails = Partial<CalibrationDetails>;
+export type ConstantDetails = Partial<CalibrationDetails>;
 type CurrentConstants = ExtractedResult;
 type CalibrationUiSource = Extract<AgentSource, 'claude' | 'codex'>;
-
-type AutoCalibrationStatus =
-  | 'starting'
-  | 'running'
-  | 'captured'
-  | 'extracting'
-  | 'ready'
-  | 'failed'
-  | 'cancelled';
-
-interface AutoCalibrationJob {
-  jobId: string;
-  status: AutoCalibrationStatus;
-  cwd: string;
-  targetHost: string;
-  port: number;
-  startedAt: string;
-  completedAt?: string;
-  logFile?: string;
-  message: string;
-  output: string[];
-  result: ExtractedResult | null;
-  error: string | null;
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -139,17 +116,37 @@ export default function CalibratePage() {
   const [result, setResult] = useState<ExtractedResult | null>(null);
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
-  const [currentConstants, setCurrentConstants] = useState<CurrentConstants | null>(null);
   const [calibrationSource, setCalibrationSource] = useState<CalibrationUiSource>('claude');
   const [autoPrompt, setAutoPrompt] = useState(defaultCalibrationPromptInput('claude'));
   const [autoTargetHost, setAutoTargetHost] = useState(defaultCalibrationTargetInput('claude'));
-  const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
-  const [autoRunning, setAutoRunning] = useState(false);
   const [detailModal, setDetailModal] = useState<CalibrationDetailModalState | null>(null);
-  const [detailTranslations, setDetailTranslations] = useState<ConstantDetails>({});
-  const [detailTranslating, setDetailTranslating] = useState(false);
-  const [detailTranslateError, setDetailTranslateError] = useState<string | null>(null);
-  const [detailCopied, setDetailCopied] = useState(false);
+  const handleCalibrationError = useCallback((message: string) => setError(message), []);
+  const handleAutoResult = useCallback((nextResult: ExtractedResult) => setResult(nextResult), []);
+  const handleAutoBeforeStart = useCallback(() => {
+    setError(null);
+    setApplied(false);
+    setResult(null);
+  }, []);
+  const { currentConstants, setCurrentConstants } = useCurrentCalibrationConstants<CurrentConstants>({
+    sessionCwd,
+    calibrationSource,
+    onError: handleCalibrationError,
+  });
+  const {
+    autoJob,
+    autoRunning,
+    setAutoJob,
+    handleAutoStart,
+    handleAutoCancel,
+  } = useAutoCalibrationJob({
+    sessionCwd,
+    calibrationSource,
+    autoPrompt,
+    autoTargetHost,
+    onResult: handleAutoResult,
+    onError: handleCalibrationError,
+    onBeforeStart: handleAutoBeforeStart,
+  });
   const permissionNotice = getCalibrationFailureNotice(autoJob);
   const sessionCalibrationSource = useMemo(() => calibrationSourceFromSession(currentSession), [currentSession]);
   const resultSummary = useMemo(() => getNormalizedCalibrationSummary(result), [result]);
@@ -172,74 +169,7 @@ export default function CalibratePage() {
     setApplied(false);
     setAutoJob(null);
     setError(null);
-  }, [sessionCalibrationSource, currentSessionId]);
-
-  // Load current constants on mount
-  useEffect(() => {
-    if (!sessionCwd) {
-      setCurrentConstants(null);
-      return;
-    }
-    get<CurrentConstants>(`/calibrate/current?cwd=${encodeURIComponent(sessionCwd)}&source=${calibrationSource}`)
-      .then(setCurrentConstants)
-      .catch((err) => setError((err as Error).message));
-  }, [calibrationSource, sessionCwd]);
-
-  const handleAutoStart = useCallback(async () => {
-    if (!sessionCwd) {
-      setError('请先打开一个会话，以便自动检测项目目录。');
-      return;
-    }
-    setError(null);
-    setApplied(false);
-    setAutoRunning(true);
-    setResult(null);
-    try {
-      const job = await post<AutoCalibrationJob>('/calibrate/auto/start', buildAutoCalibrationStartBody({
-        source: calibrationSource,
-        cwd: sessionCwd,
-        prompt: autoPrompt,
-        targetHost: autoTargetHost,
-        timeoutMs: 45000,
-      }));
-      setAutoJob(job);
-    } catch (err) {
-      setError((err as Error).message);
-      setAutoRunning(false);
-    }
-  }, [autoPrompt, autoTargetHost, calibrationSource, sessionCwd]);
-
-  useEffect(() => {
-    if (!autoJob?.jobId) return;
-    if (autoJob.status === 'ready' || autoJob.status === 'failed' || autoJob.status === 'cancelled') {
-      setAutoRunning(false);
-      if (autoJob.status === 'ready' && autoJob.result) {
-        setResult(autoJob.result);
-      }
-      return;
-    }
-    const timer = window.setTimeout(async () => {
-      try {
-        const next = await get<AutoCalibrationJob>(`/calibrate/auto/${autoJob.jobId}`);
-        setAutoJob(next);
-      } catch (err) {
-        setError((err as Error).message);
-        setAutoRunning(false);
-      }
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [autoJob]);
-
-  const handleAutoCancel = useCallback(async () => {
-    if (!autoJob?.jobId) return;
-    try {
-      const next = await post<AutoCalibrationJob>(`/calibrate/auto/${autoJob.jobId}/cancel`);
-      setAutoJob(next);
-      setAutoRunning(false);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [autoJob?.jobId]);
+  }, [currentSessionId, sessionCalibrationSource, setAutoJob]);
 
   // Apply constants
   const handleApply = useCallback(async () => {
@@ -272,90 +202,44 @@ export default function CalibratePage() {
     } finally {
       setApplying(false);
     }
-  }, [autoJob?.logFile, calibrationSource, result, resultSummary, sessionCwd]);
+  }, [autoJob?.logFile, calibrationSource, result, resultSummary, sessionCwd, setCurrentConstants]);
 
   // Token estimate
   const estTok = estimateCalibrationTokens;
 
-  const openDetail = useCallback((key: ConstantKey, text: string | undefined, title: string) => {
-    if (!text) return;
-    setDetailModal({ key, title, text });
-    setDetailCopied(false);
-    setDetailTranslateError(null);
-  }, []);
-
-  const detailTranslatedText = detailModal ? detailTranslations[detailModal.key] : undefined;
-  const detailLayout = getCalibrationDetailLayout(detailTranslatedText);
-  const detailDisplay = detailModal ? getCalibrationDetailDisplay(detailModal.key, detailModal.text) : undefined;
-  const detailTranslatedDisplay = detailModal && detailTranslatedText
-    ? getCalibrationDetailDisplay(detailModal.key, detailTranslatedText)
-    : undefined;
+  const detailDisplay = useMemo(
+    () => detailModal ? getCalibrationDetailDisplay(detailModal.key, detailModal.text) : undefined,
+    [detailModal],
+  );
   const detailTranslationSlot = useMemo(
     () => detailModal && detailDisplay
       ? getCalibrationDetailTranslationSlot(detailModal.key, detailDisplay.text)
       : undefined,
     [detailDisplay, detailModal],
   );
+  const {
+    detailTranslatedText,
+    detailTranslatedDisplay,
+    detailTranslating,
+    detailTranslateError,
+    detailCopied,
+    resetDetailFeedback,
+    handleDetailCopy,
+    handleDetailTranslate,
+  } = useCalibrationDetailTranslation({
+    detailModal,
+    detailDisplay,
+    currentSessionId,
+    currentTurnIndex,
+    detailTranslationSlot,
+  });
+  const detailLayout = getCalibrationDetailLayout(detailTranslatedText);
 
-  useEffect(() => {
-    if (!detailModal || !detailTranslationSlot || !currentSessionId || currentTurnIndex == null) return;
-    if (detailTranslations[detailModal.key]) return;
-    let cancelled = false;
-    get<{ translations: Record<string, Record<string, string>> }>(
-      `/sessions/${currentSessionId}/translations/${currentTurnIndex}?constantSections=${detailTranslationSlot.sectionIndex}`,
-    )
-      .then((res) => {
-        const translated = res.translations?.[String(detailTranslationSlot.stepIndex)]?.[String(detailTranslationSlot.sectionIndex)];
-        if (!cancelled && translated) {
-          setDetailTranslations((prev) => ({ ...prev, [detailModal.key]: translated }));
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [currentSessionId, currentTurnIndex, detailModal, detailTranslationSlot, detailTranslations]);
-
-  const handleDetailCopy = useCallback(async () => {
-    if (!detailModal || !detailDisplay) return;
-    const text = detailTranslatedText
-      ? `原文\n\n${detailDisplay.text}\n\n译文\n\n${detailTranslatedDisplay?.text ?? detailTranslatedText}`
-      : detailDisplay.text;
-    try {
-      await navigator.clipboard.writeText(text);
-      setDetailCopied(true);
-      window.setTimeout(() => setDetailCopied(false), 2000);
-    } catch {
-      setDetailTranslateError('复制失败：浏览器剪贴板不可用。');
-    }
-  }, [detailDisplay, detailModal, detailTranslatedDisplay, detailTranslatedText]);
-
-  const handleDetailTranslate = useCallback(async () => {
-    if (!detailModal || !detailDisplay || !detailTranslationSlot || detailTranslating) return;
-    if (detailTranslations[detailModal.key]) return;
-    const blockReason = getCalibrationDetailTranslationBlockReason(detailModal.key, detailDisplay);
-    if (blockReason) {
-      setDetailTranslateError(blockReason);
-      return;
-    }
-    if (!currentSessionId || currentTurnIndex == null) {
-      setDetailTranslateError('请先打开一个会话和轮次，再使用翻译。');
-      return;
-    }
-    setDetailTranslateError(null);
-    setDetailTranslating(true);
-    try {
-      const res = await post<{ translated: string }>(`/sessions/${currentSessionId}/translate`, {
-        text: detailDisplay.text,
-        turnIndex: currentTurnIndex,
-        stepIndex: detailTranslationSlot.stepIndex,
-        sectionIndex: detailTranslationSlot.sectionIndex,
-      });
-      setDetailTranslations((prev) => ({ ...prev, [detailModal.key]: res.translated }));
-    } catch (err) {
-      setDetailTranslateError((err as Error).message);
-    } finally {
-      setDetailTranslating(false);
-    }
-  }, [currentSessionId, currentTurnIndex, detailDisplay, detailModal, detailTranslating, detailTranslations, detailTranslationSlot]);
+  const openDetail = useCallback((key: ConstantKey, text: string | undefined, title: string) => {
+    if (!text) return;
+    setDetailModal({ key, title, text });
+    resetDetailFeedback();
+  }, [resetDetailFeedback]);
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 0', fontFamily: SANS, color: 'oklch(0.93 0.006 265)' }}>
