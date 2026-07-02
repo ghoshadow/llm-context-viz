@@ -1,6 +1,5 @@
 import React from 'react';
 import type { DiffTableMarker } from './markdownDiffTable';
-import { MarkdownBlock } from './MarkdownBlock';
 import { parseUnifiedDiffFile, type SideBySideCell } from './unifiedDiff';
 
 const DIFF_FILE_STYLE: React.CSSProperties = {
@@ -130,13 +129,13 @@ function SideCell({ cell, side }: { cell: SideBySideCell; side: 'left' | 'right'
   );
 }
 
-export function DiffFileBlock({ text }: { text: string }) {
+export function DiffFileBlock({ text, renderFallback }: { text: string; renderFallback?: (text: string) => React.ReactNode }) {
   const parsed = parseUnifiedDiffFile(text);
   if (!parsed) {
     return (
       <div style={DIFF_FILE_STYLE}>
         <div className="thin-scrollbar" style={DIFF_FILE_INNER_STYLE}>
-          <MarkdownBlock text={text} variant="markdown" />
+          {renderFallback ? renderFallback(text) : text}
         </div>
       </div>
     );

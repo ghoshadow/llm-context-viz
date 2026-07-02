@@ -48,6 +48,7 @@ export function MarkdownBlock({ text, fontSize = 12.5, preserveNewlines = false,
   let diffFile: string[] | null = null;
   let codeLang = '';
   let codeFence = '';
+  const renderDiffFallback = (fallbackText: string) => <MarkdownBlock text={fallbackText} variant="markdown" />;
 
   const flushParagraph = () => {
     if (paragraph.length === 0) return;
@@ -160,7 +161,7 @@ export function MarkdownBlock({ text, fontSize = 12.5, preserveNewlines = false,
     }
 
     if (trimmed === DIFF_FILE_END && diffFile) {
-      blocks.push(<DiffFileBlock key={`diff-file-${blocks.length}`} text={diffFile.join('\n')} />);
+      blocks.push(<DiffFileBlock key={`diff-file-${blocks.length}`} text={diffFile.join('\n')} renderFallback={renderDiffFallback} />);
       diffFile = null;
       return;
     }
@@ -286,7 +287,7 @@ export function MarkdownBlock({ text, fontSize = 12.5, preserveNewlines = false,
 
   const openDiffFile = diffFile as string[] | null;
   if (openDiffFile) {
-    blocks.push(<DiffFileBlock key={`diff-file-${blocks.length}`} text={openDiffFile.join('\n')} />);
+    blocks.push(<DiffFileBlock key={`diff-file-${blocks.length}`} text={openDiffFile.join('\n')} renderFallback={renderDiffFallback} />);
     diffFile = null;
   }
 
