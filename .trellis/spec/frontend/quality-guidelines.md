@@ -119,10 +119,10 @@ src/components/pages/
 
 ### Pipeline 目录
 
-`src/pipeline/` 包含纯数据处理 — 无 React、无 JSX、无 DOM：
+`shared/pipeline/` 包含纯数据处理 — 无 React、无 JSX、无 DOM。`src/pipeline/` 只保留兼容 re-export：
 
 ```
-src/pipeline/
+shared/pipeline/
   parse-jsonl.ts          # JSONL 解析
   aggregate-session.ts    # 会话摘要计算
   compute-context.ts      # 上下文窗口分析
@@ -130,10 +130,16 @@ src/pipeline/
   codex-jsonl.ts          # Codex 专用 JSONL 解析
 ```
 
+```typescript
+// src/pipeline/index.ts
+export * from '../../shared/pipeline/index';
+```
+
 ## 反模式
 
 - 不要将业务逻辑放在 JSX 渲染函数中 — 提取为纯函数。
-- 不要在 `src/types/` 中存在类型定义时使用 `any`。
+- 不要在 `shared/types/` 中存在类型定义时使用 `any`。
 - 不要直接调用 `fetch()` — 使用 `src/api/client.ts`（`get`、`post`、`put`、`del`）。
+- 不要在 `src/pipeline/` 中新增 pipeline 实现 — 新实现放在 `shared/pipeline/`，`src/pipeline/` 只做 re-export。
 - 不要创建新的测试框架 — 使用 `node:test` + `node:assert/strict`。
 - 不要使用 DOM 渲染测试 React 组件 — 提取并测试纯逻辑。

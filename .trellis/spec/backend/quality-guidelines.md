@@ -69,6 +69,18 @@ async function getSessionRawJsonl(sessionId: string): Promise<string | null> { .
 function saveOntology(sessionId: string, data: unknown, maxTurn: number): void { ... }
 ```
 
+### 跨层共享契约
+
+`server/` 不直接导入 `src/`。前后端共同使用的纯逻辑和类型位于 `shared/`：
+
+```typescript
+import { runPipeline } from '../../shared/pipeline/index';
+import type { TurnData } from '../../shared/types/session';
+import { getSessionSource } from '../../shared/session-source';
+```
+
+`src/pipeline/*` 和 `src/types/*` 是前端兼容 re-export 层，不是 server 依赖目标。
+
 ## 命名规范
 
 | 范围 | 约定 | 示例 |
@@ -112,6 +124,7 @@ res.write(`id: ${eventId}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 ## 反模式
 
 - 不使用 `require()` — 仅使用 ESM 导入。
+- 不从 `server/` 导入 `../../src/*` — 使用 `shared/*`。
 - 不在已知形状的函数参数上使用 `any`。
 - 不静默吞掉错误 — 至少 `console.error`。
 - 不使用基于类的服务层 — 本项目使用模块级函数。
