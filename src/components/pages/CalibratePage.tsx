@@ -120,6 +120,7 @@ export default function CalibratePage() {
   const [autoPrompt, setAutoPrompt] = useState(defaultCalibrationPromptInput('claude'));
   const [autoTargetHost, setAutoTargetHost] = useState(defaultCalibrationTargetInput('claude'));
   const [detailModal, setDetailModal] = useState<CalibrationDetailModalState | null>(null);
+  const [detailTranslations, setDetailTranslations] = useState<ConstantDetails>({});
   const handleCalibrationError = useCallback((message: string) => setError(message), []);
   const handleAutoResult = useCallback((nextResult: ExtractedResult) => setResult(nextResult), []);
   const handleAutoBeforeStart = useCallback(() => {
@@ -211,15 +212,23 @@ export default function CalibratePage() {
     () => detailModal ? getCalibrationDetailDisplay(detailModal.key, detailModal.text) : undefined,
     [detailModal],
   );
+  const detailTranslatedText = detailModal ? detailTranslations[detailModal.key] : undefined;
+  const detailTranslatedDisplay = useMemo(
+    () => detailModal && detailTranslatedText
+      ? getCalibrationDetailDisplay(detailModal.key, detailTranslatedText)
+      : undefined,
+    [detailModal, detailTranslatedText],
+  );
   const detailTranslationSlot = useMemo(
     () => detailModal && detailDisplay
       ? getCalibrationDetailTranslationSlot(detailModal.key, detailDisplay.text)
       : undefined,
     [detailDisplay, detailModal],
   );
+  const handleDetailTranslated = useCallback((key: string, translated: string) => {
+    setDetailTranslations((prev) => ({ ...prev, [key]: translated }));
+  }, []);
   const {
-    detailTranslatedText,
-    detailTranslatedDisplay,
     detailTranslating,
     detailTranslateError,
     detailCopied,
@@ -229,6 +238,9 @@ export default function CalibratePage() {
   } = useCalibrationDetailTranslation({
     detailModal,
     detailDisplay,
+    detailTranslatedText,
+    detailTranslatedDisplay,
+    onDetailTranslated: handleDetailTranslated,
     currentSessionId,
     currentTurnIndex,
     detailTranslationSlot,

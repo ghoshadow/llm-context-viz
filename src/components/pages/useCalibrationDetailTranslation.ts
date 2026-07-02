@@ -1,41 +1,35 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { get, post } from '../../api/client';
 import {
-  getCalibrationDetailDisplay,
   getCalibrationDetailTranslationBlockReason,
   type CalibrationDetailDisplay,
   type CalibrationDetailTranslationSlot,
 } from './calibrationDetailModal';
-import type { CalibrationDetails } from './calibrationCategories';
 import type { CalibrationDetailModalState } from './calibrationPagePanels';
-
-type ConstantDetails = Partial<CalibrationDetails>;
 
 export function useCalibrationDetailTranslation({
   detailModal,
   detailDisplay,
+  detailTranslatedText,
+  detailTranslatedDisplay,
+  onDetailTranslated,
   currentSessionId,
   currentTurnIndex,
   detailTranslationSlot,
 }: {
   detailModal: CalibrationDetailModalState | null;
   detailDisplay: CalibrationDetailDisplay | undefined;
+  detailTranslatedText: string | undefined;
+  detailTranslatedDisplay: CalibrationDetailDisplay | undefined;
+  onDetailTranslated: (key: string, text: string) => void;
   currentSessionId: string | null | undefined;
   currentTurnIndex: number | null | undefined;
   detailTranslationSlot: CalibrationDetailTranslationSlot | undefined;
 }) {
-  const [detailTranslations, setDetailTranslations] = useState<ConstantDetails>({});
   const [detailTranslating, setDetailTranslating] = useState(false);
   const [detailTranslateError, setDetailTranslateError] = useState<string | null>(null);
   const [detailCopied, setDetailCopied] = useState(false);
   const detailKey = detailModal?.key;
-  const detailTranslatedText = detailKey != null ? detailTranslations[detailKey] : undefined;
-  const detailTranslatedDisplay = useMemo(
-    () => detailKey != null && detailTranslatedText
-      ? getCalibrationDetailDisplay(detailKey, detailTranslatedText)
-      : undefined,
-    [detailKey, detailTranslatedText],
-  );
   const stepIndex = detailTranslationSlot?.stepIndex;
   const sectionIndex = detailTranslationSlot?.sectionIndex;
 
@@ -49,12 +43,12 @@ export function useCalibrationDetailTranslation({
       .then((res) => {
         const translated = res.translations?.[String(stepIndex)]?.[String(sectionIndex)];
         if (!cancelled && translated) {
-          setDetailTranslations((prev) => ({ ...prev, [detailKey]: translated }));
+          onDetailTranslated(detailKey, translated);
         }
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [currentSessionId, currentTurnIndex, detailKey, detailTranslatedText, sectionIndex, stepIndex]);
+  }, [currentSessionId, currentTurnIndex, detailKey, detailTranslatedText, onDetailTranslated, sectionIndex, stepIndex]);
 
   const resetDetailFeedback = useCallback(() => {
     setDetailCopied(false);
@@ -96,7 +90,7 @@ export function useCalibrationDetailTranslation({
         stepIndex,
         sectionIndex,
       });
-      setDetailTranslations((prev) => ({ ...prev, [detailKey]: res.translated }));
+      onDetailTranslated(detailKey, res.translated);
     } catch (err) {
       setDetailTranslateError((err as Error).message);
     } finally {
@@ -109,13 +103,13 @@ export function useCalibrationDetailTranslation({
     detailKey,
     detailTranslating,
     detailTranslatedText,
+    onDetailTranslated,
     sectionIndex,
     stepIndex,
   ]);
 
   return {
     detailTranslatedText,
-    detailTranslatedDisplay,
     detailTranslating,
     detailTranslateError,
     detailCopied,
