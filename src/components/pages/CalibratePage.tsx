@@ -4,9 +4,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { post, put, get } from '../../api/client';
 import { SEMANTIC } from '../../styles/theme';
 import { fmt } from '../../utils/format';
-import { CHARS_PER_TOKEN } from '../../pipeline/utils';
 import { getCalibrationFailureNotice } from './calibrationFailureNotice';
-import { MarkdownBlock } from '../shared/MarkdownBlock';
 import {
   getCalibrationDetailDisplay,
   getCalibrationDetailLayout,
@@ -15,7 +13,6 @@ import {
 } from './calibrationDetailModal';
 import {
   type AgentSource,
-  type CalibrationCategoryRow,
   type CalibrationCategoryMap,
   type CalibrationDetails,
   type NormalizedCalibrationSummaryLike,
@@ -30,6 +27,14 @@ import {
   defaultCalibrationTargetInput,
 } from './calibrationAutoStart';
 import { calibrationSourceFromSession, calibrationSourceLabel } from './calibrationSource';
+import {
+  CalibrationCategoryRows,
+  CalibrationDetailDialog,
+  CalibrationErrorNotice,
+  CalibrationStatCard,
+  estimateCalibrationTokens,
+  type CalibrationDetailModalState,
+} from './calibrationPagePanels';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -120,76 +125,6 @@ const S = SEMANTIC;
 const MONO = "'IBM Plex Mono', monospace";
 const SANS = "'IBM Plex Sans', system-ui, sans-serif";
 
-function StatCard({ label, value, unit, accent }: { label: string; value: string; unit?: string; accent?: string }) {
-  return (
-    <div style={{
-      border: `1px solid ${S.borderColor}`, borderRadius: 11, padding: '14px 16px',
-      background: 'oklch(0.20 0.01 265 / 0.5)',
-      display: 'flex', flexDirection: 'column', gap: 4, minWidth: 120,
-    }}>
-      <div style={{ fontSize: 11, color: S.textMuted, fontFamily: SANS }}>{label}</div>
-      <div style={{ fontFamily: MONO, fontSize: 16, fontWeight: 600, color: accent ?? S.textPrimary3 }}>
-        {value}
-      </div>
-      {unit && <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>{unit}</div>}
-    </div>
-  );
-}
-
-function ErrorNotice({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      marginTop: 2, padding: '10px 14px', borderRadius: 8,
-      background: 'oklch(0.50 0.14 25 / 0.15)',
-      border: '1px solid oklch(0.50 0.14 25 / 0.3)',
-      color: 'oklch(0.72 0.14 25)', fontSize: 13,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-function DetailButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void }) {
-  return (
-    <button
-      disabled={disabled}
-      onClick={onClick}
-      style={{
-        border: `1px solid ${disabled ? S.borderSubtle2 : S.borderColor}`,
-        borderRadius: 7,
-        padding: '4px 8px',
-        background: disabled ? 'oklch(0.19 0.008 265)' : 'oklch(0.22 0.012 265)',
-        color: disabled ? S.textMuted2 : S.textSecondary,
-        fontSize: 11,
-        fontFamily: SANS,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-      }}
-    >
-      查看
-    </button>
-  );
-}
-
-function DetailContent({ text, markdown }: { text: string; markdown: boolean }) {
-  if (markdown) {
-    return <MarkdownBlock text={text} variant="markdown" preserveNewlines />;
-  }
-
-  return (
-    <pre style={{
-      margin: 0,
-      whiteSpace: 'pre-wrap',
-      wordBreak: 'break-word',
-      fontFamily: MONO,
-      fontSize: 12,
-      lineHeight: 1.65,
-      color: S.textPrimary3,
-    }}>
-      {text}
-    </pre>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -210,7 +145,7 @@ export default function CalibratePage() {
   const [autoTargetHost, setAutoTargetHost] = useState(defaultCalibrationTargetInput('claude'));
   const [autoJob, setAutoJob] = useState<AutoCalibrationJob | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
-  const [detailModal, setDetailModal] = useState<{ key: ConstantKey; title: string; text: string } | null>(null);
+  const [detailModal, setDetailModal] = useState<CalibrationDetailModalState | null>(null);
   const [detailTranslations, setDetailTranslations] = useState<ConstantDetails>({});
   const [detailTranslating, setDetailTranslating] = useState(false);
   const [detailTranslateError, setDetailTranslateError] = useState<string | null>(null);
@@ -340,7 +275,7 @@ export default function CalibratePage() {
   }, [autoJob?.logFile, calibrationSource, result, resultSummary, sessionCwd]);
 
   // Token estimate
-  const estTok = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
+  const estTok = estimateCalibrationTokens;
 
   const openDetail = useCallback((key: ConstantKey, text: string | undefined, title: string) => {
     if (!text) return;
@@ -422,121 +357,22 @@ export default function CalibratePage() {
     }
   }, [currentSessionId, currentTurnIndex, detailDisplay, detailModal, detailTranslating, detailTranslations, detailTranslationSlot]);
 
-  const renderCategoryRows = (rows: CalibrationCategoryRow[], valueSize: number, withTokens = false) => (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
-      {rows.map((row) => (
-        <div key={row.key}>
-          <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted }}>{row.label}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontFamily: MONO, fontSize: valueSize, fontWeight: 600 }}>{row.chars.toLocaleString()}</div>
-            <DetailButton disabled={!row.detail} onClick={() => openDetail(row.detailKey, row.detail, row.label)} />
-          </div>
-          <div style={{ fontFamily: MONO, fontSize: 10, color: S.textMuted2 }}>
-            {withTokens ? `${row.detailKey} · ≈ ${estTok(row.chars)} tok` : row.detailKey}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 0', fontFamily: SANS, color: 'oklch(0.93 0.006 265)' }}>
       {detailModal && (
-        <div
-          style={{
-            position: 'fixed', inset: 0, zIndex: 1200,
-            background: 'oklch(0.10 0.006 265 / 0.74)', backdropFilter: 'blur(4px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-          }}
-          onClick={() => setDetailModal(null)}
-        >
-          <div
-            style={{
-              width: 'min(980px, 96vw)', maxHeight: '88vh', overflow: 'hidden',
-              background: 'oklch(0.155 0.008 265)',
-              border: `1px solid ${S.borderColor}`, borderRadius: 14,
-              boxShadow: '0 34px 90px oklch(0 0 0 / 0.58)',
-              display: 'flex', flexDirection: 'column',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 18px', borderBottom: `1px solid ${S.borderColor}`, background: 'oklch(0.185 0.009 265)' }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 650, color: S.textPrimary3 }}>{detailModal.title}</div>
-                <div style={{ fontSize: 11, color: S.textMuted, fontFamily: MONO }}>{detailModal.key}</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                <button
-                  onClick={handleDetailCopy}
-                  style={{
-                    border: `1px solid ${detailCopied ? 'oklch(0.45 0.08 150 / 0.42)' : S.borderColor}`,
-                    borderRadius: 7,
-                    padding: '5px 10px',
-                    background: detailCopied ? 'oklch(0.55 0.08 150 / 0.12)' : 'oklch(0.22 0.01 265)',
-                    color: detailCopied ? S.textGreen : S.textSecondary,
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    fontFamily: SANS,
-                  }}
-                >
-                  {detailCopied ? '已复制' : '复制'}
-                </button>
-                <button
-                  onClick={handleDetailTranslate}
-                  disabled={detailTranslating || Boolean(detailTranslatedText)}
-                  style={{
-                    border: `1px solid ${detailTranslatedText ? 'oklch(0.45 0.08 150 / 0.35)' : 'oklch(0.45 0.10 60 / 0.18)'}`,
-                    borderRadius: 7,
-                    padding: '5px 10px',
-                    background: detailTranslatedText ? 'oklch(0.55 0.08 150 / 0.10)' : 'oklch(0.45 0.10 60 / 0.08)',
-                    color: detailTranslatedText ? S.textGreen : S.textAccent2,
-                    cursor: detailTranslating ? 'wait' : detailTranslatedText ? 'default' : 'pointer',
-                    opacity: detailTranslating ? 0.65 : 1,
-                    fontSize: 12,
-                    fontFamily: SANS,
-                  }}
-                >
-                  {detailTranslating ? '翻译中...' : detailTranslatedText ? '已翻译' : '翻译'}
-                </button>
-                <button
-                  onClick={() => setDetailModal(null)}
-                  style={{ border: `1px solid ${S.borderColor}`, borderRadius: 8, width: 30, height: 30, background: 'oklch(0.22 0.01 265)', color: S.textSecondary, cursor: 'pointer', fontSize: 14 }}
-                >
-                  x
-                </button>
-              </div>
-            </div>
-            {detailTranslateError && (
-              <div style={{ padding: '10px 18px 0', fontSize: 12, color: 'oklch(0.72 0.14 25)' }}>
-                {detailTranslateError}
-              </div>
-            )}
-            <div style={{ padding: '16px 18px', overflow: 'auto' }}>
-              {detailLayout === 'side-by-side' ? (
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-                  gap: 14,
-                  minWidth: 760,
-                  alignItems: 'start',
-                }}>
-                  <div>
-                    <div style={{ marginBottom: 8, fontSize: 11, color: S.textMuted, fontFamily: MONO }}>原文</div>
-                    {detailDisplay && <DetailContent text={detailDisplay.text} markdown={detailDisplay.markdown} />}
-                  </div>
-                  <div>
-                    <div style={{ marginBottom: 8, fontSize: 11, color: S.textMuted, fontFamily: MONO }}>译文</div>
-                    {detailTranslatedDisplay && (
-                      <DetailContent text={detailTranslatedDisplay.text} markdown={detailTranslatedDisplay.markdown} />
-                    )}
-                  </div>
-                </div>
-              ) : (
-                detailDisplay && <DetailContent text={detailDisplay.text} markdown={detailDisplay.markdown} />
-              )}
-            </div>
-          </div>
-        </div>
+        <CalibrationDetailDialog
+          modal={detailModal}
+          layout={detailLayout}
+          display={detailDisplay}
+          translatedDisplay={detailTranslatedDisplay}
+          translatedText={detailTranslatedText}
+          translating={detailTranslating}
+          copied={detailCopied}
+          error={detailTranslateError}
+          onClose={() => setDetailModal(null)}
+          onCopy={handleDetailCopy}
+          onTranslate={handleDetailTranslate}
+        />
       )}
       {/* Header */}
       <header className="header-bar">
@@ -656,7 +492,7 @@ export default function CalibratePage() {
             </div>
           )}
           {permissionNotice ? (
-            <ErrorNotice>
+            <CalibrationErrorNotice>
               <div style={{ fontWeight: 600, color: 'oklch(0.78 0.14 25)', marginBottom: 4 }}>
                 {permissionNotice.title}
               </div>
@@ -669,16 +505,16 @@ export default function CalibratePage() {
                   wordBreak: 'break-all',
                 }}>{permissionNotice.command}</pre>
               )}
-            </ErrorNotice>
+            </CalibrationErrorNotice>
           ) : autoJob?.error && (
             <div style={{ fontSize: 12, color: 'oklch(0.72 0.14 25)' }}>
               {autoJob.error}
             </div>
           )}
           {error && (
-            <ErrorNotice>
+            <CalibrationErrorNotice>
               {error}
-            </ErrorNotice>
+            </CalibrationErrorNotice>
           )}
         </div>
       </section>
@@ -690,15 +526,15 @@ export default function CalibratePage() {
 
           {/* Meta */}
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
-            <StatCard label="来源" value={result.source === 'codex' ? 'Codex' : 'Claude Code'} />
-            <StatCard label="CLI 版本" value={result.cliVersion || result.ccVersion || '-'} />
-            <StatCard label="模型" value={result.model || '-'} />
-            <StatCard
+            <CalibrationStatCard label="来源" value={result.source === 'codex' ? 'Codex' : 'Claude Code'} />
+            <CalibrationStatCard label="CLI 版本" value={result.cliVersion || result.ccVersion || '-'} />
+            <CalibrationStatCard label="模型" value={result.model || '-'} />
+            <CalibrationStatCard
               label="首次请求 Token"
               value={fmt(resultSummary.usage?.firstRequestInputTokens ?? result.firstRequestTokens ?? 0)}
               accent="oklch(0.74 0.13 60)"
             />
-            <StatCard
+            <CalibrationStatCard
               label="总字符数"
               value={(resultTotalChars / 1000).toFixed(1) + 'K'}
               unit={`≈ ${estTok(resultTotalChars)} tok`}
@@ -713,10 +549,10 @@ export default function CalibratePage() {
             }}>
               <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>System Blocks</h3>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                <StatCard label="Billing Header" value={result.systemBlocks.billing + ''} unit="chars" />
-                <StatCard label="Agent Identity" value={result.systemBlocks.agentIdentity + ''} unit="chars" />
-                <StatCard label="Harness Prompt" value={(result.systemBlocks.harness / 1000).toFixed(1) + 'K'} unit={`${result.systemBlocks.harness} chars`} />
-                <StatCard label="总计" value={(resultTotalChars / 1000).toFixed(1) + 'K'} unit="chars" accent="oklch(0.67 0.15 25)" />
+                <CalibrationStatCard label="Billing Header" value={result.systemBlocks.billing + ''} unit="chars" />
+                <CalibrationStatCard label="Agent Identity" value={result.systemBlocks.agentIdentity + ''} unit="chars" />
+                <CalibrationStatCard label="Harness Prompt" value={(result.systemBlocks.harness / 1000).toFixed(1) + 'K'} unit={`${result.systemBlocks.harness} chars`} />
+                <CalibrationStatCard label="总计" value={(resultTotalChars / 1000).toFixed(1) + 'K'} unit="chars" accent="oklch(0.67 0.15 25)" />
               </div>
             </div>
           )}
@@ -729,19 +565,19 @@ export default function CalibratePage() {
             }}>
               <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>&lt;system-reminder&gt; 包裹体</h3>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                <StatCard label="总字符数" value={result.userMessage.total + ''} unit="chars" />
-                <StatCard label="Chrome/包装" value={result.userMessage.chrome + ''} unit="chars" />
-                <StatCard label="Global CLAUDE.md" value={(result.userMessage.globalClaudeMd / 1000).toFixed(1) + 'K'} unit="chars" />
+                <CalibrationStatCard label="总字符数" value={result.userMessage.total + ''} unit="chars" />
+                <CalibrationStatCard label="Chrome/包装" value={result.userMessage.chrome + ''} unit="chars" />
+                <CalibrationStatCard label="Global CLAUDE.md" value={(result.userMessage.globalClaudeMd / 1000).toFixed(1) + 'K'} unit="chars" />
                 {result.userMessage.projectClaudeMd > 0 && (
-                  <StatCard label="Project CLAUDE.md" value={(result.userMessage.projectClaudeMd / 1000).toFixed(1) + 'K'} unit="chars" />
+                  <CalibrationStatCard label="Project CLAUDE.md" value={(result.userMessage.projectClaudeMd / 1000).toFixed(1) + 'K'} unit="chars" />
                 )}
                 {result.userMessage.mcpInstructions > 0 && (
-                  <StatCard label="MCP 指令" value={result.userMessage.mcpInstructions + ''} unit="chars" />
+                  <CalibrationStatCard label="MCP 指令" value={result.userMessage.mcpInstructions + ''} unit="chars" />
                 )}
                 {result.userMessage.skillsListing > 0 && (
-                  <StatCard label="技能列表" value={(result.userMessage.skillsListing / 1000).toFixed(1) + 'K'} unit="chars" />
+                  <CalibrationStatCard label="技能列表" value={(result.userMessage.skillsListing / 1000).toFixed(1) + 'K'} unit="chars" />
                 )}
-                <StatCard label="日期/注记" value={result.userMessage.currentDate + ''} unit="chars" />
+                <CalibrationStatCard label="日期/注记" value={result.userMessage.currentDate + ''} unit="chars" />
               </div>
             </div>
           )}
@@ -752,7 +588,7 @@ export default function CalibratePage() {
             background: 'oklch(0.74 0.13 60 / 0.08)', marginBottom: 16,
           }}>
             <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: 'oklch(0.74 0.13 60)' }}>将应用的常量</h3>
-            {renderCategoryRows(resultRows, 18, true)}
+            <CalibrationCategoryRows rows={resultRows} valueSize={18} withTokens onOpenDetail={openDetail} />
           </div>
 
           {/* Apply button */}
@@ -793,12 +629,12 @@ export default function CalibratePage() {
           ) : currentConstants ? (
             <>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
-                <StatCard label="来源" value={currentConstants.constantsSource === 'project' ? '项目校准' : '内置默认'} />
+                <CalibrationStatCard label="来源" value={currentConstants.constantsSource === 'project' ? '项目校准' : '内置默认'} />
                 {currentConstants.appliedAt && (
-                  <StatCard label="校准时间" value={new Date(currentConstants.appliedAt).toLocaleString()} />
+                  <CalibrationStatCard label="校准时间" value={new Date(currentConstants.appliedAt).toLocaleString()} />
                 )}
-                <StatCard label="CLI 版本" value={currentConstants.cliVersion || currentConstants.ccVersion || '-'} />
-                <StatCard label="模型" value={currentConstants.model || '-'} />
+                <CalibrationStatCard label="CLI 版本" value={currentConstants.cliVersion || currentConstants.ccVersion || '-'} />
+                <CalibrationStatCard label="模型" value={currentConstants.model || '-'} />
               </div>
               <div style={{ fontSize: 11, color: S.textMuted, fontFamily: MONO, wordBreak: 'break-all', marginBottom: 14 }}>
                 {currentConstants.path ? `path: ${currentConstants.path}` : `cwd: ${sessionCwd}`}
@@ -808,7 +644,7 @@ export default function CalibratePage() {
                   {currentConstants.note}
                 </div>
               )}
-              {renderCategoryRows(currentRows, 15)}
+              <CalibrationCategoryRows rows={currentRows} valueSize={15} onOpenDetail={openDetail} />
             </>
           ) : (
             <div style={{ fontSize: 13, color: S.textDesc3 }}>

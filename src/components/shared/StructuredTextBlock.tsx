@@ -1,5 +1,5 @@
 import { SEMANTIC } from '../../styles/theme';
-import { getCommandParts } from './commandMessage';
+import { getCommandDisplayName, getCommandParts } from './commandMessage';
 import { MarkdownBlock } from './MarkdownBlock';
 import { parseStructuredTextSegments } from './structuredText';
 
@@ -75,7 +75,7 @@ function CommandCard({ message, name, args }: { message: string; name: string; a
             wordBreak: 'break-word',
           }}
         >
-          /{parts.plugin}:{parts.command}
+          {getCommandDisplayName(name || message)}
         </div>
         {args && (
           <div

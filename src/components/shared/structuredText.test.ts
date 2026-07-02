@@ -61,6 +61,34 @@ test('builds command preview through structured preview API', () => {
   );
 });
 
+test('parses slash command messages without args as structured command segments', () => {
+  const raw = '<command-message>trellis-update-spec</command-message>\n<command-name>/trellis-update-spec</command-name>';
+
+  assert.deepEqual(parseStructuredTextSegments(raw), [
+    {
+      type: 'command',
+      message: 'trellis-update-spec',
+      name: '/trellis-update-spec',
+      args: '',
+      raw,
+    },
+  ]);
+});
+
+test('parses out-of-order command tags as structured command segments', () => {
+  const raw = '<command-name>/model</command-name>\n\n<command-message>model</command-message>\n<command-args></command-args>';
+
+  assert.deepEqual(parseStructuredTextSegments(raw), [
+    {
+      type: 'command',
+      message: 'model',
+      name: '/model',
+      args: '',
+      raw,
+    },
+  ]);
+});
+
 test('parses Codex plugin references as structured segments', () => {
   assert.deepEqual(
     parseStructuredTextSegments('前文 [@superpowers](plugin://superpowers@openai-api-curated) 后文'),

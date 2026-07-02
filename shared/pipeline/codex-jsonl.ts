@@ -294,7 +294,7 @@ function assembleTurns(
       segs: segments,
       comp,
       cumTotal,
-      cumCacheHit: tokenMetrics.lastCacheHit,
+      cumCacheHit: tokenMetrics.maxCacheHit,
       cumTools: cloneTools(cumTools),
       compressionReset,
     });
@@ -312,10 +312,36 @@ function buildSegments(
   const segments: TimelineSegment[] = [];
   const tools: Record<string, number> = {};
   const seenAssistantTexts = new Set<string>();
+  let compactedEventPending = false;
 
   for (const event of turn.events) {
     const payload = event.payload;
-    if (event.type === 'response_item' && payload.type === 'reasoning') {
+    if (event.type === 'compacted') {
+      compactedEventPending = true;
+      segments.push({
+        k: 'i',
+        n: '上下文压缩',
+        ms: 0,
+        ts: event.timestamp,
+        det: {
+          text: 'Codex 在本轮执行中触发上下文压缩，后续步骤基于压缩后的新窗口继续。',
+        },
+      });
+    } else if (event.type === 'event_msg' && payload.type === 'context_compacted') {
+      if (compactedEventPending) {
+        compactedEventPending = false;
+        continue;
+      }
+      segments.push({
+        k: 'i',
+        n: '上下文压缩',
+        ms: 0,
+        ts: event.timestamp,
+        det: {
+          text: 'Codex 在本轮执行中触发上下文压缩，后续步骤基于压缩后的新窗口继续。',
+        },
+      });
+    } else if (event.type === 'response_item' && payload.type === 'reasoning') {
       const reasoningTok = nearestReasoningTokens(turn, event.order);
       const summaryText = textFromCodexReasoningSummary(payload.summary);
       segments.push({

@@ -36,6 +36,34 @@ test('preserves surrounding text around plugin command messages', () => {
   ]);
 });
 
+test('parses slash command messages without command args', () => {
+  const raw = '<command-message>trellis-update-spec</command-message>\n<command-name>/trellis-update-spec</command-name>';
+
+  assert.deepEqual(parseCommandMessageSegments(raw), [
+    {
+      type: 'command',
+      message: 'trellis-update-spec',
+      name: '/trellis-update-spec',
+      args: '',
+      raw,
+    },
+  ]);
+});
+
+test('parses command tags regardless of order', () => {
+  const raw = '<command-name>/model</command-name>\n\n<command-message>model</command-message>\n<command-args></command-args>';
+
+  assert.deepEqual(parseCommandMessageSegments(raw), [
+    {
+      type: 'command',
+      message: 'model',
+      name: '/model',
+      args: '',
+      raw,
+    },
+  ]);
+});
+
 test('returns plain text when command tags are incomplete', () => {
   assert.deepEqual(parseCommandMessageSegments('<command-name>/x:y</command-name>'), [
     { type: 'text', text: '<command-name>/x:y</command-name>' },
@@ -70,6 +98,22 @@ test('builds a compact preview from truncated session title command messages', (
       plugin: 'ponytail',
       command: 'ponytail-audit',
       displayName: '/ponytail:ponytail-audit',
+    },
+  );
+});
+
+test('builds a compact preview for slash commands without plugin namespace', () => {
+  assert.deepEqual(
+    getCommandMessagePreview(
+      '<command-message>trellis-update-spec</command-message><command-name>/trellis-update-spec</command-name>',
+    ),
+    {
+      message: 'trellis-update-spec',
+      name: '/trellis-update-spec',
+      args: '',
+      plugin: '',
+      command: 'trellis-update-spec',
+      displayName: '/trellis-update-spec',
     },
   );
 });

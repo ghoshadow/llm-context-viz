@@ -261,6 +261,10 @@ function processGroup(
   if (userText) {
     addTo(cum.userMsgs!, userText, est);
   }
+  for (const continuation of group.userContinuationLines ?? []) {
+    const text = extractContentText(continuation.message.content);
+    if (text) addTo(cum.userMsgs!, text, est);
+  }
 
   // ---- 2. Assistant messages: thinking, text, tool calls ----
   const toolIdToName = new Map<string, string>();

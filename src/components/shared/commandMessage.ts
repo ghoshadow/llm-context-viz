@@ -27,7 +27,7 @@ export function getCommandParts(name: string): { plugin: string; command: string
   const separatorIndex = normalized.indexOf(':');
   if (separatorIndex === -1) {
     return {
-      plugin: normalized || 'plugin',
+      plugin: '',
       command: normalized || 'command',
     };
   }
@@ -40,6 +40,11 @@ export function getCommandParts(name: string): { plugin: string; command: string
   };
 }
 
+export function getCommandDisplayName(name: string): string {
+  const parts = getCommandParts(name);
+  return parts.plugin ? `/${parts.plugin}:${parts.command}` : `/${parts.command}`;
+}
+
 function decodeEntity(text: string): string {
   return text
     .replace(/&lt;/g, '<')
@@ -50,23 +55,20 @@ function decodeEntity(text: string): string {
 }
 
 export function parseCommandMessageSegments(text: string): ParsedCommandMessageSegment[] {
-  const pattern = /<command-message>([\s\S]*?)<\/command-message>\s*<command-name>([\s\S]*?)<\/command-name>\s*<command-args>([\s\S]*?)<\/command-args>/g;
+  const pattern = /<command-(message|name|args)>[\s\S]*?<\/command-\1>(?:\s*<command-(message|name|args)>[\s\S]*?<\/command-\2>)*/g;
   const segments: ParsedCommandMessageSegment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(text)) !== null) {
+    const command = parseCommandTagBlock(match[0]);
+    if (!command) continue;
+
     if (match.index > lastIndex) {
       segments.push({ type: 'text', text: text.slice(lastIndex, match.index) });
     }
 
-    segments.push({
-      type: 'command',
-      message: decodeEntity(match[1] ?? '').trim(),
-      name: decodeEntity(match[2] ?? '').trim(),
-      args: decodeEntity(match[3] ?? '').trim(),
-      raw: match[0],
-    });
+    segments.push(command);
     lastIndex = match.index + match[0].length;
   }
 
@@ -76,7 +78,7 @@ export function parseCommandMessageSegments(text: string): ParsedCommandMessageS
 }
 
 export function hasCommandMessage(text: string): boolean {
-  return /<command-message>[\s\S]*?<\/command-message>\s*<command-name>[\s\S]*?<\/command-name>\s*<command-args>[\s\S]*?<\/command-args>/.test(text);
+  return parseCommandMessageSegments(text).some((segment) => segment.type === 'command');
 }
 
 export function getCommandMessagePreview(text: string): CommandMessagePreview | null {
@@ -93,7 +95,28 @@ export function getCommandMessagePreview(text: string): CommandMessagePreview | 
     args: looseMatch.args,
     plugin: parts.plugin,
     command: parts.command,
-    displayName: `/${parts.plugin}:${parts.command}`,
+    displayName: getCommandDisplayName(name),
+  };
+}
+
+function parseCommandTagBlock(raw: string): CommandMessageSegment | null {
+  const tags = new Map<string, string>();
+  const tagPattern = /<command-(message|name|args)>([\s\S]*?)<\/command-\1>/g;
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(raw)) !== null) {
+    tags.set(match[1] ?? '', decodeEntity(match[2] ?? '').trim());
+  }
+
+  const message = tags.get('message') ?? '';
+  const name = tags.get('name') ?? '';
+  if (!message || !name) return null;
+
+  return {
+    type: 'command',
+    message,
+    name,
+    args: tags.get('args') ?? '',
+    raw,
   };
 }
 

@@ -369,6 +369,60 @@ test('marks Codex turns that only have token usage but no readable events', () =
   assert.equal(turns[0]!.segs[0]!.det.outTok, 10);
 });
 
+test('shows Codex compaction events in step details', () => {
+  const compactedSample = [
+    {
+      timestamp: '2026-06-26T01:00:00.000Z',
+      type: 'event_msg',
+      payload: { type: 'task_started', turn_id: 'turn_1' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:00.100Z',
+      type: 'event_msg',
+      payload: { type: 'user_message', message: '继续' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:01.000Z',
+      type: 'event_msg',
+      payload: { type: 'agent_message', message: '压缩前回复', phase: 'commentary' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.000Z',
+      type: 'compacted',
+      payload: { message: '', window_number: 1 },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.010Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 16000 } },
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.020Z',
+      type: 'event_msg',
+      payload: { type: 'context_compacted' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:03.000Z',
+      type: 'event_msg',
+      payload: { type: 'agent_message', message: '压缩后继续', phase: 'commentary' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:04.000Z',
+      type: 'event_msg',
+      payload: { type: 'task_complete', turn_id: 'turn_1', duration_ms: 4000 },
+    },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const { turns } = runCodexPipeline(compactedSample, 'compacted.jsonl');
+  const compactedStep = turns[0]!.segs.find((seg) => seg.k === 'i' && seg.n === '上下文压缩');
+
+  assert.equal(compactedStep?.det.text, 'Codex 在本轮执行中触发上下文压缩，后续步骤基于压缩后的新窗口继续。');
+  assert.equal(turns[0]!.compressionReset, true);
+});
+
 test('marks Codex turns that have no readable assistant events at all', () => {
   const emptyTurnSample = [
     {

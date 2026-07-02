@@ -48,6 +48,14 @@ function startsNewTurn(line: UserLine): boolean {
   return line.promptId != null;
 }
 
+function isSamePromptMetaContinuation(line: UserLine, currentUser: UserLine | null): boolean {
+  return Boolean(
+    currentUser?.promptId &&
+    line.promptId === currentUser.promptId &&
+    line.isMeta === true,
+  );
+}
+
 /**
  * Group session lines into conversation turns.
  *
@@ -67,6 +75,7 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
   let currentAsstLines: AssistantLine[] = [];
   let currentSystemLines: SystemLine[] = [];
   let currentToolResultLines: UserLine[] = [];
+  let currentUserContinuationLines: UserLine[] = [];
   let currentAttachmentLines: AttachmentSummary[] = [];
   let preTurnAttachments: AttachmentSummary[] = [];
   let currentStartTs = '';
@@ -76,6 +85,12 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
   for (const line of lines) {
     if (line.type === 'user') {
       const userLine = line as UserLine;
+
+      if (isSamePromptMetaContinuation(userLine, currentUser)) {
+        currentUserContinuationLines.push(userLine);
+        currentEndTs = line.timestamp;
+        continue;
+      }
 
       if (startsNewTurn(userLine)) {
         // Finalize previous turn if one is in progress.
@@ -87,6 +102,7 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
             asstLines: currentAsstLines,
             systemLines: currentSystemLines,
             toolResultLines: currentToolResultLines,
+            userContinuationLines: currentUserContinuationLines,
             attachmentLines: currentAttachmentLines,
             startTs: currentStartTs,
             endTs: currentEndTs,
@@ -98,6 +114,7 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
         currentAsstLines = [];
         currentSystemLines = [];
         currentToolResultLines = [];
+        currentUserContinuationLines = [];
         currentAttachmentLines = turnIndex === 0 ? [...preTurnAttachments] : [];
         currentStartTs = line.timestamp;
         continue;
@@ -155,6 +172,7 @@ export function identifyTurns(lines: SessionLine[]): TurnGroup[] {
       asstLines: currentAsstLines,
       systemLines: currentSystemLines,
       toolResultLines: currentToolResultLines,
+      userContinuationLines: currentUserContinuationLines,
       attachmentLines: currentAttachmentLines,
       startTs: currentStartTs,
       endTs: currentEndTs,

@@ -486,10 +486,13 @@ function computeContextInfo(
     for (const line of group.asstLines) {
       const usage = line.message.usage;
       if (usage) {
+        const cache = usage.cache_read_input_tokens ?? 0;
         const total = usage.input_tokens + (usage.cache_read_input_tokens ?? 0);
+        if (cache > cumCacheHit) {
+          cumCacheHit = cache;
+        }
         if (total > cumTotal) {
           cumTotal = total;
-          cumCacheHit = usage.cache_read_input_tokens ?? 0;
         }
       }
     }
@@ -543,6 +546,7 @@ export function computeTimeline(
   const cumTools: Record<string, { calls: number; resultTokens: number; task: boolean }> = {};
 
   let runningCumTotal = 0; // ensures monotonicity across turns
+  let runningCumCacheHit = 0;
 
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i]!;
@@ -576,7 +580,7 @@ export function computeTimeline(
         segs: [],
         comp: { ...comp },
         cumTotal: runningCumTotal,
-        cumCacheHit: 0,
+        cumCacheHit: runningCumCacheHit,
         cumTools: cumToolsSnapshot,
       });
       continue;
@@ -632,14 +636,25 @@ export function computeTimeline(
         // Context compression detected: API reports a dramatic drop.
         // Wipe the slate — only this turn's tools count going forward.
         compressionReset = true;
+        segments.unshift({
+          k: 'i',
+          n: '上下文压缩',
+          ms: 0,
+          ts: group.startTs,
+          det: {
+            text: `Claude Code 在本轮请求前触发上下文压缩，API 上报的累计上下文从 ${Math.round(runningCumTotal)} tok 降至 ${Math.round(cumTotal)} tok。后续步骤基于压缩后的新窗口继续。`,
+          },
+        });
         for (const key of Object.keys(cumTools)) {
           delete cumTools[key];
         }
       }
       runningCumTotal = cumTotal;
+      runningCumCacheHit = cumCacheHit;
     } else {
       // No API data — carry forward to avoid inflated composition estimates
       cumTotal = runningCumTotal;
+      cumCacheHit = runningCumCacheHit;
     }
 
     // 5. Build tool usage summary.
@@ -671,7 +686,7 @@ export function computeTimeline(
           maxReqIdx = reqNo;
           let stepIdx = 0;
           for (const seg of segments) {
-            if (seg.ts === asst.timestamp) { maxReqStep = stepIdx; break; }
+            if (seg.k === 'm' && seg.ts === asst.timestamp) { maxReqStep = stepIdx; break; }
             stepIdx++;
           }
         }

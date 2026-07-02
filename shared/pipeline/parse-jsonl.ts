@@ -381,6 +381,9 @@ export function parseJsonl(text: string): ParseResult {
       if (isString(parsed.promptId)) {
         userLine.promptId = parsed.promptId;
       }
+      if (typeof parsed.isMeta === 'boolean') {
+        userLine.isMeta = parsed.isMeta;
+      }
       lines.push(userLine);
     } else {
       // system, attachment, mode, permission-mode, ai-title, last-prompt,

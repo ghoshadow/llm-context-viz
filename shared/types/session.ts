@@ -124,6 +124,7 @@ export interface UserLine extends SessionLine {
     content: string | ContentBlock[];
   };
   promptId?: string;
+  isMeta?: boolean;
 }
 
 // ============================================================================
@@ -210,6 +211,8 @@ export interface TurnGroup {
   systemLines: SystemLine[];
   /** Tool-result user messages that arrive between assistant responses. */
   toolResultLines: UserLine[];
+  /** Non-tool user continuation messages that share the initiating prompt. */
+  userContinuationLines?: UserLine[];
   /** System attachments (skill_listing, task_reminder, etc.) not in systemLines. */
   attachmentLines?: AttachmentSummary[];
   /** First event timestamp (ISO). */
