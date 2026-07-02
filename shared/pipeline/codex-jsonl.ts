@@ -294,7 +294,7 @@ function assembleTurns(
       segs: segments,
       comp,
       cumTotal,
-      cumCacheHit: tokenMetrics.maxCacheHit,
+      cumCacheHit: tokenMetrics.lastCacheHit,
       cumTools: cloneTools(cumTools),
       compressionReset,
     });
@@ -555,14 +555,25 @@ function computeTokenMetrics(turn: CodexTurn): {
   let lastInput = 0;
   let lastCacheHit = 0;
   let peakTs = turn.startTs;
+  let lastCompactOrder = -1;
+
+  for (const event of turn.events) {
+    if (event.type === 'compacted' || (event.type === 'event_msg' && event.payload.type === 'context_compacted')) {
+      lastCompactOrder = event.order;
+    }
+  }
 
   turn.tokenUsages.forEach(({ line, usage }, idx) => {
     const input = numberOrZero(usage.input_tokens);
     const cache = numberOrZero(usage.cached_input_tokens);
     const output = numberOrZero(usage.output_tokens);
     outTok += output;
-    lastInput = input;
-    lastCacheHit = cache;
+    if (input > 0 || cache > 0 || output > 0) {
+      if (lastCompactOrder < 0 || line.order > lastCompactOrder) {
+        lastInput = input;
+        lastCacheHit = cache;
+      }
+    }
     if (input > maxInput) {
       maxInput = input;
       maxCacheHit = cache;

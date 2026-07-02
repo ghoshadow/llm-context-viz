@@ -423,6 +423,98 @@ test('shows Codex compaction events in step details', () => {
   assert.equal(turns[0]!.compressionReset, true);
 });
 
+test('uses post-compaction Codex token usage for cumulative cache hit', () => {
+  const compactedTokenSample = [
+    {
+      timestamp: '2026-06-26T01:00:00.000Z',
+      type: 'event_msg',
+      payload: { type: 'task_started', turn_id: 'turn_1' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:00.100Z',
+      type: 'event_msg',
+      payload: { type: 'user_message', message: '继续' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:01.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: 226782,
+            cached_input_tokens: 224640,
+            output_tokens: 12,
+            total_tokens: 226794,
+          },
+        },
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.000Z',
+      type: 'compacted',
+      payload: { message: '', window_number: 1 },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.010Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 16000 } },
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:02.020Z',
+      type: 'event_msg',
+      payload: { type: 'context_compacted' },
+    },
+    {
+      timestamp: '2026-06-26T01:00:03.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: 49580,
+            cached_input_tokens: 47488,
+            output_tokens: 20,
+            total_tokens: 49600,
+          },
+        },
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:04.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: 49154,
+            cached_input_tokens: 46976,
+            output_tokens: 18,
+            total_tokens: 49172,
+          },
+        },
+      },
+    },
+    {
+      timestamp: '2026-06-26T01:00:05.000Z',
+      type: 'event_msg',
+      payload: { type: 'task_complete', turn_id: 'turn_1', duration_ms: 5000 },
+    },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const { turns } = runCodexPipeline(compactedTokenSample, 'compacted-token.jsonl');
+  const turn = turns[0]!;
+
+  assert.equal(turn.maxInput, 226782);
+  assert.equal(turn.maxCacheHit, 224640);
+  assert.equal(turn.cumTotal, 49154);
+  assert.equal(turn.cumCacheHit, 46976);
+  assert.equal(turn.compressionReset, true);
+});
+
 test('marks Codex turns that have no readable assistant events at all', () => {
   const emptyTurnSample = [
     {
