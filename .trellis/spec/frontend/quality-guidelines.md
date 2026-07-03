@@ -81,16 +81,14 @@ await del('/sessions/123');
 
 特性: AbortController 超时（默认 30s）、从 JSON 响应中提取错误信息、上传时支持 FormData。
 
-### Tauri 桌面打包的 API 地址
+### API 地址
 
-打包后前端从 `tauri://localhost` 加载，`/api` 相对路径会解析到错误地址。用 Vite `define` 在构建时注入绝对地址：
+前端统一使用 `/api` 相对路径。开发模式由 Vite proxy 转发到 Express，生产构建使用同源请求：
 
 ```typescript
 // vite.config.ts
 define: {
-  __API_BASE__: JSON.stringify(
-    isTauriBuild ? `http://localhost:${API_PORT}/api` : '/api'
-  ),
+  __API_BASE__: JSON.stringify('/api'),
 }
 
 // src/api/client.ts
@@ -98,7 +96,7 @@ declare const __API_BASE__: string;
 const BASE = typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : '/api';
 ```
 
-所有 `fetch` 调用使用 `${API_BASE}/path`，不写死 `/api/`。
+所有 HTTP 调用通过 `src/api/client.ts`，不要在组件或 store 中直接调用 `fetch()`。
 
 ## 代码组织
 

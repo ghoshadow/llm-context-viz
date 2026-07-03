@@ -144,43 +144,17 @@ try {
 - 不使用基于类的服务层 — 本项目使用模块级函数。
 - 不在异步路由处理器中使用 `fs` 同步方法（`readFileSync`） — 使用 `fs/promises`。例外: 同步辅助函数中允许 `existsSync`。
 
-## 桌面打包规范
-
-### 路径解析双回退
-
-打包后 `__dirname` 会偏移（esbuild 单文件 + Tauri `_up_/` 资源目录）。所有读取外部文件的代码必须用双路径回退：
-
-```typescript
-// ✅ 正确
-const DEV_PATH = resolve(join(__dirname, '..', '..', 'scripts', 'tool.cjs'));
-const BUNDLE_PATH = resolve(join(__dirname, 'scripts', 'tool.cjs'));
-const script = existsSync(DEV_PATH) ? DEV_PATH : BUNDLE_PATH;
-```
-
-```typescript
-// ❌ 错误 — 打包后 ../.. 指到错误位置
-const script = join(__dirname, '..', '..', 'scripts', 'tool.cjs');
-```
+## 运行时路径
 
 ### 数据库路径
 
-`DB_PATH` 不能硬编码为 `../data/`。生产环境通过 `LLM_CONTEXT_VIZ_DATA_DIR` 环境变量指定系统标准数据目录：
+`DB_PATH` 不要在调用点重复拼接。统一通过 `server/db.ts` 的 `DB_DIR` 计算，默认使用项目本地 `data/`，需要时可用 `LLM_CONTEXT_VIZ_DATA_DIR` 覆盖：
 
 ```typescript
 const DATA_DIR = process.env.LLM_CONTEXT_VIZ_DATA_DIR 
   || path.join(__dirname, '..', 'data');
 const DB_PATH = path.join(DATA_DIR, 'llm-context.db');
 ```
-
-Rust 侧通过 `app.path().app_data_dir()` 传入：
-```rust
-let data_dir = app.path().app_data_dir().unwrap();
-cmd.env("LLM_CONTEXT_VIZ_DATA_DIR", data_dir.to_string_lossy());
-```
-
-### esbuild 打包
-
-`packages: 'external'` — 所有 node_modules 保持外部，只打包应用代码。`better-sqlite3` 和 `dotenv` 等含原生模块/CJS 的包必须 external。
 
 ### Express 5 通配符路由
 

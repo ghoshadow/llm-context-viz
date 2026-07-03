@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { useSessionStore } from './store/sessionStore';
 import { useUIStore } from './store/uiStore';
-import { useMonitor } from './hooks/useMonitor';
 import { get } from './api/client';
 import HomePage from './components/home/HomePage';
 import ContextAssembly from './components/pages/ContextAssembly';
@@ -15,9 +14,6 @@ function App() {
   const currentSessionId = useSessionStore(s => s.currentSessionId);
   const scannerOpen = useSessionStore(s => s.scannerOpen);
   const setHomeDir = useUIStore(s => s.setHomeDir);
-
-  // 状态栏监控：轮询活跃会话，更新 Tauri 托盘提示
-  useMonitor();
 
   // 获取 home 目录（用于路径显示）
   useEffect(() => {

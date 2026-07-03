@@ -12,7 +12,7 @@
 | 跨层数据流 | 4/10 | 高 | 类型分裂严重，server 直接 import src/ |
 | 代码复用 | 5/10 | 高 | SessionSource 5 处定义、CWD 提取 2 份重复 |
 | 项目结构 | 7/10 | 中 | 四层分离清晰，pipeline 位置尴尬 |
-| 打包部署 | 7/10 | 中 | Tauri 构建链合理，依赖同步需手动维护 |
+| 打包部署 | 6/10 | 中 | 仅保留 Web 构建与本地后端运行，发布流程仍需补充 |
 | 依赖管理 | 8/10 | 中 | 精简无冗余，tsx 位置合理 |
 | 安全性 | 5/10 | 高 | strict=false、CORS 全开放、无 rate limiting |
 
@@ -108,16 +108,11 @@ server/monitor/watcher.ts           → runPipeline
 
 **修复：** 统一为 `{ ok: boolean; data?: T; error?: string }` 或定义 Zod response schema。
 
-### 6. CORS 全开放 + CSP unsafe-inline
+### 6. CORS 全开放
 
 ```typescript
 // server/index.ts:52
 res.header('Access-Control-Allow-Origin', '*');
-```
-
-```json
-// tauri.conf.json:31
-"script-src 'self' 'unsafe-inline'"
 ```
 
 本地工具场景可接受，但缺少安全假设注释。
@@ -128,8 +123,6 @@ res.header('Access-Control-Allow-Origin', '*');
 |------|--------|-----------------|
 | `shared/constants.ts` | `DEFAULT_SERVER_PORT = 4137` | 定义处 |
 | `vite.config.ts` | `'4137'` | ❌ 未引用 |
-| `lib.rs` | `"4137"` | ❌ Rust 无法引用 |
-| `tauri.conf.json` | `http://localhost:4137` | ❌ 配置无法引用 |
 
 ---
 
@@ -194,7 +187,7 @@ shared/
 - 四层分离清晰
 - server/ 内部模块划分合理（routes/services/repositories/middleware/llm/utils）
 - 测试文件 co-located
-- Tauri 配置最小化且正确
+- 浏览器前端与 Express 后端边界清晰
 
 ### 待改进
 - `src/pipeline/` 位置尴尬：不在前端也不在 server
@@ -206,18 +199,16 @@ shared/
 
 ## 六、打包和部署
 
-### Tauri 构建链评估
+### Web 构建与本地运行
 
 ```
-tauri-build.mjs
- ├── bundle-node.mjs  → 下载 Node.js → binaries/
- ├── esbuild 打包     → dist-server/server.js
- ├── 安装生产依赖      → dist-server/node_modules/
- └── 复制 CJS 脚本     → dist-server/scripts/
+npm run dev      → Vite dev server
+npm run server   → Express API server
+npm run build    → TypeScript check + Vite production build
 ```
 
-**✅ 良好：** 平台检测完整、esbuild external 策略正确
-**⚠️ 风险：** `serverDeps` 白名单硬编码在脚本中，新增依赖需手动同步
+**✅ 良好：** 开发路径简单，前端通过 `/api` 代理访问后端
+**⚠️ 风险：** 尚未定义正式发布/部署流程，生产静态资源托管方式需要补充文档
 
 ---
 
@@ -228,7 +219,6 @@ tauri-build.mjs
 | `.env` gitignored | ✅ | 已忽略且未追踪 |
 | `.env.example` 模板 | ✅ | 占位符正确 |
 | CORS 限制 | ⚠️ | 允许所有来源 |
-| CSP | ⚠️ | `unsafe-inline` |
 | 日志脱敏 | ✅ | `log-sanitizer.ts` 完善 |
 | 环境变量隔离 | ✅ | `filterEnv()` 白名单保护 |
 | SQL 注入 | ✅ | 全部 prepared statements |
@@ -249,5 +239,4 @@ tauri-build.mjs
 | P1 | 统一 API 响应格式 | 3h |
 | P2 | 提取 errorMessage() 工具函数 | 0.5h |
 | P2 | 清理 worktrees/ 旧目录 | 0.1h |
-| P3 | 收紧 CSP | 1h |
 | **合计** | | **~10h** |

@@ -22,7 +22,7 @@ let pickPort: (host?: string) => Promise<number>;
 try {
   ({ pickPort } = require('../../scripts/calibration-proxy-utils.cjs') as ProxyUtils);
 } catch {
-  // ponytail: 打包环境路径不同，回退到内置端口选择
+  // ponytail: fallback if the helper cannot be loaded
   const { createServer } = await import('net');
   pickPort = (host = '127.0.0.1') => new Promise((resolve, reject) => {
     const s = createServer();
@@ -73,11 +73,7 @@ export interface StartCalibrationJobOptions {
 const jobs = new Map<string, CalibrationJob>();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = join(__filename, '..');
-// ponytail: 开发环境: server/services/ → ../../scripts/
-//           打包环境: dist-server/ → ./scripts/
-const DEV_SCRIPT = resolve(join(__dirname, '..', '..', 'scripts', 'calibration-proxy.cjs'));
-const BUNDLE_SCRIPT = resolve(join(__dirname, 'scripts', 'calibration-proxy.cjs'));
-const SCRIPT_PATH = existsSync(DEV_SCRIPT) ? DEV_SCRIPT : BUNDLE_SCRIPT;
+const SCRIPT_PATH = resolve(join(__dirname, '..', '..', 'scripts', 'calibration-proxy.cjs'));
 const MAX_OUTPUT_LINES = 80;
 const JOB_RETENTION_MS = 15 * 60 * 1000;
 
@@ -217,10 +213,7 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
     prompt,
   });
 
-  // 打包环境下 claude CLI 在 node_modules 中，不在 PATH 里
-  const claudePath = join(__dirname, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-darwin-arm64', 'claude');
   const env: Record<string, string> = { ...process.env as Record<string, string> };
-  if (existsSync(claudePath)) env.CLAUDE_CLI_PATH = claudePath;
 
   const child = spawn(process.execPath, args, {
     cwd: __dirname,

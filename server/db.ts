@@ -9,8 +9,7 @@ const __dirname = path.dirname(__filename);
 
 let db: Database.Database | null = null;
 
-// 生产环境使用系统标准数据目录 (Tauri 侧通过 LLM_CONTEXT_VIZ_DATA_DIR 传入)
-// 开发环境使用项目本地 data/ 目录
+// 允许通过环境变量覆盖数据目录，默认使用项目本地 data/ 目录。
 const DB_DIR = process.env.LLM_CONTEXT_VIZ_DATA_DIR || path.join(__dirname, '..', 'data');
 const DB_PATH = path.join(DB_DIR, 'llm-context.db');
 

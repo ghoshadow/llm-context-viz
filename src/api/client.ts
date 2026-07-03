@@ -1,8 +1,8 @@
 /**
  * API client — 统一的 HTTP 请求封装。
  *
- * 浏览器模式 (npm run dev): /api → Vite proxy → localhost:4137
- * Tauri 模式 (npx tauri build): 构建时注入绝对地址
+ * 开发模式: /api → Vite proxy → localhost:4137
+ * 生产构建: /api 使用同源请求
  */
 
 // 构建时注入（vite.config.ts define），运行时是常量字符串
