@@ -29,8 +29,9 @@ export default defineConfig({
       '/api': {
         target: `http://localhost:${API_PORT}`,
         changeOrigin: true,
-        // 代理超时：防止长时间挂起的请求占用资源
-        timeout: 60_000,
+        // SSE extraction requests can stay quiet while an LLM shard is running.
+        timeout: 0,
+        proxyTimeout: 0,
       },
     },
   },

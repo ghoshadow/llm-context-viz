@@ -121,6 +121,20 @@ res.writeHead(200, {
 res.write(`id: ${eventId}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 ```
 
+长时间可能无业务事件的 SSE 必须发送注释 heartbeat，避免 Vite 代理、浏览器或中间层把空闲 chunked 响应断开：
+
+```typescript
+const stopHeartbeat = startSseHeartbeat(res);
+try {
+  // await long-running work
+} finally {
+  stopHeartbeat();
+  if (!res.destroyed && !res.writableEnded) res.end();
+}
+```
+
+测试点：使用 fake timers 断言 heartbeat 会写入 `: keepalive\n\n`，并且调用 cleanup 后不再写入。不要用业务 `event:` 作为 heartbeat，否则前端事件处理器会误以为有进度事件。
+
 ## 反模式
 
 - 不使用 `require()` — 仅使用 ESM 导入。

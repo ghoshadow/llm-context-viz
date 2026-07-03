@@ -1,4 +1,4 @@
-import { Router, type Request } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { existsSync, realpathSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { getKnowledgeCardContext, type ObsidianOntologyDataLike } from '../obsidian/card-context';
@@ -39,9 +39,19 @@ import {
   sessionExists,
 } from '../repositories/session-repository';
 const router = Router({ mergeParams: true });
+const SSE_HEARTBEAT_MS = 25_000;
 
 function params(req: Request): { id: string } { return req.params as { id: string }; }
 function cardParams(req: Request): { id: string; topicId: string } { return req.params as { id: string; topicId: string }; }
+
+type SseResponse = Pick<Response, 'write' | 'destroyed' | 'writableEnded'>;
+
+export function startSseHeartbeat(res: SseResponse, intervalMs = SSE_HEARTBEAT_MS): () => void {
+  const timer = setInterval(() => {
+    if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
+  }, intervalMs);
+  return () => clearInterval(timer);
+}
 
 interface ObsidianSyncRecordLocal {
   topic_id: string; vault_path: string; note_path: string;
@@ -381,6 +391,8 @@ router.post('/extract', async (req, res) => {
     return;
   }
 
+  const stopHeartbeat = startSseHeartbeat(res);
+  req.on('close', stopHeartbeat);
   const shardMeta = new Map<number, OntologyShardMeta>();
   let eventId = 0;
   const send = (event: string, data: Record<string, unknown>) => {
@@ -477,6 +489,8 @@ router.post('/extract', async (req, res) => {
   } catch (err) {
     send('error', { message: '提取本体数据时出错: ' + (err instanceof Error ? err.message : String(err)) });
   } finally {
+    stopHeartbeat();
+    req.off('close', stopHeartbeat);
     if (!res.destroyed && !res.writableEnded) res.end();
   }
 });

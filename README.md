@@ -13,14 +13,15 @@
 
 LLM Context Viz 是一个基于 **Express + React** 构建的本地工具，支持将 LLM 会话 JSONL 文件导入 SQLite 数据库，并提供多维度的可视化分析。核心特性：
 
-- **会话扫描** — 递归扫描 `~/.claude/projects/` 和 `~/.codex/` 目录，SHA256 去重，增量导入
-- **Turn 检查器** — 按 turn 粒度拆解 token 分布（模型 / 子代理 / 工具 / 系统 / 用户），支持分页
-- **上下文组装视图** — 柱状图展示 context window 内 token 占用，按类别（system prompt、tool call、content block）拆解
-- **LLM 翻译** — 对 tool call 参数 / 结果进行中文翻译（Anthropic API / 兼容端点）
-- **本体提取** — 从会话内容中自动提取概念节点和关系边，SSE 流式返回，支持导出 Obsidian 知识卡片
-- **校准系统** — 校准 LLM 分析参数（手动 + 自动检测），用于分类器微调
-- **模型配置** — 管理 API key、自定义端点、模型选择
-- **桌面打包** — Tauri 2 封装为 macOS 原生应用，带系统托盘
+- **会话扫描** — 递归扫描 `~/.claude/projects/` 和 `~/.codex/` 目录，SHA256 去重，增量导入。支持 Claude Code（Anthropic SDK 格式）和 Codex（OpenAI 兼容格式）两种 JSONL 来源
+- **处理管道** — 五阶段同步管道（解析 → Turn 分组 → Token 计算 → 时间线拆解 → 摘要聚合），核心逻辑集中在 `shared/pipeline/`，前后端零依赖共享
+- **Turn 检查器** — 按 turn 粒度拆解 token 分布（模型 / 子代理 / 工具 / 系统 / 用户），支持执行时间线、token 增量面板、工具使用统计
+- **上下文组装视图** — 柱状图展示 context window 内 token 占用，按类别（system prompt、tool call、content block）拆解，含增长趋势折线图
+- **LLM 翻译** — 对 tool call 参数 / 结果进行中文翻译（Anthropic API / OpenAI 兼容端点），支持项目常量翻译
+- **本体提取** — 从会话内容中自动提取概念节点和关系边，分片并发+置信度评分+合并去重，SSE 流式返回，支持导出 Obsidian 知识卡片
+- **校准系统** — 校准 LLM 分析参数（手动 + 自动检测），按来源（claude/codex）独立维护，用于分类器微调和 token 估算
+- **模型配置** — 管理 API key、自定义端点、模型选择，支持 .env 文件和环境变量双重配置
+- **桌面打包** — Tauri 2 封装为 macOS 原生应用，内嵌便携 Node.js，带系统托盘
 
 <br>
 
@@ -37,10 +38,15 @@ flowchart LR
         Pages["TurnInspector / ContextAssembly / Ontology / Calibrate"]
     end
 
+    subgraph Shared["共享层（零依赖）"]
+        Pipeline["Pipeline 核心 shared/pipeline/"]
+        Types["跨层类型 shared/types/"]
+    end
+
     subgraph Backend["后端层"]
         Routes["Routes /sessions /scanner /calibrate /obsidian /ontology /config"]
-        Services["Services pipeline / calibration / card-summary"]
-        LLM["LLM Client translation / ontology-extraction"]
+        Services["Services pipeline / calibration / card-summary / extraction"]
+        LLM["LLM Client translation / ontology-extraction (分片+置信度+合并)"]
         Monitor["File Monitor watcher"]
     end
 
@@ -58,8 +64,11 @@ flowchart LR
     React --> Zustand
     Zustand --> Pages
 
+    Pages --> Pipeline
+    React --> Pipeline
     Express --> Routes
     Routes --> Services
+    Services --> Pipeline
     Services --> LLM
     Services --> SQLite
     Monitor --> JSONL
@@ -292,45 +301,156 @@ curl -N -X POST http://localhost:4137/api/sessions/abc123/ontology/extract \
 
 ```
 llm-context-viz/
-├── server/                  Express 5 API
-│   ├── routes/              路由（sessions, scanner, calibrate, obsidian, ontology, config）
-│   ├── services/            业务逻辑（pipeline, calibration, card-summary）
-│   ├── repositories/        SQLite 数据访问层
-│   ├── llm/                 LLM 客户端（翻译、本体提取）
-│   ├── monitor/             文件系统监控
-│   ├── obsidian/            Obsidian 集成（卡片生成、同步）
-│   ├── middleware/          请求校验（Zod schema）
-│   ├── content/             会话内容提取与导出
-│   └── utils/               日志脱敏等工具
-├── src/                     React 19 前端
+├── server/                    Express 5 API
+│   ├── routes/                路由层
+│   │   ├── sessions.ts        会话 CRUD、turn 查询、翻译触发
+│   │   ├── scanner.ts         JSONL 扫描与增量导入
+│   │   ├── calibrate.ts       校准常量提取、应用、任务状态
+│   │   ├── ontology.ts        本体提取作业、SSE 流式返回
+│   │   ├── obsidian.ts        Obsidian 集成配置
+│   │   ├── config.ts          模型配置与 home 目录
+│   │   └── shared.ts          跨路由共享工具（JSONL 文件查找）
+│   ├── services/              业务逻辑层
+│   │   ├── pipeline-service.ts      管道调度（解析 → 聚合 → 持久化）
+│   │   ├── calibration-job.ts       校准提取作业管理
+│   │   ├── calibration-constants.ts  校准常量读写
+│   │   ├── extraction-job.ts        本体提取作业管理
+│   │   ├── card-summary.ts          Obsidian 卡片摘要生成
+│   │   ├── claude-config.ts         Claude Code 配置解析
+│   │   ├── codex-config.ts          Codex 配置解析
+│   │   ├── env-file.ts              .env 文件读写
+│   │   └── sub-agent-enricher.ts    子代理调用详情富化
+│   ├── repositories/          SQLite 数据访问层
+│   │   ├── session-repository.ts    会话 & turn 存储
+│   │   └── ontology-repository.ts   本体实体 & 边存储
+│   ├── llm/                   LLM 客户端模块
+│   │   ├── client.ts               Anthropic SDK 封装
+│   │   ├── translation-client.ts   OpenAI 兼容端点翻译
+│   │   ├── config.ts               API 密钥与端点管理
+│   │   ├── schema.ts               Zod schema（翻译回复校验）
+│   │   ├── extract-ontology.ts     本体提取入口
+│   │   ├── ontology-confidence.ts  置信度评分
+│   │   ├── ontology-merge.ts       分片结果合并
+│   │   ├── ontology-response-parser.ts   LLM 回复解析
+│   │   ├── ontology-shard-collector.ts   分片收集器
+│   │   └── orchestrator-prompt.ts       编排器 prompt 模板
+│   ├── monitor/               文件系统监控（目录监听 + 路由）
+│   ├── obsidian/              Obsidian 集成（卡片 Markdown 生成、同步、图配置）
+│   ├── content/               会话内容提取与文件导出
+│   ├── middleware/            请求校验（Zod validateBody 中间件工厂）
+│   └── utils/                 日志脱敏等工具
+├── src/                       React 19 前端
 │   ├── components/
-│   │   ├── pages/           主要页面（TurnInspector, ContextAssembly, CalibratePage）
-│   │   ├── home/            首页
-│   │   ├── ontology/        本体图谱
-│   │   ├── shared/          可复用 UI（ContentRenderer, MarkdownBlock, DiffView）
-│   │   └── upload/          扫描弹窗
-│   ├── store/               Zustand store（sessionStore, uiStore）
-│   ├── api/                 HTTP 客户端（fetch + AbortController）
-│   ├── pipeline/            会话数据处理管道（纯逻辑，无 JSX）
-│   ├── hooks/               React hooks（useMonitor）
-│   ├── styles/              设计 token（oklch 颜色）
-│   ├── types/               共享 TypeScript 类型
-│   └── utils/               格式化、SSE 客户端
-├── shared/                  跨层共享
-│   ├── constants.ts         应用常量
-│   └── types/               校准类型定义
-├── src-tauri/               Tauri 2 桌面壳（Rust）
-│   ├── src/lib.rs           主逻辑（启动 Express 子进程、系统托盘）
-│   ├── src/main.rs          Windows 入口
-│   ├── Cargo.toml           Rust 依赖
-│   └── tauri.conf.json      Tauri 配置
-├── scripts/                 构建脚本
-│   ├── tauri-build.mjs      Tauri 构建前置
-│   └── bundle-node.mjs      便携 Node.js 下载
-├── data/                    SQLite 数据库 + 配置（运行时生成）
-├── dist/                    Vite 构建输出
-└── dist-server/             Server 构建输出
+│   │   ├── pages/             主要页面
+│   │   │   ├── TurnInspector.tsx           Turn 检查器主组件
+│   │   │   ├── turnInspectorLogic.ts       纯逻辑层（数据聚合、翻译状态）
+│   │   │   ├── turnInspectorPanels.tsx     面板组合
+│   │   │   ├── TurnStepDetailPanel.tsx     Step 详情面板
+│   │   │   ├── turn-inspector/            Turn 子面板
+│   │   │   │   ├── ContextStructure.tsx    上下文结构面板
+│   │   │   │   ├── DeltaPanel.tsx          Token 增量面板
+│   │   │   │   ├── ExecutionTimeline.tsx   执行时间线
+│   │   │   │   ├── ToolUsagePanel.tsx      工具使用面板
+│   │   │   │   └── TurnListItem.tsx        Turn 列表项
+│   │   │   ├── ContextAssembly.tsx         上下文组装主组件
+│   │   │   ├── ContextAssemblyBreakdown.tsx Token 分类拆解
+│   │   │   ├── ContextAssemblyOverview.tsx 概览卡片
+│   │   │   ├── ContextAssemblyTools.tsx    工具栏与排序
+│   │   │   ├── ContextAssemblyGrowthSection.tsx 增长趋势区
+│   │   │   ├── ContextGrowthChart.tsx      上下文增长折线图
+│   │   │   ├── contextAssemblyData.ts      数据转换纯逻辑
+│   │   │   ├── CalibratePage.tsx           校准面板
+│   │   │   ├── calibrationPagePanels.tsx   面板布局
+│   │   │   ├── calibrationAutoStart.ts     自动检测触发
+│   │   │   ├── calibrationCategories.ts    分类常量管理
+│   │   │   ├── calibrationSource.ts        来源适配逻辑
+│   │   │   ├── calibrationDetailModal.ts   详情编辑弹窗
+│   │   │   ├── calibrationFailureNotice.ts 失败通知组件
+│   │   │   ├── useAutoCalibrationJob.ts    自动校准 hook
+│   │   │   ├── useCalibrationDetailTranslation.ts 翻译详情 hook
+│   │   │   ├── useCurrentCalibrationConstants.ts  常量查询 hook
+│   │   │   └── ModelConfigModal.tsx         模型配置弹窗
+│   │   ├── home/              首页（会话列表、标题、路径展示）
+│   │   ├── ontology/          本体图谱
+│   │   │   ├── OntologyPage.tsx           图谱主页
+│   │   │   ├── OntologyGraph.tsx          力导向布局图
+│   │   │   ├── ontologyGraphLayout.ts     图布局纯逻辑
+│   │   │   ├── OntologySelectedEntity.tsx 选中实体详情
+│   │   │   ├── ontologyDetailLogic.ts     详情数据处理
+│   │   │   ├── OntologyDetailPanel.tsx    详情面板
+│   │   │   ├── EntitySummarySection.tsx   实体摘要
+│   │   │   ├── EntityEvidenceSection.tsx  证据展示
+│   │   │   ├── EntityRelationsSection.tsx 关系列表
+│   │   │   ├── ObsidianActionsSection.tsx Obsidian 操作
+│   │   │   ├── OntologyEmptyState.tsx     空状态
+│   │   │   ├── OntologyToolbar.tsx        工具栏
+│   │   │   ├── typeOrder.ts              类型排序常量
+│   │   │   ├── useEntitySummary.ts        实体摘要 hook
+│   │   │   └── useObsidianCardSync.ts     Obsidian 卡片同步 hook
+│   │   ├── shared/            可复用 UI 组件
+│   │   │   ├── ContentRenderer.tsx         内容渲染入口
+│   │   │   ├── contentRenderStrategy.ts    渲染策略分发
+│   │   │   ├── MarkdownBlock.tsx           Markdown 容器
+│   │   │   ├── MarkdownCodeBlock.tsx       代码块渲染
+│   │   │   ├── MarkdownDiffFileBlock.tsx   文件差异块
+│   │   │   ├── markdownDiffTable.ts        差异表渲染
+│   │   │   ├── markdownInline.tsx          行内元素
+│   │   │   ├── markdownTable.tsx           表格渲染
+│   │   │   ├── markdownToolOutput.ts       Tool 输出渲染
+│   │   │   ├── StructuredTextBlock.tsx     结构化文本块
+│   │   │   ├── structuredText.ts           结构化文本解析
+│   │   │   ├── commandMessage.ts           /command 消息渲染
+│   │   │   ├── unifiedDiff.ts              Unified diff 解析
+│   │   │   ├── ProgressBar.tsx             进度条
+│   │   │   └── DiffView.tsx                文本差异比较
+│   │   └── upload/            扫描弹窗（Scanner 文件选择、预览导入）
+│   ├── store/                 Zustand store（sessionStore, uiStore）
+│   ├── api/                   HTTP 客户端（fetch + AbortController）
+│   ├── pipeline/              管道层（re-export stubs → shared/pipeline/，仅保留测试）
+│   ├── hooks/                 React hooks（useMonitor）
+│   ├── styles/                设计 token（oklch 颜色、CSS 变量）
+│   ├── types/                 前端类型定义（ontology.ts, session.ts）
+│   └── utils/                 格式化、SSE 客户端、几何工具、来源判断
+├── shared/                    跨层共享（前端 + 后端零依赖引用）
+│   ├── constants.ts           应用常量
+│   ├── session-source.ts      会话来源工具
+│   ├── pipeline/              ⭐ 管道核心逻辑（纯 TS，无 Node/Browser 依赖）
+│   │   ├── index.ts               管道编排器（5 阶段同步运行）
+│   │   ├── parse-jsonl.ts         JSONL 解析
+│   │   ├── identify-turns.ts      Turn 识别分组
+│   │   ├── compute-context.ts     上下文 token 计算（含校准常量加载）
+│   │   ├── compute-timeline.ts    执行时间线拆解
+│   │   ├── aggregate-session.ts   会话摘要聚合
+│   │   ├── build-ontology.ts      本地本体构建
+│   │   ├── calibration-types.ts   校准类型定义与规范化
+│   │   ├── constants.ts           管道常量
+│   │   ├── extract-constants.ts   常量提取
+│   │   ├── extract-codex-constants.ts Codex 常量提取
+│   │   ├── utils.ts               token 估算、工具判断
+│   │   ├── codex-jsonl.ts          Codex JSONL 入口（re-export）
+│   │   ├── codex-jsonl-types.ts    Codex 类型定义
+│   │   ├── codex-jsonl-parser.ts   Codex 行解析器
+│   │   ├── codex-jsonl-turns.ts    Codex Turn 分组
+│   │   ├── codex-jsonl-segments.ts Codex 时间线拆解
+│   │   └── codex-jsonl-summary.ts  Codex 摘要聚合
+│   └── types/                 跨层类型定义
+│       ├── index.ts               barrel export
+│       ├── session.ts             会话 & turn 类型
+│       ├── ontology.ts            本体实体 & 关系类型
+│       └── calibration.ts         校准常量类型
+├── src-tauri/                 Tauri 2 桌面壳（Rust）
+│   ├── src/lib.rs             主逻辑（启动 Express 子进程、系统托盘）
+│   ├── src/main.rs            Windows 入口
+│   ├── binaries/              便携 Node.js 二进制
+│   ├── Cargo.toml             Rust 依赖
+│   └── tauri.conf.json        Tauri 配置
+├── scripts/                   构建脚本（tauri-build, bundle-node）
+├── data/                      SQLite 数据库 + 配置（运行时生成）
+├── dist/                      Vite 构建输出
+└── dist-server/               esbuild server 构建输出
 ```
+
+> **架构要点**：`shared/pipeline/` 是管道核心的单一事实源，所有实现代码集中于此。`src/pipeline/` 仅保留 re-export 桩文件（`export * from '../../shared/pipeline/...'`）和测试用例，以保证前端消费方无需修改导入路径。`shared/` 目录下的代码不依赖 Node.js 或浏览器特定 API，可被前后端零依赖引用。
 
 <br>
 
@@ -339,8 +459,8 @@ llm-context-viz/
 | 层 | 技术 |
 | :-- | :-- |
 | 前端 | React 19 + Zustand 5 + Vite 6 + oklch 设计系统 |
-| 后端 | Express 5 + better-sqlite3 (WAL) + Zod 校验 |
-| LLM | Anthropic SDK + OpenAI 兼容端点 |
+| 后端 | Express 5 + better-sqlite3 (WAL) + Zod 4 校验 |
+| LLM | Anthropic SDK（Claude Agent SDK）+ OpenAI 兼容端点 |
 | 桌面 | Tauri 2 (Rust) + 便携 Node.js |
 | 构建 | esbuild 0.28 + TypeScript 5.6 |
 | 测试 | `node:test` + `node:assert/strict`（内存 SQLite） |
@@ -353,7 +473,7 @@ llm-context-viz/
 npm test          # 运行全部 server/src 下 .test.ts 文件
 ```
 
-测试使用内存 SQLite（`:memory:`），不依赖外部数据库。测试文件与源文件同目录（`.test.ts` 命名）。
+测试使用内存 SQLite（`:memory:`），不依赖外部数据库。测试文件与源文件同目录（`.test.ts` 命名）。管道核心逻辑的测试位于 `src/pipeline/*.test.ts`，通过 re-export 桩引用 `shared/pipeline/` 的实现代码。
 
 <br>
 
