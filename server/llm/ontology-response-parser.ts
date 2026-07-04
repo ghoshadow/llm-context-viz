@@ -40,12 +40,33 @@ export function toOntologyEvidence(evidence: Array<OntologyEvidence | (Omit<Onto
 
 export function collectParsedItems(parsed: unknown): unknown[] {
   if (!parsed || typeof parsed !== 'object') return [];
-  const single = parsed as Record<string, unknown>;
-  return Array.isArray(parsed)
-    ? parsed
-    : Array.isArray(single.results)
-      ? single.results
-      : [parsed];
+  const items: unknown[] = [];
+
+  function visit(value: unknown, depth: number): boolean {
+    if (!value || typeof value !== 'object' || depth > 4) return false;
+
+    if (Array.isArray(value)) {
+      let found = false;
+      for (const item of value) found = visit(item, depth + 1) || found;
+      return found;
+    }
+
+    const obj = value as Record<string, unknown>;
+    if (Array.isArray(obj.results)) {
+      return visit(obj.results, depth + 1);
+    }
+
+    if (typeof obj.text === 'string') {
+      const nested = parseJsonFromText(obj.text);
+      return nested ? visit(nested, depth + 1) : false;
+    }
+
+    items.push(value);
+    return true;
+  }
+
+  visit(parsed, 0);
+  return items;
 }
 
 export function textFromToolResultContent(content: unknown): string {

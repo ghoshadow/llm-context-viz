@@ -1,3 +1,5 @@
+import { lstat, readFile } from 'node:fs/promises';
+import { basename, dirname, extname } from 'node:path';
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ExtractionManifest, ShardFile } from '../content/extract-to-files.js';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
@@ -21,6 +23,21 @@ export interface ShardError {
 
 /** Agent SDK 超时时间（毫秒），单次 query 最长等待 */
 const LLM_EXTRACTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟
+const MAX_AGENT_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
+
+export function isAgentToolResultPath(filePath: string): boolean {
+  return basename(dirname(filePath)) === 'tool-results'
+    && extname(filePath) === '.json'
+    && /^call_[A-Za-z0-9_-]+\.json$/.test(basename(filePath));
+}
+
+export async function readShardItemsFromAgentToolResultPath(filePath: string): Promise<unknown[]> {
+  if (!isAgentToolResultPath(filePath)) return [];
+  const info = await lstat(filePath);
+  if (!info.isFile() || info.size > MAX_AGENT_TOOL_RESULT_BYTES) return [];
+  const text = await readFile(filePath, 'utf8');
+  return collectParsedItems(parseJsonFromText(text));
+}
 
 export async function collectShardTextResults(params: {
   manifest: ExtractionManifest;
@@ -52,6 +69,54 @@ export async function collectShardTextResults(params: {
     abort.abort();
   }, LLM_EXTRACTION_TIMEOUT_MS);
 
+  function recordParsedItem(item: unknown): boolean {
+    const validation = SubmitExtractionSchema.safeParse(item);
+    if (validation.success) {
+      const r = validation.data;
+      shardTextResults.set(r.shardIndex, JSON.stringify(r));
+      console.error('  [parsed shard]', r.shardIndex, 'theme:', sanitizeForLog(r.phaseTheme || ''));
+      const shard = manifest.shards.find((s) => s.index === r.shardIndex);
+      onEvent('shard-done', {
+        shardIndex: r.shardIndex,
+        phaseTheme: r.phaseTheme,
+        candidates: r.candidates,
+        relations: r.relations,
+        config: r.config,
+        turnRange: shard?.turnRange,
+        startTurn: shard?.startTurn,
+        endTurn: shard?.endTurn,
+        extractionDepth: depth,
+      });
+      return true;
+    }
+
+    const candidate = item as Record<string, unknown>;
+    const shardIndex = typeof candidate?.shardIndex === 'number' ? candidate.shardIndex : -1;
+    const error = formatValidationError(validation.error);
+    console.error('  [validation error]', shardIndex, sanitizeForLog(error));
+    const shard = manifest.shards.find((s) => s.index === shardIndex);
+    onEvent('shard-error', {
+      shardIndex,
+      error,
+      turnRange: shard?.turnRange,
+      startTurn: shard?.startTurn,
+      endTurn: shard?.endTurn,
+      extractionDepth: depth,
+    });
+    return false;
+  }
+
+  function recordParsedText(text: string): number {
+    const parsed = parseJsonFromText(text);
+    let count = 0;
+    for (const item of collectParsedItems(parsed)) {
+      if (recordParsedItem(item)) count++;
+    }
+    return count;
+  }
+
+  const readToolUsePaths = new Map<string, string>();
+
   try {
     const q = query({
       prompt: '请开始提取。',
@@ -82,9 +147,20 @@ export async function collectShardTextResults(params: {
       if (msg.type === 'assistant') {
         const am = msg as SDKMessage & { type: 'assistant'; message?: { content?: unknown[] } };
         if (am.message?.content) {
-          for (const block of am.message.content as Array<{ type: string; text?: string; name?: string }>) {
-            if (block.type === 'text') console.error('  [asst text]', sanitizeForLog((block.text || '').substring(0, 120)));
-            if (block.type === 'tool_use') console.error('  [asst tool]', block.name);
+          for (const block of am.message.content as Array<{
+            type: string;
+            id?: string;
+            text?: string;
+            name?: string;
+            input?: { file_path?: string };
+          }>) {
+            if (block.type === 'text') console.error('  [asst text]', 'chars:', (block.text || '').length);
+            if (block.type === 'tool_use') {
+              console.error('  [asst tool]', block.name);
+              if (block.name === 'Read' && block.id && typeof block.input?.file_path === 'string') {
+                readToolUsePaths.set(block.id, block.input.file_path);
+              }
+            }
           }
         }
       }
@@ -101,40 +177,21 @@ export async function collectShardTextResults(params: {
           const text = textFromToolResultContent(block.content);
           if (!text) continue;
 
-          console.error('  [tool_result]', sanitizeForLog(text.substring(0, 200)));
-          const parsed = parseJsonFromText(text);
-          for (const item of collectParsedItems(parsed)) {
-            const validation = SubmitExtractionSchema.safeParse(item);
-            if (validation.success) {
-              const r = validation.data;
-              shardTextResults.set(r.shardIndex, JSON.stringify(r));
-              console.error('  [parsed shard]', r.shardIndex, 'theme:', sanitizeForLog(r.phaseTheme || ''));
-              const shard = manifest.shards.find((s) => s.index === r.shardIndex);
-              onEvent('shard-done', {
-                shardIndex: r.shardIndex,
-                phaseTheme: r.phaseTheme,
-                candidates: r.candidates,
-                relations: r.relations,
-                config: r.config,
-                turnRange: shard?.turnRange,
-                startTurn: shard?.startTurn,
-                endTurn: shard?.endTurn,
-                extractionDepth: depth,
-              });
-            } else {
-              const candidate = item as Record<string, unknown>;
-              const shardIndex = typeof candidate?.shardIndex === 'number' ? candidate.shardIndex : -1;
-              const error = formatValidationError(validation.error);
-              console.error('  [validation error]', shardIndex, sanitizeForLog(error));
-              const shard = manifest.shards.find((s) => s.index === shardIndex);
-              onEvent('shard-error', {
-                shardIndex,
-                error,
-                turnRange: shard?.turnRange,
-                startTurn: shard?.startTurn,
-                endTurn: shard?.endTurn,
-                extractionDepth: depth,
-              });
+          console.error('  [tool_result]', 'chars:', text.length);
+          const parsedCount = recordParsedText(text);
+          if (parsedCount === 0 && block.tool_use_id) {
+            const filePath = readToolUsePaths.get(block.tool_use_id);
+            if (filePath && isAgentToolResultPath(filePath)) {
+              try {
+                for (const item of await readShardItemsFromAgentToolResultPath(filePath)) {
+                  recordParsedItem(item);
+                }
+              } catch (err) {
+                console.error(
+                  '[extract-ontology] tool-result 文件解析失败:',
+                  sanitizeForLog(err instanceof Error ? err.message : String(err)),
+                );
+              }
             }
           }
         }
@@ -148,7 +205,7 @@ export async function collectShardTextResults(params: {
 
       if (msg.type === 'result') {
         const resultStr = JSON.stringify(msg);
-        console.error('  [result]', sanitizeForLog(resultStr.substring(0, 400)));
+        console.error('  [result]', 'chars:', resultStr.length);
       }
     }
   } catch (err) {
@@ -176,6 +233,13 @@ export async function collectShardTextResults(params: {
     }
   } finally {
     clearTimeout(timeoutId);
+  }
+
+  if (shardTextResults.size === 0 && errors.length === 0) {
+    errors.push({
+      type: 'recoverable',
+      detail: 'Agent SDK 未返回可解析的分片 JSON，可能是大结果未被父 Agent 转述',
+    });
   }
 
   return { results: shardTextResults, errors };

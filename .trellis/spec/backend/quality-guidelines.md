@@ -135,6 +135,66 @@ try {
 
 测试点：使用 fake timers 断言 heartbeat 会写入 `: keepalive\n\n`，并且调用 cleanup 后不再写入。不要用业务 `event:` 作为 heartbeat，否则前端事件处理器会误以为有进度事件。
 
+### Agent SDK tool-result 文件恢复
+
+#### 1. Scope / Trigger
+
+当 Claude Agent SDK 把大段子 Agent 输出落到 `.claude/projects/.../tool-results/call_*.json` 时，后端可以作为恢复路径读取该文件。触发场景是本体分片提取：子 Agent 已生成合法 JSON，但父 Agent 没有把完整 JSON 内联转述给 `collectShardTextResults()`。
+
+#### 2. Signatures
+
+```typescript
+export function isAgentToolResultPath(filePath: string): boolean;
+export async function readShardItemsFromAgentToolResultPath(filePath: string): Promise<unknown[]>;
+```
+
+#### 3. Contracts
+
+- 只接受 basename 匹配 `call_*.json` 的文件。
+- 父目录 basename 必须是 `tool-results`。
+- 文件扩展名必须是 `.json`。
+- 使用 `lstat()`，符号链接必须拒绝。
+- 文件大小必须低于恢复函数定义的上限。
+- 恢复出的对象仍必须经过业务 schema 校验，不能绕过 `SubmitExtractionSchema`。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+|------|------|
+| 非 `tool-results/call_*.json` | 返回空数组 |
+| 符号链接 | 返回空数组 |
+| 文件超过大小上限 | 返回空数组 |
+| 文件不存在或读取失败 | 调用方捕获并记录脱敏错误 |
+| JSON 包装为 `{ type: "text", text: "```json ...```" }` | 递归解包后交给 schema 校验 |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: `.../tool-results/call_00_abc.json` 内含 text-wrapped shard JSON，恢复后触发原有 `shard-done`。
+- Base: 普通内联 JSON 继续走 `tool_result` 文本解析。
+- Bad: `/tmp/tool-results/secret.json`、`call_00_abc.txt`、symlink 到其他文件，都不读取。
+
+#### 6. Tests Required
+
+- 解析器测试：text-wrapped JSON 能被递归提取，普通内联 JSON 行为保持。
+- 文件恢复测试：只接受安全路径，拒绝 symlink。
+- collector 测试：模拟 `assistant.tool_use Read(file_path)` + `user.tool_result(tool_use_id)`，断言恢复后有 `shard-done`。
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```typescript
+// 扩大权限，让父 Agent 用 Bash cat 文件。
+allowedTools: ['Read', 'Task', 'Bash']
+```
+
+Correct:
+
+```typescript
+// 权限不变；后端只读取窄范围 tool-result JSON，并继续走 schema 校验。
+allowedTools: ['Read', 'Task']
+```
+
 ## 反模式
 
 - 不使用 `require()` — 仅使用 ESM 导入。
