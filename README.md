@@ -365,8 +365,6 @@ npm test          # 运行全部 server/src 下 .test.ts 文件
 
 ## 许可证
 
-本项目基于 **GNU Affero General Public License v3.0 (AGPL-3.0)** 许可证开源。详见 [LICENSE](LICENSE) 文件。
-
-> [!NOTE]
-> - 本项目仅供学习与研究交流。使用 LLM API 功能时请务必遵循相关服务的使用条款及当地法律法规。
-> - 感谢 [linux.do](https://linux.do/) 社区在开发过程中提供的反馈、讨论和灵感。
+- 本项目基于 **GNU Affero General Public License v3.0 (AGPL-3.0)** 许可证开源。详见 [LICENSE](LICENSE) 文件。
+- 本项目仅供学习与研究交流。使用 LLM API 功能时请务必遵循相关服务的使用条款及当地法律法规。
+- 感谢 [linux.do](https://linux.do/) 社区在开发过程中提供的反馈、讨论和灵感。
