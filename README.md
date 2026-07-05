@@ -12,14 +12,14 @@
 
 LLM Context Viz 是一个基于 **Express + React** 构建的本地工具，支持将 LLM 会话 JSONL 文件导入 SQLite 数据库，并提供多维度的可视化分析。核心特性：
 
-- **会话扫描** — 递归扫描 `~/.claude/projects/` 和 `~/.codex/` 目录，SHA256 去重，增量导入。支持 Claude Code（Anthropic SDK 格式）和 Codex（OpenAI 兼容格式）两种 JSONL 来源
+- **会话扫描** — 递归扫描 `~/.claude/projects/`、`~/.codex/sessions/` 和 `~/.codex/archived_sessions/`，SHA256 去重，增量导入。支持 Claude Code（Anthropic SDK 格式）和 Codex（OpenAI 兼容格式）两种 JSONL 来源
 - **处理管道** — 五阶段同步管道（解析 → Turn 分组 → Token 计算 → 时间线拆解 → 摘要聚合），核心逻辑集中在 `shared/pipeline/`，前后端零依赖共享
 - **Turn 检查器** — 按 turn 粒度拆解 token 分布（模型 / 子代理 / 工具 / 系统 / 用户），支持执行时间线、token 增量面板、工具使用统计
 - **上下文组装视图** — 柱状图展示 context window 内 token 占用，按类别（system prompt、tool call、content block）拆解，含增长趋势折线图
-- **LLM 翻译** — 对 tool call 参数 / 结果进行中文翻译（Anthropic API / OpenAI 兼容端点），支持项目常量翻译
-- **本体提取** — 从会话内容中自动提取概念节点和关系边，分片并发+置信度评分+合并去重，SSE 流式返回，支持导出 Obsidian 知识卡片
+- **LLM 翻译** — 对 tool call 参数 / 结果进行中文翻译（Chat Completions 兼容端点），支持项目常量缓存翻译
+- **本体提取** — 从会话内容中自动提取概念节点和关系边，分片并发、置信度评分、缓存复用、失败分片重跑，SSE 流式返回并保持长连接
 - **校准系统** — 校准 LLM 分析参数（手动 + 自动检测），按来源（claude/codex）独立维护，用于分类器微调和 token 估算
-- **模型配置** — 管理 API key、自定义端点、模型选择，支持 .env 文件和环境变量双重配置
+- **模型配置** — 管理 `LLM_API_KEY`、自定义端点、模型选择，支持 `~/.llm-context-viz/.env`、项目 `.env` 和环境变量
 
 <br>
 
@@ -42,7 +42,7 @@ flowchart LR
     end
 
     subgraph Backend["后端层"]
-        Routes["Routes /sessions /scanner /calibrate /obsidian /ontology /config"]
+        Routes["Routes /sessions(+ontology) /scanner /calibrate /obsidian /monitor /config"]
         Services["Services pipeline / calibration / card-summary / extraction"]
         LLM["LLM Client translation / ontology-extraction (分片+置信度+合并)"]
         Monitor["File Monitor watcher"]
@@ -79,10 +79,19 @@ git clone https://github.com/ghoshadow/llm-context-viz.git
 cd llm-context-viz
 npm install
 
-# 开发模式（分别启动前端和后端）
+# 开发模式（两个终端分别启动前端和后端）
 npm run dev          # Vite dev server（前端，端口 5173）
 npm run server       # Express API server（后端，端口 4137）
 ```
+
+生产模式由 Express 托管构建后的前端：
+
+```bash
+npm run build
+NODE_ENV=production npm run server
+```
+
+当前项目是 Web 本地工具，近期已移除 Tauri/桌面打包脚本。
 
 ### 首次启动
 
@@ -110,12 +119,13 @@ npm run server       # Express API server（后端，端口 4137）
 | 变量 | 说明 | 默认值 |
 | :-- | :-- | :-- |
 | `PORT` | 服务器端口 | `4137` |
-| `ANTHROPIC_API_KEY` | Anthropic API 密钥 | — |
-| `ANTHROPIC_BASE_URL` | 自定义 API 端点 | `https://api.anthropic.com` |
-| `ANTHROPIC_MODEL` | 默认模型 | `claude-sonnet-4-6` |
-| `LLM_BASE_URL` | LLM 翻译端点（OpenAI 兼容） | `https://api.deepseek.com/anthropic` |
-| `LLM_API_KEY` | LLM 翻译 API 密钥 | — |
-| `LLM_MODEL` | LLM 翻译模型 | `deepseek-v4-pro` |
+| `VITE_PORT` | Vite 开发服务器端口 | `5173` |
+| `LLM_BASE_URL` | 本体提取 / 卡片总结端点（Anthropic 兼容） | `https://api.deepseek.com/anthropic` |
+| `LLM_API_KEY` | LLM API 密钥；运行时会安全映射给 Claude Agent SDK 子进程 | — |
+| `LLM_MODEL` | 本体提取 / 卡片总结模型 | `deepseek-v4-pro` |
+| `TRANSLATION_BASE_URL` | 翻译端点（Chat Completions 兼容） | `https://api.deepseek.com/chat/completions` |
+| `TRANSLATION_MODEL` | 翻译模型 | `deepseek-v4-flash` |
+| `TRANSLATION_MAX_TOKENS` | 翻译请求最大输出 token（可选） | — |
 | `NODE_ENV` | 运行环境 | `development` |
 | `LLM_CONTEXT_VIZ_DATA_DIR` | 数据目录覆盖 | `./data` |
 
@@ -131,19 +141,26 @@ npm run server       # Express API server（后端，端口 4137）
 | `/api/sessions` | `GET` | 获取全部会话列表 |
 | `/api/sessions/:id` | `GET` | 获取单个会话详情 |
 | `/api/sessions/:id` | `DELETE` | 删除会话及其关联数据 |
+| `/api/sessions/:id/refresh` | `POST` | 重新解析原始 JSONL 并刷新 turn 数据 |
 | `/api/sessions/:id/turns` | `GET` | 获取会话 turn 列表（分页） |
-| `/api/sessions/:id/turns/:index` | `GET` | 获取指定 turn 的完整数据 |
+| `/api/sessions/:id/turns/:turnIndex` | `GET` | 获取指定 turn 的完整数据 |
 | `/api/sessions/:id/translate` | `POST` | 翻译会话中 tool call 内容 |
-| `/api/sessions/:id/translate/constants` | `POST` | 翻译会话中项目常量 |
+| `/api/sessions/:id/translations/:turnIndex` | `GET` | 获取 turn 翻译缓存，可带 `constantSections` |
+| `/api/sessions/:id/ontology` | `GET` / `POST` / `DELETE` | 读取、保存或删除本体数据 |
 | `/api/sessions/:id/ontology/extract` | `POST` | 触发本体提取任务（SSE） |
-| `/api/sessions/:id/ontology/card` | `POST` | 生成并导出 Obsidian 知识卡片 |
-| `/api/scanner/scan` | `POST` | 扫描指定目录的 JSONL 文件 |
+| `/api/sessions/:id/ontology/extract/status` | `GET` | 查询本体提取任务状态 |
+| `/api/sessions/:id/ontology/content-status` | `GET` | 查询会话内容文件拆分状态 |
+| `/api/sessions/:id/ontology/content-extract` | `POST` | 将会话内容拆分导出到文件 |
+| `/api/sessions/:id/ontology/summarize-card` | `POST` | 启动主题知识卡片总结任务 |
+| `/api/sessions/:id/ontology/summarize-card/:topicId` | `GET` / `PUT` | 获取或手动保存主题总结 |
+| `/api/sessions/:id/ontology/obsidian-card/:topicId` | `GET` / `POST` | 查询或同步 Obsidian 知识卡片 |
+| `/api/scanner/scan` | `GET` | 扫描默认或指定目录下的 JSONL 文件 |
 | `/api/scanner/import` | `POST` | 导入选中的 JSONL 文件 |
-| `/api/scanner/files` | `GET` | 获取已扫描文件列表 |
-| `/api/calibrate/constants` | `GET` | 读取校准常量 |
-| `/api/calibrate/extract` | `POST` | 启动校准提取任务 |
+| `/api/calibrate/current` | `GET` | 读取当前项目和来源的校准常量 |
 | `/api/calibrate/apply` | `PUT` | 应用校准常量 |
-| `/api/calibrate/job` | `GET` | 查询校准任务状态 |
+| `/api/calibrate/auto/start` | `POST` | 启动自动校准任务 |
+| `/api/calibrate/auto/:jobId` | `GET` | 查询自动校准任务状态 |
+| `/api/calibrate/auto/:jobId/cancel` | `POST` | 取消自动校准任务 |
 | `/api/obsidian/config` | `GET` / `PUT` | 读写 Obsidian 集成配置 |
 | `/api/config/model` | `GET` / `PUT` | 读写模型配置 |
 | `/api/config/home` | `GET` | 获取用户 home 目录路径 |
@@ -192,18 +209,18 @@ curl "http://localhost:4137/api/sessions/abc123/turns?limit=50&offset=0"
 </details>
 
 <details>
-<summary><code>POST /api/scanner/scan</code> — 扫描 JSONL 文件</summary>
+<summary><code>GET /api/scanner/scan</code> — 扫描 JSONL 文件</summary>
 <br>
 
 ```bash
-curl -X POST http://localhost:4137/api/scanner/scan \
-  -H "Content-Type: application/json" \
-  -d '{"paths": ["~/.claude/projects/"]}'
+curl "http://localhost:4137/api/scanner/scan?paths=/Users/me/.claude/projects,/Users/me/.codex/sessions&depth=3&force=1"
 ```
 
-| 字段 | 说明 |
+| 参数 | 说明 |
 | :-- | :-- |
-| `paths` | 要扫描的目录路径列表，支持 `~` 展开 |
+| `paths` | 要扫描的目录列表，逗号分隔；省略时使用默认 Claude/Codex 会话目录 |
+| `depth` | 最大递归深度，默认 `3` |
+| `force` | 设为 `1` 时清空扫描缓存并重新计算文件 hash |
 
 <br>
 </details>
@@ -215,13 +232,16 @@ curl -X POST http://localhost:4137/api/scanner/scan \
 ```bash
 curl -X POST http://localhost:4137/api/sessions/abc123/translate \
   -H "Content-Type: application/json" \
-  -d '{"turnIndex": 3, "stepIndex": 1}'
+  -d '{"text":"hello","turnIndex":3,"stepIndex":1,"sectionIndex":0}'
 ```
 
 | 字段 | 说明 |
 | :-- | :-- |
+| `text` | 要翻译的文本 |
 | `turnIndex` | Turn 序号（从 0 开始） |
 | `stepIndex` | Step 序号 |
+| `sectionIndex` | 同一 step 内的文本段序号 |
+| `force` | 设为 `true` 时跳过缓存重新翻译 |
 
 <br>
 </details>
@@ -233,14 +253,19 @@ curl -X POST http://localhost:4137/api/sessions/abc123/translate \
 ```bash
 curl -N -X POST http://localhost:4137/api/sessions/abc123/ontology/extract \
   -H "Content-Type: application/json" \
-  -d '{"shardKey": "concept"}'
+  -d '{"shardSize":30,"maxShardChars":45000,"incremental":true,"extractionDepth":"refined"}'
 ```
 
-响应为 SSE 事件流，`data` 字段包含提取进度和结果节点。
+响应为 SSE 事件流，空闲时会发送 keepalive；`data` 字段包含提取进度、分片状态和最终统计。
 
 | 字段 | 说明 |
 | :-- | :-- |
-| `shardKey` | 提取分片标识，用于增量缓存 |
+| `shardSize` | 每个分片的 turn 数，默认 `30` |
+| `maxShardChars` | 单个分片最大字符数，默认 `45000` |
+| `force` | 忽略缓存重新提取 |
+| `incremental` | 与已有本体结果增量合并 |
+| `retryFailedOnly` | 只重跑失败分片 |
+| `extractionDepth` | `refined` 或 `deep` |
 
 <br>
 </details>
@@ -253,9 +278,10 @@ curl -N -X POST http://localhost:4137/api/sessions/abc123/ontology/extract \
 
 | 位置 | 用途 | 生效时机 |
 | :-- | :-- | :-- |
-| `.env` | 启动前配置（LLM 密钥、端口等） | 服务启动时 |
+| `~/.llm-context-viz/.env` | 前端模型配置写入位置 | 保存后即时生效 |
+| 项目 `.env` | 启动前配置（端口、数据目录等） | 服务启动时 |
 | `data/llm-context.db` | 运行时数据（会话、校准、Obsidian 配置） | 保存后即时生效 |
-| 前端 ModelConfig | 模型选择和 API 端点 | 即时生效 |
+| 前端 ModelConfig | `LLM_*` 和 `TRANSLATION_*` 配置 | 即时生效 |
 
 ### 模型配置项
 
@@ -263,9 +289,11 @@ curl -N -X POST http://localhost:4137/api/sessions/abc123/ontology/extract \
 
 | 配置项 | 说明 |
 | :-- | :-- |
-| Anthropic API Key | Anthropic API 密钥 |
-| Anthropic Base URL | 自定义 API 端点地址 |
-| Anthropic Model | 模型 ID（如 `claude-sonnet-4-6`） |
+| `LLM_API_KEY` | 本体提取、知识卡片总结和翻译共用的 API Key |
+| `LLM_BASE_URL` | 本体提取 / 卡片总结使用的 Anthropic 兼容端点 |
+| `LLM_MODEL` | 本体提取 / 卡片总结模型 |
+| `TRANSLATION_BASE_URL` | 可选翻译端点，不填时使用默认 Chat Completions 地址 |
+| `TRANSLATION_MODEL` | 可选翻译模型，不填时使用默认翻译模型 |
 
 ### 校准配置项
 
