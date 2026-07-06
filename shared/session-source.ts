@@ -1,4 +1,12 @@
-export type SessionSource = 'claude' | 'codex' | 'opencode' | 'openclaw';
+export type SessionSource = 'claude' | 'codex' | 'opencode' | 'pi' | 'openclaw';
+
+export const SESSION_SOURCE_LABELS: Record<SessionSource, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+  openclaw: 'OpenClaw',
+};
 
 export interface SessionSourceLike {
   source?: SessionSource | string | null;
@@ -12,6 +20,7 @@ export function getSessionSource(session: SessionSourceLike): SessionSource {
     session.source === 'codex' ||
     session.source === 'claude' ||
     session.source === 'opencode' ||
+    session.source === 'pi' ||
     session.source === 'openclaw'
   ) {
     return session.source;
@@ -22,6 +31,8 @@ export function getSessionSource(session: SessionSourceLike): SessionSource {
   const version = (session.version || '').toLowerCase();
 
   if (model.includes('claude')) return 'claude';
+  if (model === 'opencode' || version.includes('opencode')) return 'opencode';
+  if (model === 'pi' || version === 'pi') return 'pi';
 
   if (
     model.includes('gpt') ||

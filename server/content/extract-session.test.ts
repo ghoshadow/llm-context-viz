@@ -104,3 +104,68 @@ test('keeps Claude JSONL ontology extraction unchanged', () => {
   assert.match(turns[0]!.content, /Claude 侧用户问题/);
   assert.match(turns[0]!.content, /\[REPLY\] Claude 侧模型回答/);
 });
+
+test('extracts OpenCode JSONL into ontology turn content', () => {
+  const rawJsonl = toJsonl([
+    { type: 'step_start', timestamp: 1767036059338, sessionID: 'ses_open', part: { type: 'step-start' } },
+    {
+      type: 'tool_use',
+      timestamp: 1767036061199,
+      sessionID: 'ses_open',
+      part: {
+        type: 'tool',
+        callID: 'call_1',
+        tool: 'bash',
+        state: { input: { command: 'echo ok' }, output: 'ok', status: 'completed' },
+      },
+    },
+    {
+      type: 'text',
+      timestamp: 1767036064268,
+      sessionID: 'ses_open',
+      part: { type: 'text', text: 'OpenCode 侧模型回答' },
+    },
+    {
+      type: 'step_finish',
+      timestamp: 1767036064273,
+      sessionID: 'ses_open',
+      part: { type: 'step-finish', tokens: { input: 120, output: 8 } },
+    },
+  ]);
+
+  const turns = extractContentWithTurns(rawJsonl);
+
+  assert.equal(turns.length, 1);
+  assert.match(turns[0]!.content, /\[REPLY\] OpenCode 侧模型回答/);
+  assert.match(turns[0]!.content, /\[TOOL_SUMMARY\][\s\S]*bash/);
+  assert.match(turns[0]!.content, /echo ok/);
+});
+
+test('extracts Pi session JSONL into ontology turn content', () => {
+  const rawJsonl = toJsonl([
+    { type: 'header', version: 3, workingDirectory: '/repo/pi' },
+    { type: 'message', id: 'u1', parentId: null, message: { role: 'user', content: [{ type: 'text', text: 'Pi 侧用户问题' }] } },
+    { type: 'message', id: 'a1', parentId: 'u1', message: { role: 'assistant', content: [{ type: 'text', text: 'Pi 侧模型回答' }] } },
+    { type: 'message', id: 't1', parentId: 'a1', message: { role: 'toolResult', toolName: 'bash', content: [{ type: 'text', text: 'Pi 工具结果' }] } },
+    { type: 'compaction', id: 'c1', parentId: 't1', summary: 'Pi 压缩摘要' },
+  ]);
+
+  const turns = extractContentWithTurns(rawJsonl);
+
+  assert.equal(turns.length, 1);
+  assert.match(turns[0]!.content, /Pi 侧用户问题/);
+  assert.match(turns[0]!.content, /\[REPLY\] Pi 侧模型回答/);
+  assert.match(turns[0]!.content, /\[TOOL_SUMMARY\][\s\S]*Pi 工具结果/);
+  assert.match(turns[0]!.content, /Pi 压缩摘要/);
+});
+
+test('rejects unknown JSONL during ontology content extraction', () => {
+  const rawJsonl = toJsonl([
+    { type: 'message', value: 'not an agent log' },
+  ]);
+
+  assert.throws(
+    () => extractContentWithTurns(rawJsonl),
+    /Unsupported JSONL session format/,
+  );
+});

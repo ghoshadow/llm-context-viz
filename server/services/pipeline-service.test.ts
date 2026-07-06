@@ -333,3 +333,57 @@ test('runPipelineOnContentSync Claude 分支返回摘要', () => {
   assert.ok(Array.isArray(result.turns), 'turns 应为数组');
   assert.equal(result.summary.session.model, 'claude-sonnet');
 });
+
+test('runPipelineOnContentSync OpenCode 分支返回摘要', () => {
+  const opencodeJsonl = [
+    {
+      type: 'step_start',
+      timestamp: 1767036059338,
+      sessionID: 'ses_open',
+      part: { id: 'prt_1', sessionID: 'ses_open', messageID: 'msg_1', type: 'step-start' },
+    },
+    {
+      type: 'text',
+      timestamp: 1767036064268,
+      sessionID: 'ses_open',
+      part: { id: 'prt_2', sessionID: 'ses_open', messageID: 'msg_2', type: 'text', text: 'OpenCode reply' },
+    },
+    {
+      type: 'step_finish',
+      timestamp: 1767036064273,
+      sessionID: 'ses_open',
+      part: { id: 'prt_3', sessionID: 'ses_open', messageID: 'msg_2', type: 'step-finish', tokens: { input: 321, output: 9 } },
+    },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const result = runPipelineOnContentSync(opencodeJsonl, 'opencode.jsonl');
+
+  assert.equal(result.summary.session.model, 'opencode');
+  assert.equal(result.summary.session.peakTokens, 321);
+  assert.equal(result.turns.length, 1);
+  assert.equal(result.turns[0]!.segs.some((seg) => seg.det.text === 'OpenCode reply'), true);
+});
+
+test('runPipelineOnContentSync Pi session 分支返回摘要', () => {
+  const piJsonl = [
+    { type: 'header', version: 3, workingDirectory: '/repo/pi' },
+    { type: 'message', id: 'u1', parentId: null, message: { role: 'user', content: [{ type: 'text', text: 'Pi prompt' }] } },
+    { type: 'message', id: 'a1', parentId: 'u1', message: { role: 'assistant', content: [{ type: 'text', text: 'Pi reply' }] } },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const result = runPipelineOnContentSync(piJsonl, 'pi.jsonl');
+
+  assert.equal(result.summary.session.model, 'pi');
+  assert.equal(result.summary.session.cwd, '/repo/pi');
+  assert.equal(result.turns.length, 1);
+  assert.equal(result.turns[0]!.prompt, 'Pi prompt');
+});
+
+test('runPipelineOnContentSync unknown JSONL throws unsupported format error', () => {
+  const unknownJsonl = JSON.stringify({ type: 'message', value: 'not an agent log' }) + '\n';
+
+  assert.throws(
+    () => runPipelineOnContentSync(unknownJsonl, 'unknown.jsonl'),
+    /Unsupported JSONL session format/,
+  );
+});

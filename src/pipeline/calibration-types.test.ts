@@ -56,5 +56,6 @@ test('normalizes supported agent sources and rejects unknown values', () => {
   assert.equal(normalizeAgentSource('codex'), 'codex');
   assert.equal(normalizeAgentSource('opencode'), 'opencode');
   assert.equal(normalizeAgentSource('openclaw'), 'openclaw');
+  assert.throws(() => normalizeAgentSource('pi'), /Unsupported calibration source: pi/);
   assert.throws(() => normalizeAgentSource('other'), /Unsupported calibration source: other/);
 });

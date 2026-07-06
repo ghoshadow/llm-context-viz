@@ -4,7 +4,10 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db';
 import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../shared/pipeline/index';
-import { isCodexJsonl, runCodexPipeline } from '../../shared/pipeline/codex-jsonl';
+import { runCodexPipeline } from '../../shared/pipeline/codex-jsonl';
+import { runOpenCodePipeline } from '../../shared/pipeline/opencode-jsonl';
+import { runPiPipeline } from '../../shared/pipeline/pi-jsonl';
+import { detectSessionFormat } from '../../shared/pipeline/session-format';
 import type { SessionSummary, TurnData } from '../../shared/types/session';
 import type Database from 'better-sqlite3';
 import { readCalibrationConstants } from './calibration-constants';
@@ -24,7 +27,7 @@ import type { ParseError } from '../../shared/pipeline/parse-jsonl';
  * 使用异步 fs/promises API，避免阻塞事件循环。
  */
 export async function computeMemoryChars(jsonlContent?: string): Promise<number> {
-  if (jsonlContent && isCodexJsonl(jsonlContent)) return 0;
+  if (jsonlContent && detectSessionFormat(jsonlContent) !== 'claude') return 0;
 
   let memChars = 0;
   const globalMd = join(homedir(), '.claude', 'CLAUDE.md');
@@ -51,7 +54,7 @@ export async function computeMemoryChars(jsonlContent?: string): Promise<number>
  * 仍使用同步 fs API，但在事务中无法避免。
  */
 export function computeMemoryCharsSync(jsonlContent?: string): number {
-  if (jsonlContent && isCodexJsonl(jsonlContent)) return 0;
+  if (jsonlContent && detectSessionFormat(jsonlContent) !== 'claude') return 0;
 
   let memChars = 0;
   try {
@@ -86,6 +89,9 @@ export function extractCwdFromJsonl(jsonlContent?: string): string {
       const parsed = JSON.parse(line);
       if (typeof parsed.cwd === 'string' && parsed.cwd) return parsed.cwd;
       if (parsed.type === 'session_meta' && typeof parsed.payload?.cwd === 'string') return parsed.payload.cwd;
+      if (parsed.type === 'header' && typeof parsed.workingDirectory === 'string') return parsed.workingDirectory;
+      if (parsed.type === 'session' && typeof parsed.cwd === 'string') return parsed.cwd;
+      if (typeof parsed.part?.cwd === 'string') return parsed.part.cwd;
     } catch { /* ignore parse errors */ }
   }
   return '';
@@ -104,10 +110,22 @@ export async function runPipelineOnContent(
   jsonlContent: string,
   filename: string,
 ): Promise<{ summary: SessionSummary; turns: TurnData[]; errors: ParseError[] }> {
-  if (isCodexJsonl(jsonlContent)) {
-    const cwd = extractCwdFromJsonl(jsonlContent);
-    const constants = cwd ? readCalibrationConstants(cwd, 'codex') : null;
-    return runCodexPipeline(jsonlContent, filename, constants);
+  const format = detectSessionFormat(jsonlContent);
+  switch (format) {
+    case 'codex': {
+      const cwd = extractCwdFromJsonl(jsonlContent);
+      const constants = cwd ? readCalibrationConstants(cwd, 'codex') : null;
+      return runCodexPipeline(jsonlContent, filename, constants);
+    }
+    case 'opencode':
+      return runOpenCodePipeline(jsonlContent, filename);
+    case 'pi-session':
+    case 'pi-event-stream':
+      return runPiPipeline(jsonlContent, filename);
+    case 'claude':
+      break;
+    case 'unknown':
+      throw new Error('Unsupported JSONL session format');
   }
 
   const cwd = extractCwdFromJsonl(jsonlContent);
@@ -127,10 +145,22 @@ export function runPipelineOnContentSync(
   jsonlContent: string,
   filename: string,
 ): { summary: SessionSummary; turns: TurnData[]; errors: ParseError[] } {
-  if (isCodexJsonl(jsonlContent)) {
-    const cwd = extractCwdFromJsonl(jsonlContent);
-    const constants = cwd ? readCalibrationConstants(cwd, 'codex') : null;
-    return runCodexPipeline(jsonlContent, filename, constants);
+  const format = detectSessionFormat(jsonlContent);
+  switch (format) {
+    case 'codex': {
+      const cwd = extractCwdFromJsonl(jsonlContent);
+      const constants = cwd ? readCalibrationConstants(cwd, 'codex') : null;
+      return runCodexPipeline(jsonlContent, filename, constants);
+    }
+    case 'opencode':
+      return runOpenCodePipeline(jsonlContent, filename);
+    case 'pi-session':
+    case 'pi-event-stream':
+      return runPiPipeline(jsonlContent, filename);
+    case 'claude':
+      break;
+    case 'unknown':
+      throw new Error('Unsupported JSONL session format');
   }
 
   const cwd = extractCwdFromJsonl(jsonlContent);
@@ -254,7 +284,7 @@ export async function createSession(opts: {
       opts.hash,
       summary.session.model,
       summary.session.version,
-      opts.aiTitle ?? null,
+      opts.aiTitle ?? summary.session.aiTitle ?? null,
       summary.session.cwd,
       summary.session.requests,
       summary.session.peakIndex,

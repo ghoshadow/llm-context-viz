@@ -4,7 +4,7 @@ import { useUIStore } from '../../store/uiStore';
 import { SEMANTIC } from '../../styles/theme';
 import { fmtK, fmtDateShort } from '../../utils/format';
 import { get, post } from '../../api/client';
-import { filterScannerFiles } from './scannerFileFilters';
+import { SCANNER_SOURCE_LABELS, SCANNER_SOURCES, filterScannerFiles, type ScannerFileSource } from './scannerFileFilters';
 import { getScannerFileTitleDisplay, type ScannerFileTitleDisplay } from './scannerFileTitle';
 
 interface FoundFile {
@@ -12,7 +12,7 @@ interface FoundFile {
   name: string;
   size: number;
   modified: string;
-  source?: 'claude' | 'codex';
+  source?: ScannerFileSource;
   hash: string;
   imported: boolean;
   title?: string;
@@ -160,7 +160,7 @@ const S = {
   status: { textAlign: 'center', fontSize: 13, color: SEMANTIC.textSecondary, marginTop: 12 } as React.CSSProperties,
   tabs: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
     gap: 4,
     padding: 4,
     marginTop: 14,
@@ -224,7 +224,7 @@ function StructuredScannerTitle({ title }: { title: Extract<ScannerFileTitleDisp
 export default function ScannerModal() {
   const [scanning, setScanning] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
-  const [activeSource, setActiveSource] = useState<'claude' | 'codex'>('claude');
+  const [activeSource, setActiveSource] = useState<ScannerFileSource>('claude');
   const [hideShortSessions, setHideShortSessions] = useState(false);
 
   const files = useSessionStore(s => s.scanFiles);
@@ -235,15 +235,17 @@ export default function ScannerModal() {
   const setPage = useUIStore(s => s.setPage);
   const selectSession = useSessionStore(s => s.selectSession);
 
-  const claudeFiles = useMemo(
-    () => files.filter((f) => f.source !== 'codex'),
+  const sourceCounts = useMemo(
+    () => Object.fromEntries(SCANNER_SOURCES.map((source) => [
+      source,
+      files.filter((file) => file.source === source).length,
+    ])) as Record<ScannerFileSource, number>,
     [files],
   );
-  const codexFiles = useMemo(
-    () => files.filter((f) => f.source === 'codex'),
-    [files],
+  const sourceFiles = useMemo(
+    () => files.filter((f) => f.source === activeSource),
+    [files, activeSource],
   );
-  const sourceFiles = activeSource === 'codex' ? codexFiles : claudeFiles;
   const visibleFiles = useMemo(
     () => filterScannerFiles(files, { source: activeSource, hideShortSessions }),
     [files, activeSource, hideShortSessions],
@@ -256,8 +258,8 @@ export default function ScannerModal() {
       const data = await get<ScannerResponse>(force ? '/scanner/scan?force=1' : '/scanner/scan');
       const cached = data.cached ?? 0;
       const cachedNote = cached > 0 ? `（${cached} 个命中缓存）` : '';
-      const codexCount = Array.isArray(data.files) ? data.files.filter((f: FoundFile) => f.source === 'codex').length : 0;
-      const sourceNote = codexCount > 0 ? `，包含 ${codexCount} 个 Codex 日志` : '';
+      const extraCount = Array.isArray(data.files) ? data.files.filter((f: FoundFile) => f.source && f.source !== 'claude').length : 0;
+      const sourceNote = extraCount > 0 ? `，包含 ${extraCount} 个非 Claude 日志` : '';
       setScanFiles(data.files || [], `发现 ${data.totalFiles} 个有效文件，其中 ${data.importedCount} 个已导入${sourceNote}${cachedNote}`);
     } catch (e) {
       setScanFiles(files, '扫描失败: ' + (e as Error).message);
@@ -297,7 +299,7 @@ export default function ScannerModal() {
 
         {files.length === 0 && !scanning && (
           <p style={{ fontSize: 13, color: SEMANTIC.textSecondary, marginTop: 8, textAlign: 'center' }}>
-            扫描 Claude Code 与 Codex 的本地 JSONL 会话记录
+            扫描 Claude Code、Codex、OpenCode 与 Pi 的本地 JSONL 会话记录
           </p>
         )}
 
@@ -320,10 +322,8 @@ export default function ScannerModal() {
         {files.length > 0 && (
           <>
             <div style={S.tabs} role="tablist" aria-label="日志来源">
-              {([
-                ['claude', `Claude Code (${claudeFiles.length})`],
-                ['codex', `Codex (${codexFiles.length})`],
-              ] as const).map(([source, label]) => {
+              {SCANNER_SOURCES.map((source) => {
+                const label = `${SCANNER_SOURCE_LABELS[source]} (${sourceCounts[source]})`;
                 const active = activeSource === source;
                 return (
                   <button
@@ -362,7 +362,7 @@ export default function ScannerModal() {
         {files.length > 0 && visibleFiles.length === 0 && !scanning && (
           <div style={{ ...S.status, marginTop: 18 }}>
             {sourceFiles.length === 0
-              ? activeSource === 'codex' ? '未发现 Codex 日志' : '未发现 Claude Code 日志'
+              ? `未发现 ${SCANNER_SOURCE_LABELS[activeSource]} 日志`
               : '当前筛选条件下没有会话'}
           </div>
         )}
@@ -377,7 +377,7 @@ export default function ScannerModal() {
                   <span style={{ fontSize: 16, flexShrink: 0 }}>📄</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                      <span style={S.sourceTag}>{f.source === 'codex' ? 'Codex' : 'Claude'}</span>
+                      <span style={S.sourceTag}>{SCANNER_SOURCE_LABELS[f.source ?? 'claude']}</span>
                       {titleDisplay.kind === 'structured' ? (
                         <StructuredScannerTitle title={titleDisplay} />
                       ) : (

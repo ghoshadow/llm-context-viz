@@ -11,6 +11,9 @@ import type {
 } from '../types/session';
 import type { OntologyData } from '../types/ontology';
 
+type ScanFileSource = 'claude' | 'codex' | 'opencode' | 'pi';
+type ScanFile = { path: string; name: string; size: number; modified: string; source?: ScanFileSource; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number; cwd?: string };
+
 export interface SessionStore {
   sessions: SessionListItem[];
   sessionsLoading: boolean;
@@ -31,9 +34,9 @@ export interface SessionStore {
   scannerOpen: boolean;
 
   // Scan result cache
-  scanFiles: { path: string; name: string; size: number; modified: string; source?: 'claude' | 'codex'; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number; cwd?: string }[];
+  scanFiles: ScanFile[];
   scanStatus: string;
-  setScanFiles: (files: { path: string; name: string; size: number; modified: string; source?: 'claude' | 'codex'; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number }[], status: string) => void;
+  setScanFiles: (files: ScanFile[], status: string) => void;
 
   fetchSessions: () => Promise<void>;
   selectSession: (id: string) => Promise<void>;

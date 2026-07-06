@@ -4,7 +4,7 @@ import { useUIStore } from '../../store/uiStore';
 import type { SessionListItem } from '../../types/session';
 import { SEMANTIC } from '../../styles/theme';
 import { fmtK, fmtDateOnly } from '../../utils/format';
-import { getSessionSource, type SessionSource } from '../../utils/sessionSource';
+import { getSessionSource, SESSION_SOURCE_LABELS, type SessionSource } from '../../utils/sessionSource';
 import { getSessionProjectPathText } from './sessionProjectPath';
 import { getSessionCardTitleDisplay, type SessionCardTitleDisplay } from './sessionTitle';
 
@@ -75,7 +75,7 @@ const s = {
 
   tabs: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
+    gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
     gap: 4,
     padding: 4,
     maxWidth: 1080,
@@ -418,9 +418,12 @@ function StructuredSessionTitle({
 
 // ─── SessionList ────────────────────────────────────────────────────────
 
+const HOME_SOURCES = ['claude', 'codex', 'opencode', 'pi', 'openclaw'] as const satisfies readonly SessionSource[];
+type HomeSessionSource = typeof HOME_SOURCES[number];
+
 function SessionList({ sessions, activeSource, onSelect, onDelete }: {
   sessions: SessionListItem[];
-  activeSource: SessionSource;
+  activeSource: HomeSessionSource;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -428,7 +431,7 @@ function SessionList({ sessions, activeSource, onSelect, onDelete }: {
     return (
       <div style={s.grid}>
         <div style={s.empty}>
-          {activeSource === 'codex' ? '暂无已导入 Codex 会话' : '暂无已导入 Claude Code 会话'}
+          暂无已导入 {SESSION_SOURCE_LABELS[activeSource]} 会话
         </div>
       </div>
     );
@@ -451,7 +454,7 @@ function SessionList({ sessions, activeSource, onSelect, onDelete }: {
 // ─── HomePage ───────────────────────────────────────────────────────────
 
 export default function HomePage() {
-  const [activeSource, setActiveSource] = useState<SessionSource>('claude');
+  const [activeSource, setActiveSource] = useState<HomeSessionSource>('claude');
   const sessions = useSessionStore((st) => st.sessions);
   const sessionsLoading = useSessionStore((st) => st.sessionsLoading);
   const fetchSessions = useSessionStore((st) => st.fetchSessions);
@@ -464,15 +467,14 @@ export default function HomePage() {
     fetchSessions();
   }, [fetchSessions]);
 
-  const claudeSessions = useMemo(
-    () => sessions.filter((session) => getSessionSource(session) === 'claude'),
+  const sessionsBySource = useMemo(
+    () => Object.fromEntries(HOME_SOURCES.map((source) => [
+      source,
+      sessions.filter((session) => getSessionSource(session) === source),
+    ])) as Record<HomeSessionSource, SessionListItem[]>,
     [sessions],
   );
-  const codexSessions = useMemo(
-    () => sessions.filter((session) => getSessionSource(session) === 'codex'),
-    [sessions],
-  );
-  const visibleSessions = activeSource === 'codex' ? codexSessions : claudeSessions;
+  const visibleSessions = sessionsBySource[activeSource];
 
   const handleSelect = async (id: string) => {
     await selectSession(id);
@@ -495,7 +497,7 @@ export default function HomePage() {
         </div>
         <h1 style={s.h1}>LLM 上下文可视化</h1>
         <p style={s.desc}>
-          扫描本地 Claude Code 与 Codex 会话 JSONL 文件，查看上下文窗口增长、分类 Token 构成，
+          扫描本地 Claude Code、Codex、OpenCode 与 Pi 会话 JSONL 文件，查看上下文窗口增长、分类 Token 构成，
           并逐轮检查推理与工具调用细节。
         </p>
         <button
@@ -521,10 +523,8 @@ export default function HomePage() {
         <>
           {sessions.length > 0 && (
             <div style={s.tabs} role="tablist" aria-label="已导入会话来源">
-              {([
-                ['claude', `Claude Code (${claudeSessions.length})`],
-                ['codex', `Codex (${codexSessions.length})`],
-              ] as const).map(([source, label]) => {
+              {HOME_SOURCES.map((source) => {
+                const label = `${SESSION_SOURCE_LABELS[source]} (${sessionsBySource[source].length})`;
                 const active = activeSource === source;
                 return (
                   <button

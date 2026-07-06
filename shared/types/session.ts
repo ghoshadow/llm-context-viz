@@ -333,7 +333,7 @@ export interface SessionListItem {
   id: string;
   filename: string;
   cwd?: string | null;
-  source?: 'claude' | 'codex' | 'opencode' | 'openclaw';
+  source?: 'claude' | 'codex' | 'opencode' | 'pi' | 'openclaw';
   model: string;
   version: string;
   ai_title?: string;

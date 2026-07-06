@@ -7,6 +7,9 @@ import crypto from 'crypto';
 import { createSession } from '../services/pipeline-service';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
 import { validateBody, ImportRequestSchema } from '../middleware/validate.js';
+import { detectSessionFormat } from '../../shared/pipeline/session-format';
+import { runOpenCodePipeline } from '../../shared/pipeline/opencode-jsonl';
+import { runPiPipeline } from '../../shared/pipeline/pi-jsonl';
 import {
   getAllScannedFiles,
   upsertScannedFile,
@@ -17,7 +20,7 @@ import {
 
 const router = Router();
 
-type SessionSource = 'claude' | 'codex';
+type SessionSource = 'claude' | 'codex' | 'opencode' | 'pi';
 
 interface ScannedFile {
   path: string;
@@ -27,19 +30,42 @@ interface ScannedFile {
   source: SessionSource;
 }
 
-// Default scan paths — Claude Code and Codex store transcripts in different homes.
+// Default scan paths for local transcript stores that expose JSONL files.
 const DEFAULT_SCAN_PATHS = [
   join(homedir(), '.claude', 'projects'),
   join(homedir(), '.codex', 'sessions'),
   join(homedir(), '.codex', 'archived_sessions'),
+  join(homedir(), '.pi', 'agent', 'sessions'),
 ];
+
+function defaultScanPaths(): string[] {
+  return DEFAULT_SCAN_PATHS.filter((dir) => existsSync(dir));
+}
 
 /**
  * Recursively scan a directory for .jsonl files.
  * Returns an array of { path, name, size, modified } for each file found.
  */
-function inferSource(filePath: string): SessionSource {
-  return filePath.includes(`${join(homedir(), '.codex')}/`) ? 'codex' : 'claude';
+function inferSource(filePath: string, raw?: string): SessionSource {
+  if (raw) {
+    const format = detectSessionFormat(raw);
+    if (format === 'codex') return 'codex';
+    if (format === 'opencode') return 'opencode';
+    if (format === 'pi-session' || format === 'pi-event-stream') return 'pi';
+    if (format === 'claude') return 'claude';
+  }
+  if (filePath.includes(`${join(homedir(), '.codex')}/`)) return 'codex';
+  if (filePath.includes(`${join(homedir(), '.pi', 'agent', 'sessions')}/`)) return 'pi';
+  return 'claude';
+}
+
+function inferSourceFromModel(model?: string | null): SessionSource | null {
+  const normalized = (model || '').toLowerCase();
+  if (normalized === 'opencode') return 'opencode';
+  if (normalized === 'pi') return 'pi';
+  if (normalized.includes('codex')) return 'codex';
+  if (normalized.includes('claude')) return 'claude';
+  return null;
 }
 
 async function scanDir(dir: string, maxDepth = 3): Promise<ScannedFile[]> {
@@ -100,6 +126,9 @@ function quickCwd(raw: string): string {
       if (typeof obj.cwd === 'string' && obj.cwd) return obj.cwd;
       // Codex 格式：cwd 在 payload 内
       if (typeof obj.payload?.cwd === 'string' && obj.payload.cwd) return obj.payload.cwd;
+      if (typeof obj.part?.cwd === 'string' && obj.part.cwd) return obj.part.cwd;
+      if (obj.type === 'header' && typeof obj.workingDirectory === 'string') return obj.workingDirectory;
+      if (obj.type === 'session' && typeof obj.cwd === 'string') return obj.cwd;
     } catch { /* skip */ }
   }
   return '';
@@ -138,7 +167,11 @@ function textFromOpenAiContent(content: unknown): string {
 }
 
 function quickMeta(filePath: string, raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
-  return inferSource(filePath) === 'codex' ? quickMetaCodex(raw) : quickMetaClaude(raw);
+  const source = inferSource(filePath, raw);
+  if (source === 'codex') return quickMetaCodex(raw);
+  if (source === 'opencode') return quickMetaOpenCode(raw, basename(filePath));
+  if (source === 'pi') return quickMetaPi(raw, basename(filePath));
+  return quickMetaClaude(raw);
 }
 
 function quickMetaClaude(raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
@@ -227,6 +260,28 @@ function quickMetaCodex(raw: string): { title?: string; model?: string; requests
   return { title: title || fallbackTitle, model: model || 'codex', requests, peakTokens, turnCount };
 }
 
+function quickMetaOpenCode(raw: string, filename: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+  const { summary, turns } = runOpenCodePipeline(raw, filename);
+  return {
+    title: summary.session.aiTitle,
+    model: summary.session.model,
+    requests: summary.session.requests,
+    peakTokens: summary.session.peakTokens,
+    turnCount: turns.length,
+  };
+}
+
+function quickMetaPi(raw: string, filename: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+  const { summary, turns } = runPiPipeline(raw, filename);
+  return {
+    title: summary.session.aiTitle,
+    model: summary.session.model,
+    requests: summary.session.requests,
+    peakTokens: summary.session.peakTokens,
+    turnCount: turns.length,
+  };
+}
+
 // ── GET /scan ──────────────────────────────────────────────────────────────
 // Query params:
 //   paths  - comma-separated list of directories to scan (optional)
@@ -237,7 +292,7 @@ router.get('/scan', async (_req, res) => {
     const pathsParam = _req.query.paths as string | undefined;
     const dirs = pathsParam
       ? pathsParam.split(',').map(p => p.trim()).filter(Boolean)
-      : DEFAULT_SCAN_PATHS;
+      : defaultScanPaths();
 
     const maxDepth = parseInt((_req.query.depth as string) || '3', 10);
     const force = _req.query.force === '1';
@@ -283,7 +338,7 @@ router.get('/scan', async (_req, res) => {
         const cachedMeta = cache.get(f.path);
         let result: FoundFile;
         if (!force && cachedMeta && cachedMeta.modified === f.modified) {
-          result = { ...f, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
+          result = { ...f, source: inferSourceFromModel(cachedMeta.model) ?? f.source, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
         } else {
           let hash = '';
           let meta: ReturnType<typeof quickMeta> = { requests: 0, peakTokens: 0, turnCount: 0 };
@@ -291,6 +346,7 @@ router.get('/scan', async (_req, res) => {
           try {
             const content = await readFile(f.path, 'utf-8');
             hash = crypto.createHash('sha256').update(content).digest('hex');
+            f.source = inferSource(f.path, content);
             meta = quickMeta(f.path, content);
             cwd = quickCwd(content);
           } catch { /* can't read */ }
@@ -339,6 +395,15 @@ function extractSessionTitle(jsonlContent: string): string {
     for (const line of jsonlContent.split('\n').slice(0, 50)) {
       if (!line.trim()) continue;
       const obj = JSON.parse(line);
+      if (obj.type === 'text' && typeof obj.part?.text === 'string') return obj.part.text.trim().slice(0, 120);
+      if (obj.type === 'message' && obj.message?.role === 'user') {
+        const c = obj.message.content;
+        if (typeof c === 'string' && c.trim()) return c.trim().slice(0, 120);
+        if (Array.isArray(c)) {
+          const text = c.map((block) => typeof block?.text === 'string' ? block.text : '').filter(Boolean).join('\n');
+          if (text.trim()) return text.trim().slice(0, 120);
+        }
+      }
       if (obj.type === 'event_msg' && obj.payload?.type === 'user_message' && typeof obj.payload.message === 'string') {
         return obj.payload.message.trim().slice(0, 120);
       }

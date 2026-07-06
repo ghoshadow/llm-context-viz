@@ -5,7 +5,10 @@
  * 用于喂给 LLM 做本体提取。
  */
 
-import { isCodexJsonl, runCodexPipeline } from '../../shared/pipeline/codex-jsonl';
+import { runCodexPipeline } from '../../shared/pipeline/codex-jsonl';
+import { runOpenCodePipeline } from '../../shared/pipeline/opencode-jsonl';
+import { runPiPipeline } from '../../shared/pipeline/pi-jsonl';
+import { detectSessionFormat } from '../../shared/pipeline/session-format';
 import type { TimelineSegment, TurnData } from '../../shared/types/session';
 import { sanitizeForLog } from '../utils/log-sanitizer.js';
 
@@ -196,7 +199,7 @@ function segmentThinking(detail: SegmentDetail): string {
   return `${detail.think}${tok}`;
 }
 
-function codexToolSummary(seg: TimelineSegment): string {
+function toolSegmentSummary(seg: TimelineSegment): string {
   const detail = seg.det;
   const name = typeof detail.name === 'string' && detail.name.trim() ? detail.name : seg.n;
   const chunks: string[] = [`[${name}]`];
@@ -212,7 +215,7 @@ function codexToolSummary(seg: TimelineSegment): string {
   return chunks.join('\n');
 }
 
-function codexContentFromTurn(turn: TurnData, turnNum: number): TurnContent {
+function contentFromPipelineTurn(turn: TurnData, turnNum: number): TurnContent {
   const parts: string[] = [
     `## 第 ${turnNum} 轮\n\n### 用户输入\n${normalizeText(turn.prompt)}`,
   ];
@@ -228,7 +231,7 @@ function codexContentFromTurn(turn: TurnData, turnNum: number): TurnContent {
     if (text) modelParts.push(`[REPLY] ${normalizeText(text)}`);
 
     if (seg.k === 't' || seg.k === 's') {
-      const summary = codexToolSummary(seg);
+      const summary = toolSegmentSummary(seg);
       if (summary) toolSummaries.push(summary);
     }
   }
@@ -249,7 +252,17 @@ function codexContentFromTurn(turn: TurnData, turnNum: number): TurnContent {
 
 function extractCodexContentWithTurns(rawJsonl: string): TurnContent[] {
   const { turns } = runCodexPipeline(rawJsonl, 'codex-session.jsonl');
-  return turns.map((turn, index) => codexContentFromTurn(turn, index + 1));
+  return turns.map((turn, index) => contentFromPipelineTurn(turn, index + 1));
+}
+
+function extractOpenCodeContentWithTurns(rawJsonl: string): TurnContent[] {
+  const { turns } = runOpenCodePipeline(rawJsonl, 'opencode-session.jsonl');
+  return turns.map((turn, index) => contentFromPipelineTurn(turn, index + 1));
+}
+
+function extractPiContentWithTurns(rawJsonl: string): TurnContent[] {
+  const { turns } = runPiPipeline(rawJsonl, 'pi-session.jsonl');
+  return turns.map((turn, index) => contentFromPipelineTurn(turn, index + 1));
 }
 
 /**
@@ -274,8 +287,20 @@ export function extractSessionContent(rawJsonl: string): string {
  * 包含 turn 标记、用户消息、推理摘要、工具摘要和助手回复。
  */
 export function extractContentWithTurns(rawJsonl: string): TurnContent[] {
-  if (isCodexJsonl(rawJsonl)) {
-    return extractCodexContentWithTurns(rawJsonl);
+  if (!rawJsonl.trim()) return [];
+
+  switch (detectSessionFormat(rawJsonl)) {
+    case 'codex':
+      return extractCodexContentWithTurns(rawJsonl);
+    case 'opencode':
+      return extractOpenCodeContentWithTurns(rawJsonl);
+    case 'pi-session':
+    case 'pi-event-stream':
+      return extractPiContentWithTurns(rawJsonl);
+    case 'claude':
+      break;
+    case 'unknown':
+      throw new Error('Unsupported JSONL session format');
   }
 
   const lines = rawJsonl.trim().split('\n').filter(Boolean);
