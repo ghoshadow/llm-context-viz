@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { get, post, put } from '../../api/client';
 
 export interface ObsidianConfigStatus {
@@ -40,6 +40,13 @@ export function useObsidianCardSync({
   nodeId: string;
   nodeType: string;
 }) {
+  const latestKeyRef = useRef({ sessionId, nodeId, nodeType });
+  latestKeyRef.current = { sessionId, nodeId, nodeType };
+  const isCurrentKey = useCallback((key: { sessionId: string | null; nodeId: string; nodeType: string }) => {
+    const latest = latestKeyRef.current;
+    return latest.sessionId === key.sessionId && latest.nodeId === key.nodeId && latest.nodeType === key.nodeType;
+  }, []);
+
   const [obsidianStatus, setObsidianStatus] = useState<ObsidianSyncStatus>(() => initialObsidianStatus(nodeId));
   const [obsidianConfig, setObsidianConfig] = useState<ObsidianConfigStatus | null>(null);
   const [obsidianConfigOpen, setObsidianConfigOpen] = useState(false);
@@ -50,22 +57,26 @@ export function useObsidianCardSync({
 
   const loadObsidianStatus = useCallback(async () => {
     if (!sessionId || nodeType !== 'topic') return;
+    const key = { sessionId, nodeId, nodeType };
     try {
       const [config, status] = await Promise.all([
         get<ObsidianConfigStatus>('/obsidian/config'),
         get<ObsidianSyncStatus>(`/sessions/${sessionId}/ontology/obsidian-card/${encodeURIComponent(nodeId)}`),
       ]);
+      if (!isCurrentKey(key)) return;
       setObsidianConfig(config);
       setObsidianStatus(status);
       setObsidianVaultPath(config.vaultPath || '');
       setObsidianNotesDir(config.notesDir || 'LLM知识卡片');
       setObsidianError(status.error || config.error);
     } catch (err) {
+      if (!isCurrentKey(key)) return;
       setObsidianError(err instanceof Error ? err.message : '获取 Obsidian 状态失败');
     }
-  }, [nodeId, nodeType, sessionId]);
+  }, [isCurrentKey, nodeId, nodeType, sessionId]);
 
   const handleSaveObsidianConfig = useCallback(async () => {
+    const key = { sessionId, nodeId, nodeType };
     setObsidianBusy(true);
     setObsidianError(null);
     try {
@@ -73,15 +84,17 @@ export function useObsidianCardSync({
         vaultPath: obsidianVaultPath,
         notesDir: obsidianNotesDir || 'LLM知识卡片',
       });
+      if (!isCurrentKey(key)) return;
       setObsidianConfig(config);
       setObsidianConfigOpen(false);
       await loadObsidianStatus();
     } catch (err) {
+      if (!isCurrentKey(key)) return;
       setObsidianError(err instanceof Error ? err.message : '保存 Obsidian 配置失败');
     } finally {
-      setObsidianBusy(false);
+      if (isCurrentKey(key)) setObsidianBusy(false);
     }
-  }, [loadObsidianStatus, obsidianNotesDir, obsidianVaultPath]);
+  }, [isCurrentKey, loadObsidianStatus, nodeId, nodeType, obsidianNotesDir, obsidianVaultPath, sessionId]);
 
   const handleSyncObsidian = useCallback(async () => {
     if (!sessionId || nodeType !== 'topic') return;
@@ -90,21 +103,24 @@ export function useObsidianCardSync({
       return;
     }
 
+    const key = { sessionId, nodeId, nodeType };
     setObsidianBusy(true);
     setObsidianError(null);
     try {
       const status = await post<ObsidianSyncStatus>(
         `/sessions/${sessionId}/ontology/obsidian-card/${encodeURIComponent(nodeId)}`,
       );
+      if (!isCurrentKey(key)) return;
       setObsidianStatus(status);
       setObsidianError(status.error);
     } catch (err) {
+      if (!isCurrentKey(key)) return;
       setObsidianStatus((prev) => ({ ...prev, status: 'error' }));
       setObsidianError(err instanceof Error ? err.message : '同步到 Obsidian 失败');
     } finally {
-      setObsidianBusy(false);
+      if (isCurrentKey(key)) setObsidianBusy(false);
     }
-  }, [nodeId, nodeType, obsidianConfig?.configured, sessionId]);
+  }, [isCurrentKey, nodeId, nodeType, obsidianConfig?.configured, sessionId]);
 
   useEffect(() => {
     setObsidianStatus(initialObsidianStatus(nodeId));

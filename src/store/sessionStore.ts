@@ -108,19 +108,29 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   selectSession: async (id: string) => {
     set({
       currentSessionId: id,
+      currentSession: null,
       turns: [],
+      turnsLoading: false,
       turnsTotal: 0,
       turnsHasMore: false,
       currentTurnIndex: null,
       currentTurn: null,
+      currentTurnLoading: false,
       ontologyData: null,
+      ontologyLoading: false,
       ontologyError: null,
       ontologyFetched: false,
+      extractPhase: 'idle',
+      extractProgress: { shardsTotal: 0, shardsCompleted: 0, shardDetails: [] },
+      extractRootDir: null,
+      extractError: null,
     });
     try {
       const currentSession = await get<SessionDetail>(`/sessions/${id}`);
+      if (getState().currentSessionId !== id) return;
       set({ currentSession });
       await getState().fetchTurns(id);
+      if (getState().currentSessionId !== id) return;
       await getState().fetchOntology();
     } catch {
       // silently ignore — the UI handles errors through currentSession null
@@ -128,10 +138,12 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   },
 
   fetchTurns: async (sessionId: string) => {
+    if (getState().currentSessionId !== sessionId) return;
     set({ turnsLoading: true });
     try {
       const { turnsPageSize } = getState();
       const page = await get<TurnListPage>(`/sessions/${sessionId}/turns?limit=${turnsPageSize}&offset=0`);
+      if (getState().currentSessionId !== sessionId) return;
       set({
         turns: page.items,
         turnsTotal: page.total,
@@ -139,6 +151,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         turnsLoading: false,
       });
     } catch {
+      if (getState().currentSessionId !== sessionId) return;
       set({ turnsLoading: false });
     }
   },
@@ -152,6 +165,11 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       const page = await get<TurnListPage>(
         `/sessions/${currentSessionId}/turns?limit=${turnsPageSize}&offset=${turns.length}`,
       );
+      if (getState().currentSessionId !== currentSessionId) return;
+      if (getState().turns.length !== turns.length) {
+        set({ turnsLoading: false });
+        return;
+      }
       set({
         turns: [...turns, ...page.items],
         turnsTotal: page.total,
@@ -159,6 +177,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         turnsLoading: false,
       });
     } catch {
+      if (getState().currentSessionId !== currentSessionId) return;
       set({ turnsLoading: false });
     }
   },
@@ -172,8 +191,10 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       const currentTurn = await get<TurnDetail>(
         `/sessions/${currentSessionId}/turns/${turnIndex}`,
       );
+      if (getState().currentSessionId !== currentSessionId || getState().currentTurnIndex !== turnIndex) return;
       set({ currentTurn, currentTurnLoading: false });
     } catch {
+      if (getState().currentSessionId !== currentSessionId || getState().currentTurnIndex !== turnIndex) return;
       set({ currentTurnLoading: false });
     }
   },
@@ -193,12 +214,14 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
       const result = await get<{ data: OntologyData | null; maxTurn?: number }>(
         '/sessions/' + currentSessionId + '/ontology',
       );
+      if (getState().currentSessionId !== currentSessionId) return;
       if (result.data) {
         set({ ontologyData: result.data, ontologyMaxTurn: result.maxTurn ?? 0, ontologyLoading: false, ontologyFetched: true });
       } else {
         set({ ontologyData: null, ontologyMaxTurn: 0, ontologyLoading: false, ontologyError: null, ontologyFetched: true });
       }
     } catch {
+      if (getState().currentSessionId !== currentSessionId) return;
       set({ ontologyData: null, ontologyMaxTurn: 0, ontologyLoading: false, ontologyError: null, ontologyFetched: true });
     }
   },
@@ -228,6 +251,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
   extractOntology: async (options) => {
     const { currentSessionId } = getState();
     if (!currentSessionId) return false;
+    const isCurrentSession = () => getState().currentSessionId === currentSessionId;
 
     const requestedDepth = options?.extractionDepth ?? 'refined';
     set({
@@ -252,6 +276,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         },
         {
           onExtracted: (data) => {
+            if (!isCurrentSession()) return;
             const shardDetails = data.shards.map((s) => ({
               index: s.index,
               status: 'pending' as const,
@@ -269,6 +294,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
             });
           },
           onStart: (data) => {
+            if (!isCurrentSession()) return;
             set((state) => ({
               extractProgress: {
                 ...state.extractProgress,
@@ -281,6 +307,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
             }));
           },
           onShardStart: (data) => {
+            if (!isCurrentSession()) return;
             set((state) => {
               const details = state.extractProgress.shardDetails.map((s) =>
                 s.index === data.shardIndex ? { ...s, status: 'running' as const } : s,
@@ -289,6 +316,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
             });
           },
           onShardDone: (data) => {
+            if (!isCurrentSession()) return;
             set((state) => {
               const wasDone = state.extractProgress.shardDetails.some((s) => s.index === data.shardIndex && s.status === 'done');
               const details = state.extractProgress.shardDetails.map((s) =>
@@ -314,6 +342,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
             });
           },
           onShardRetry: (data) => {
+            if (!isCurrentSession()) return;
             set((state) => {
               const details = state.extractProgress.shardDetails.map((s) =>
                 s.index === data.shardIndex
@@ -324,6 +353,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
             });
           },
           onShardError: (data) => {
+            if (!isCurrentSession()) return;
             set((state) => {
               const details = state.extractProgress.shardDetails.map((s) =>
                 s.index === data.shardIndex
@@ -339,12 +369,15 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
             });
           },
           onMerge: () => {
+            if (!isCurrentSession()) return;
             set({ extractPhase: 'merging' });
           },
           onBuild: () => {
+            if (!isCurrentSession()) return;
             set({ extractPhase: 'building' });
           },
-          onComplete: (data) => {
+          onComplete: () => {
+            if (!isCurrentSession()) return;
             succeeded = true;
             getState().fetchOntology();
             const failed = getState().extractProgress.shardDetails.filter((s) => s.status === 'error').length;
@@ -356,6 +389,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
             });
           },
           onError: (data) => {
+            if (!isCurrentSession()) return;
             set({
               extractError: data.message,
               extractPhase: 'idle',
@@ -366,6 +400,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
 
       return succeeded;
     } catch (err) {
+      if (!isCurrentSession()) return false;
       set({
         extractPhase: 'idle',
         extractError: err instanceof Error ? err.message : 'Extraction failed',
@@ -392,6 +427,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         maxShardChars?: number | null;
       }>(`/sessions/${currentSessionId}/ontology/extract/status`);
 
+      if (getState().currentSessionId !== currentSessionId) return;
       const activePhase = status.phase === 'complete' || status.phase === 'error' ? 'idle' : status.phase;
       set({
         extractPhase: activePhase,
@@ -407,7 +443,7 @@ export const useSessionStore = create<SessionStore>((set, getState) => ({
         },
       });
 
-      if (status.phase === 'complete') {
+      if (status.phase === 'complete' && getState().currentSessionId === currentSessionId) {
         await getState().fetchOntology();
       }
     } catch {

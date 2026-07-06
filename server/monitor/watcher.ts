@@ -101,6 +101,7 @@ export interface Alert {
 // ── 核心逻辑 ──────────────────────────────────────────────────────────────────
 
 let cachedResult: MonitorSnapshot | null = null;
+let cachedMtime: number | null = null;
 
 /**
  * 获取当前活跃会话的监控快照。
@@ -113,11 +114,12 @@ export async function getSnapshot(): Promise<MonitorSnapshot> {
 
   if (!active) {
     cachedResult = null;
+    cachedMtime = null;
     return emptySnapshot();
   }
 
   // 缓存命中：文件未变化
-  if (cachedResult && cachedResult.sessionPath === active.path) {
+  if (cachedResult && cachedResult.sessionPath === active.path && cachedMtime === active.mtime) {
     return cachedResult;
   }
 
@@ -127,6 +129,7 @@ export async function getSnapshot(): Promise<MonitorSnapshot> {
 
     if (turns.length === 0) {
       cachedResult = null;
+      cachedMtime = null;
       return emptySnapshot();
     }
 
@@ -163,6 +166,7 @@ export async function getSnapshot(): Promise<MonitorSnapshot> {
     };
 
     cachedResult = snapshot;
+    cachedMtime = active.mtime;
     return snapshot;
   } catch (err) {
     console.error('[monitor] 解析失败:', String(err));

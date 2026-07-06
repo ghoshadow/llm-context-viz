@@ -359,6 +359,17 @@ function extractSessionTitle(jsonlContent: string): string {
 // Re-export from dedicated service module for backward compatibility.
 export { enrichWithSubAgents } from '../services/sub-agent-enricher.js';
 
+function isSessionUniqueConstraintError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const code = typeof err === 'object' && err !== null && 'code' in err
+    ? String((err as { code?: unknown }).code)
+    : '';
+  return (
+    code.startsWith('SQLITE_CONSTRAINT') &&
+    /(?:UNIQUE constraint failed|PRIMARY KEY).+sessions\.(?:file_hash|id)/.test(message)
+  ) || /UNIQUE constraint failed: sessions\.(?:file_hash|id)/.test(message);
+}
+
 // ── POST /import ───────────────────────────────────────────────────────────
 // Body: { path: string } — absolute path to a .jsonl file
 
@@ -382,9 +393,20 @@ router.post('/import', validateBody(ImportRequestSchema), async (req, res) => {
     const filename = basename(filePath);
     const aiTitle = extractSessionTitle(content);
 
-    const { sessionId, summary, turns, errors } = await createSession({
-      jsonlContent: content, filename, hash, aiTitle, rawJsonl: null,
-    });
+    let created: Awaited<ReturnType<typeof createSession>>;
+    try {
+      created = await createSession({
+        jsonlContent: content, filename, hash, aiTitle, rawJsonl: null,
+      });
+    } catch (err) {
+      const racedExisting = isSessionUniqueConstraintError(err) ? findSessionByHash(hash) : undefined;
+      if (racedExisting) {
+        return res.status(200).json({ imported: false, sessionId: racedExisting.id, message: '会话已存在' });
+      }
+      throw err;
+    }
+
+    const { sessionId, summary, turns, errors } = created;
 
     res.status(201).json({
       imported: true,
