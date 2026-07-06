@@ -31,8 +31,19 @@ test('detects supported JSONL session formats by source-specific shape', () => {
 
   assert.equal(detectSessionFormat(toJsonl([
     { type: 'session', id: 'pi_1', version: 3, timestamp: '2026-07-06T00:00:00Z', cwd: '/repo' },
+    { type: 'model_change', id: 'm1', parentId: null, modelId: 'deepseek-v4-pro' },
+    { type: 'message', id: 'msg_1', parentId: 'm1', message: { role: 'user', content: [{ type: 'text', text: 'hello' }] } },
+  ])), 'pi-session');
+
+  assert.equal(detectSessionFormat(toJsonl([
+    { type: 'session', id: 'pi_1', version: 3, timestamp: '2026-07-06T00:00:00Z', cwd: '/repo' },
     { type: 'turn_start' },
   ])), 'pi-event-stream');
+
+  assert.equal(detectSessionFormat(toJsonl([
+    { type: 'openclaw_session', sessionId: 'oc_1', sessionKey: 'agent:main', cwd: '/repo/openclaw' },
+    { type: 'session_update', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'hello' } } },
+  ])), 'openclaw');
 
   assert.equal(detectSessionFormat(toJsonl([
     { type: 'message', value: 'not a known agent format' },

@@ -19,6 +19,7 @@ test('infers imported session source from model and filename', () => {
   assert.equal(getSessionSource({ model: 'claude-sonnet-4', filename: 'rollout-x.jsonl' }), 'claude');
   assert.equal(getSessionSource({ model: 'opencode', filename: 'session.jsonl' }), 'opencode');
   assert.equal(getSessionSource({ model: 'pi', filename: 'session.jsonl' }), 'pi');
+  assert.equal(getSessionSource({ model: 'openclaw', filename: 'session.jsonl' }), 'openclaw');
   assert.equal(getSessionSource({ model: '', filename: 'rollout-2026-06-26T10-41-39.jsonl' }), 'codex');
   assert.equal(getSessionSource({ model: '', filename: 'plain-claude.jsonl' }), 'claude');
 });

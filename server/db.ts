@@ -78,6 +78,7 @@ export function initDb(): void {
       id TEXT PRIMARY KEY,
       filename TEXT NOT NULL,
       file_hash TEXT NOT NULL UNIQUE,
+      source TEXT,
       model TEXT,
       version TEXT,
       ai_title TEXT,
@@ -426,6 +427,12 @@ export function migrate(): void {
   if (userVersion < 8) {
     try { conn.exec('ALTER TABLE scanned_files ADD COLUMN cwd TEXT'); } catch { /* 已存在 */ }
     conn.pragma('user_version = 8');
+  }
+
+  // v8 → v9: store explicit imported agent source instead of inferring only from model.
+  if (userVersion < 9) {
+    try { conn.exec('ALTER TABLE sessions ADD COLUMN source TEXT'); } catch { /* 已存在 */ }
+    conn.pragma('user_version = 9');
   }
 }
 

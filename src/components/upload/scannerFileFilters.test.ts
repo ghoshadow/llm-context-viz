@@ -10,6 +10,7 @@ const files = [
   { path: 'codex-7.jsonl', source: 'codex' as const, turnCount: 7 },
   { path: 'opencode-2.jsonl', source: 'opencode' as const, turnCount: 2 },
   { path: 'pi-6.jsonl', source: 'pi' as const, turnCount: 6 },
+  { path: 'openclaw-8.jsonl', source: 'openclaw' as const, turnCount: 8 },
 ];
 
 test('filters scanner files by active source without hiding short sessions', () => {
@@ -31,6 +32,11 @@ test('filters scanner files by active source without hiding short sessions', () 
   assert.deepEqual(
     filterScannerFiles(files, { source: 'pi', hideShortSessions: false }).map((file) => file.path),
     ['pi-6.jsonl'],
+  );
+
+  assert.deepEqual(
+    filterScannerFiles(files, { source: 'openclaw', hideShortSessions: false }).map((file) => file.path),
+    ['openclaw-8.jsonl'],
   );
 });
 
@@ -54,6 +60,11 @@ test('hides scanner files with fewer than five turns when enabled', () => {
     filterScannerFiles(files, { source: 'pi', hideShortSessions: true }).map((file) => file.path),
     ['pi-6.jsonl'],
   );
+
+  assert.deepEqual(
+    filterScannerFiles(files, { source: 'openclaw', hideShortSessions: true }).map((file) => file.path),
+    ['openclaw-8.jsonl'],
+  );
 });
 
 test('provides scanner labels for all supported import sources', () => {
@@ -61,4 +72,5 @@ test('provides scanner labels for all supported import sources', () => {
   assert.equal(SCANNER_SOURCE_LABELS.codex, 'Codex');
   assert.equal(SCANNER_SOURCE_LABELS.opencode, 'OpenCode');
   assert.equal(SCANNER_SOURCE_LABELS.pi, 'Pi');
+  assert.equal(SCANNER_SOURCE_LABELS.openclaw, 'OpenClaw');
 });

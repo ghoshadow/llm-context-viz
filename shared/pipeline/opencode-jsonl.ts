@@ -103,6 +103,9 @@ function buildOpenCodeTurns(lines: OpenCodeLine[], filename: string): OpenCodeTu
   for (const line of lines) {
     if (line.type === 'step_start' && current !== null) current = null;
     const turn = ensureTurn(line);
+    if (line.type === 'step_start' && typeof line.part.prompt === 'string' && line.part.prompt.trim()) {
+      turn.prompt = line.part.prompt.trim();
+    }
     turn.events.push(line);
     if (line.timestamp) turn.endTs = line.timestamp;
 

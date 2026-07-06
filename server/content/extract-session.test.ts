@@ -159,6 +159,56 @@ test('extracts Pi session JSONL into ontology turn content', () => {
   assert.match(turns[0]!.content, /Pi 压缩摘要/);
 });
 
+test('extracts OpenClaw JSONL into ontology turn content', () => {
+  const rawJsonl = toJsonl([
+    { type: 'openclaw_session', sessionId: 'oc_1', sessionKey: 'agent:main', cwd: '/repo/openclaw' },
+    {
+      type: 'session_update',
+      timestamp: '2026-07-06T00:00:00.000Z',
+      sessionId: 'oc_1',
+      runId: 'run_1',
+      update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'OpenClaw 侧用户问题' } },
+    },
+    {
+      type: 'session_update',
+      timestamp: '2026-07-06T00:00:01.000Z',
+      sessionId: 'oc_1',
+      runId: 'run_1',
+      update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'OpenClaw 推理摘要' } },
+    },
+    {
+      type: 'session_update',
+      timestamp: '2026-07-06T00:00:02.000Z',
+      sessionId: 'oc_1',
+      runId: 'run_1',
+      update: { sessionUpdate: 'tool_call', toolCallId: 'tool_1', title: 'bash', rawInput: { command: 'pwd' } },
+    },
+    {
+      type: 'session_update',
+      timestamp: '2026-07-06T00:00:03.000Z',
+      sessionId: 'oc_1',
+      runId: 'run_1',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool_1', status: 'completed', rawOutput: '/repo/openclaw' },
+    },
+    {
+      type: 'session_update',
+      timestamp: '2026-07-06T00:00:04.000Z',
+      sessionId: 'oc_1',
+      runId: 'run_1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'OpenClaw 侧模型回答' } },
+    },
+  ]);
+
+  const turns = extractContentWithTurns(rawJsonl);
+
+  assert.equal(turns.length, 1);
+  assert.match(turns[0]!.content, /OpenClaw 侧用户问题/);
+  assert.match(turns[0]!.content, /\[REPLY\] OpenClaw 侧模型回答/);
+  assert.match(turns[0]!.content, /\[REASONING_SUMMARY\][\s\S]*OpenClaw 推理摘要/);
+  assert.match(turns[0]!.content, /\[TOOL_SUMMARY\][\s\S]*bash/);
+  assert.match(turns[0]!.content, /\/repo\/openclaw/);
+});
+
 test('rejects unknown JSONL during ontology content extraction', () => {
   const rawJsonl = toJsonl([
     { type: 'message', value: 'not an agent log' },

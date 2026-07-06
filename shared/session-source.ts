@@ -33,6 +33,7 @@ export function getSessionSource(session: SessionSourceLike): SessionSource {
   if (model.includes('claude')) return 'claude';
   if (model === 'opencode' || version.includes('opencode')) return 'opencode';
   if (model === 'pi' || version === 'pi') return 'pi';
+  if (model === 'openclaw' || version.includes('openclaw')) return 'openclaw';
 
   if (
     model.includes('gpt') ||

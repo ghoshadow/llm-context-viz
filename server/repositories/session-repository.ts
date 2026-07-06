@@ -12,6 +12,7 @@ import { getDb } from '../db';
 export interface SessionListItem {
   id: string;
   filename: string;
+  source: string | null;
   cwd: string | null;
   model: string | null;
   version: string | null;
@@ -26,6 +27,7 @@ export interface SessionDetail {
   id: string;
   filename: string;
   file_hash: string;
+  source: string | null;
   model: string | null;
   version: string | null;
   ai_title: string | null;
@@ -51,6 +53,7 @@ export interface SessionDetail {
 export interface SessionBrief {
   id: string;
   cwd: string | null;
+  source: string | null;
   model: string | null;
   filename: string | null;
   version: string | null;
@@ -112,7 +115,7 @@ export interface ProjectConstantTranslationRow {
 export function getAllSessions(): SessionListItem[] {
   return getDb()
     .prepare(
-      `SELECT id, filename, cwd, model, version, ai_title, total_requests, peak_tokens, turn_count, created_at
+      `SELECT id, filename, source, cwd, model, version, ai_title, total_requests, peak_tokens, turn_count, created_at
        FROM sessions
        ORDER BY created_at DESC`,
     )
@@ -123,7 +126,7 @@ export function getAllSessions(): SessionListItem[] {
 export function getSessionById(id: string): SessionDetail | undefined {
   return getDb()
     .prepare(
-      `SELECT id, filename, file_hash, model, version, ai_title, cwd,
+      `SELECT id, filename, file_hash, source, model, version, ai_title, cwd,
               total_requests, peak_index, peak_tokens, peak_cache_hit,
               peak_turn_idx, peak_step, total_output, context_limit,
               turn_count, raw_size, categories_json, tools_json, series_json,
@@ -163,7 +166,7 @@ export function sessionExists(id: string): boolean {
 /** 获取会话简要信息（用于 translate 等需要 source/meta 的场景）。 */
 export function getSessionBrief(id: string): SessionBrief | undefined {
   return getDb()
-    .prepare('SELECT id, cwd, model, filename, version FROM sessions WHERE id = ?')
+    .prepare('SELECT id, cwd, source, model, filename, version FROM sessions WHERE id = ?')
     .get(id) as SessionBrief | undefined;
 }
 
@@ -183,10 +186,10 @@ export function getSessionRawJsonlMeta(sessionId: string): { id: string; raw_jso
 }
 
 /** 获取刷新所需的会话元信息（含 file_hash 和 raw_jsonl）。 */
-export function getSessionForRefresh(sessionId: string): { id: string; filename: string; file_hash: string; raw_jsonl: string | null } | undefined {
+export function getSessionForRefresh(sessionId: string): { id: string; filename: string; file_hash: string; source: string | null; raw_jsonl: string | null } | undefined {
   return getDb()
-    .prepare('SELECT id, filename, file_hash, raw_jsonl FROM sessions WHERE id = ?')
-    .get(sessionId) as { id: string; filename: string; file_hash: string; raw_jsonl: string | null } | undefined;
+    .prepare('SELECT id, filename, file_hash, source, raw_jsonl FROM sessions WHERE id = ?')
+    .get(sessionId) as { id: string; filename: string; file_hash: string; source: string | null; raw_jsonl: string | null } | undefined;
 }
 
 // ── Turn 查询 ──────────────────────────────────────────────────────────────

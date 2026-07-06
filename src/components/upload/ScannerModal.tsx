@@ -160,7 +160,7 @@ const S = {
   status: { textAlign: 'center', fontSize: 13, color: SEMANTIC.textSecondary, marginTop: 12 } as React.CSSProperties,
   tabs: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
     gap: 4,
     padding: 4,
     marginTop: 14,
@@ -299,7 +299,7 @@ export default function ScannerModal() {
 
         {files.length === 0 && !scanning && (
           <p style={{ fontSize: 13, color: SEMANTIC.textSecondary, marginTop: 8, textAlign: 'center' }}>
-            扫描 Claude Code、Codex、OpenCode 与 Pi 的本地 JSONL 会话记录
+            扫描 Claude Code、Codex、OpenCode、Pi 与 OpenClaw 的本地 JSONL 会话记录
           </p>
         )}
 

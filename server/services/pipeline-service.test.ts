@@ -20,7 +20,7 @@ const memDb = new Database(':memory:');
 memDb.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY, filename TEXT, file_hash TEXT,
-    model TEXT, version TEXT, ai_title TEXT, cwd TEXT,
+    source TEXT, model TEXT, version TEXT, ai_title TEXT, cwd TEXT,
     total_requests INTEGER, peak_index INTEGER, peak_tokens INTEGER,
     peak_cache_hit INTEGER DEFAULT 0, peak_turn_idx INTEGER DEFAULT 0,
     peak_step INTEGER DEFAULT 0, total_output INTEGER, context_limit INTEGER DEFAULT 200000,
@@ -58,6 +58,7 @@ const {
   computeMemoryCharsSync,
   persistTurns,
   runPipelineOnContentSync,
+  createSession,
 } = pipelineService;
 
 // ── extractCwdFromJsonl 测试 ─────────────────────────────────────────────
@@ -377,6 +378,55 @@ test('runPipelineOnContentSync Pi session 分支返回摘要', () => {
   assert.equal(result.summary.session.cwd, '/repo/pi');
   assert.equal(result.turns.length, 1);
   assert.equal(result.turns[0]!.prompt, 'Pi prompt');
+});
+
+test('createSession persists explicit OpenClaw source for Pi-shaped OpenClaw JSONL', async () => {
+  const jsonl = [
+    { type: 'session', version: 3, id: 'openclaw_local', timestamp: '2026-07-06T03:46:26.390Z', cwd: '/repo/openclaw' },
+    { type: 'model_change', id: 'model1', parentId: null, modelId: 'deepseek-v4-pro' },
+    { type: 'message', id: 'u1', parentId: 'model1', message: { role: 'user', content: [{ type: 'text', text: 'OpenClaw prompt' }] } },
+    { type: 'message', id: 'a1', parentId: 'u1', message: { role: 'assistant', content: [{ type: 'text', text: 'OpenClaw reply' }] } },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const created = await createSession({
+    jsonlContent: jsonl,
+    filename: 'openclaw-pi-shaped.jsonl',
+    hash: 'openclaw-source-hash',
+    source: 'openclaw',
+  });
+
+  const row = memDb.prepare('SELECT source, model FROM sessions WHERE id = ?').get(created.sessionId) as { source: string; model: string };
+  assert.equal(row.source, 'openclaw');
+  assert.equal(row.model, 'openclaw');
+  assert.equal(created.summary.session.model, 'openclaw');
+});
+
+test('runPipelineOnContentSync OpenClaw 分支返回摘要', () => {
+  const openClawJsonl = [
+    { type: 'openclaw_session', sessionId: 'oc_1', sessionKey: 'agent:main', cwd: '/repo/openclaw' },
+    {
+      type: 'session_update',
+      timestamp: '2026-07-06T00:00:00.000Z',
+      sessionId: 'oc_1',
+      runId: 'run_1',
+      update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'OpenClaw prompt' } },
+    },
+    {
+      type: 'session_update',
+      timestamp: '2026-07-06T00:00:01.000Z',
+      sessionId: 'oc_1',
+      runId: 'run_1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'OpenClaw reply' } },
+    },
+  ].map((line) => JSON.stringify(line)).join('\n');
+
+  const result = runPipelineOnContentSync(openClawJsonl, 'openclaw.jsonl');
+
+  assert.equal(result.summary.session.model, 'openclaw');
+  assert.equal(result.summary.session.cwd, '/repo/openclaw');
+  assert.equal(result.turns.length, 1);
+  assert.equal(result.turns[0]!.prompt, 'OpenClaw prompt');
+  assert.equal(result.turns[0]!.segs.find((seg) => seg.k === 'm')?.det.text, 'OpenClaw reply');
 });
 
 test('runPipelineOnContentSync unknown JSONL throws unsupported format error', () => {

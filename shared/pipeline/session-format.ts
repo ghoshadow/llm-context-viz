@@ -1,10 +1,18 @@
 import { isObject } from './codex-jsonl-parser';
 
-export type SessionFormat = 'claude' | 'codex' | 'opencode' | 'pi-session' | 'pi-event-stream' | 'unknown';
+export type SessionFormat = 'claude' | 'codex' | 'opencode' | 'pi-session' | 'pi-event-stream' | 'openclaw' | 'unknown';
 
 const OPENCODE_TYPES = new Set(['step_start', 'step_finish', 'tool_use', 'text', 'error']);
+const OPENCLAW_SESSION_UPDATES = new Set([
+  'user_message_chunk',
+  'agent_message_chunk',
+  'agent_thought_chunk',
+  'tool_call',
+  'tool_call_update',
+  'usage_update',
+  'session_info_update',
+]);
 const PI_EVENT_TYPES = new Set([
-  'session',
   'agent_start',
   'agent_end',
   'turn_start',
@@ -38,11 +46,16 @@ export function detectSessionFormat(jsonlText: string): SessionFormat {
     const type = typeof obj.type === 'string' ? obj.type : '';
     const payload = isObject(obj.payload) ? obj.payload : null;
     const part = isObject(obj.part) ? obj.part : null;
+    const update = isObject(obj.update) ? obj.update : obj;
+    const sessionUpdate = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : '';
 
     if (type === 'session_meta' || type === 'turn_context') return 'codex';
     if ((type === 'event_msg' || type === 'response_item') && typeof payload?.type === 'string') return 'codex';
 
     if (OPENCODE_TYPES.has(type) && (typeof obj.sessionID === 'string' || part)) return 'opencode';
+
+    if (type === 'openclaw_session') return 'openclaw';
+    if (OPENCLAW_SESSION_UPDATES.has(sessionUpdate)) return 'openclaw';
 
     if (PI_EVENT_TYPES.has(type)) return 'pi-event-stream';
 

@@ -75,6 +75,35 @@ test('parses Pi session JSONL using only the current longest branch', () => {
   assert.match(compaction?.det.text ?? '', /Compressed context summary/);
 });
 
+test('parses Pi local sessions that start with a session record', () => {
+  const rawJsonl = toJsonl([
+    { type: 'session', version: 3, id: 'pi_local', timestamp: '2026-07-06T03:46:26.390Z', cwd: '/repo/pi' },
+    { type: 'model_change', id: 'model1', parentId: null, timestamp: '2026-07-06T03:47:02.824Z', modelId: 'deepseek-v4-pro' },
+    {
+      type: 'message',
+      id: 'u1',
+      parentId: 'model1',
+      timestamp: '2026-07-06T03:47:14.135Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'Pi local prompt' }] },
+    },
+    {
+      type: 'message',
+      id: 'a1',
+      parentId: 'u1',
+      timestamp: '2026-07-06T03:47:18.314Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Pi local answer' }] },
+    },
+  ]);
+
+  const { summary, turns } = runPiPipeline(rawJsonl, 'pi-local.jsonl');
+
+  assert.equal(summary.session.version, 'pi_local');
+  assert.equal(summary.session.cwd, '/repo/pi');
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0]!.prompt, 'Pi local prompt');
+  assert.equal(turns[0]!.segs.find((seg) => seg.k === 'm')?.det.text, 'Pi local answer');
+});
+
 test('parses Pi event streams without treating them as session JSONL', () => {
   const rawJsonl = toJsonl([
     { type: 'session', id: 'pi_stream', version: 3, timestamp: '2026-07-06T00:00:00Z', cwd: '/repo/pi' },

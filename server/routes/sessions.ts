@@ -144,6 +144,7 @@ router.post('/:id/refresh', async (req, res) => {
       sessionId: session.id,
       jsonlContent: content,
       filename: session.filename,
+      source: getSessionSource(session),
     });
 
     if (sessDir) enrichWithSubAgents(turns, sessDir);

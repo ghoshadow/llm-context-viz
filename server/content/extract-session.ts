@@ -7,6 +7,7 @@
 
 import { runCodexPipeline } from '../../shared/pipeline/codex-jsonl';
 import { runOpenCodePipeline } from '../../shared/pipeline/opencode-jsonl';
+import { runOpenClawPipeline } from '../../shared/pipeline/openclaw-jsonl';
 import { runPiPipeline } from '../../shared/pipeline/pi-jsonl';
 import { detectSessionFormat } from '../../shared/pipeline/session-format';
 import type { TimelineSegment, TurnData } from '../../shared/types/session';
@@ -265,6 +266,11 @@ function extractPiContentWithTurns(rawJsonl: string): TurnContent[] {
   return turns.map((turn, index) => contentFromPipelineTurn(turn, index + 1));
 }
 
+function extractOpenClawContentWithTurns(rawJsonl: string): TurnContent[] {
+  const { turns } = runOpenClawPipeline(rawJsonl, 'openclaw-session.jsonl');
+  return turns.map((turn, index) => contentFromPipelineTurn(turn, index + 1));
+}
+
 /**
  * 从原始 JSONL 字符串中提取全部自然语言内容，返回格式化文本。
  *
@@ -294,6 +300,8 @@ export function extractContentWithTurns(rawJsonl: string): TurnContent[] {
       return extractCodexContentWithTurns(rawJsonl);
     case 'opencode':
       return extractOpenCodeContentWithTurns(rawJsonl);
+    case 'openclaw':
+      return extractOpenClawContentWithTurns(rawJsonl);
     case 'pi-session':
     case 'pi-event-stream':
       return extractPiContentWithTurns(rawJsonl);

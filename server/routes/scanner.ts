@@ -9,7 +9,10 @@ import { sanitizeForLog } from '../utils/log-sanitizer.js';
 import { validateBody, ImportRequestSchema } from '../middleware/validate.js';
 import { detectSessionFormat } from '../../shared/pipeline/session-format';
 import { runOpenCodePipeline } from '../../shared/pipeline/opencode-jsonl';
+import { runOpenClawPipeline } from '../../shared/pipeline/openclaw-jsonl';
 import { runPiPipeline } from '../../shared/pipeline/pi-jsonl';
+import { isOpenCodeDbVirtualPath, listOpenCodeDbSessions, readOpenCodeDbVirtualJsonl } from '../services/opencode-db-adapter';
+import { isOpenClawDbVirtualPath, listOpenClawDbSessions, readOpenClawDbVirtualJsonl } from '../services/openclaw-db-adapter';
 import {
   getAllScannedFiles,
   upsertScannedFile,
@@ -20,7 +23,7 @@ import {
 
 const router = Router();
 
-type SessionSource = 'claude' | 'codex' | 'opencode' | 'pi';
+type SessionSource = 'claude' | 'codex' | 'opencode' | 'pi' | 'openclaw';
 
 interface ScannedFile {
   path: string;
@@ -30,12 +33,14 @@ interface ScannedFile {
   source: SessionSource;
 }
 
-// Default scan paths for local transcript stores that expose JSONL files.
+// Default scan paths for local transcript stores.
 const DEFAULT_SCAN_PATHS = [
   join(homedir(), '.claude', 'projects'),
   join(homedir(), '.codex', 'sessions'),
   join(homedir(), '.codex', 'archived_sessions'),
   join(homedir(), '.pi', 'agent', 'sessions'),
+  join(homedir(), '.local', 'share', 'opencode'),
+  join(homedir(), '.openclaw'),
 ];
 
 function defaultScanPaths(): string[] {
@@ -46,16 +51,26 @@ function defaultScanPaths(): string[] {
  * Recursively scan a directory for .jsonl files.
  * Returns an array of { path, name, size, modified } for each file found.
  */
+function inferSourceFromPath(filePath: string): SessionSource | null {
+  if (filePath.includes(`${join(homedir(), '.codex')}/`)) return 'codex';
+  if (filePath.includes(`${join(homedir(), '.pi', 'agent', 'sessions')}/`)) return 'pi';
+  if (filePath.includes(`${join(homedir(), '.local', 'share', 'opencode')}/`)) return 'opencode';
+  if (filePath.includes(`${join(homedir(), '.openclaw')}/`)) return 'openclaw';
+  return null;
+}
+
 function inferSource(filePath: string, raw?: string): SessionSource {
+  const pathSource = inferSourceFromPath(filePath);
+  if (pathSource) return pathSource;
+
   if (raw) {
     const format = detectSessionFormat(raw);
     if (format === 'codex') return 'codex';
     if (format === 'opencode') return 'opencode';
+    if (format === 'openclaw') return 'openclaw';
     if (format === 'pi-session' || format === 'pi-event-stream') return 'pi';
     if (format === 'claude') return 'claude';
   }
-  if (filePath.includes(`${join(homedir(), '.codex')}/`)) return 'codex';
-  if (filePath.includes(`${join(homedir(), '.pi', 'agent', 'sessions')}/`)) return 'pi';
   return 'claude';
 }
 
@@ -63,8 +78,19 @@ function inferSourceFromModel(model?: string | null): SessionSource | null {
   const normalized = (model || '').toLowerCase();
   if (normalized === 'opencode') return 'opencode';
   if (normalized === 'pi') return 'pi';
+  if (normalized === 'openclaw') return 'openclaw';
   if (normalized.includes('codex')) return 'codex';
   if (normalized.includes('claude')) return 'claude';
+  return null;
+}
+
+function isVirtualSessionPath(path: string): boolean {
+  return isOpenCodeDbVirtualPath(path) || isOpenClawDbVirtualPath(path);
+}
+
+function readVirtualSessionJsonl(path: string): { jsonl: string; filename: string } | null {
+  if (isOpenCodeDbVirtualPath(path)) return readOpenCodeDbVirtualJsonl(path);
+  if (isOpenClawDbVirtualPath(path)) return readOpenClawDbVirtualJsonl(path);
   return null;
 }
 
@@ -81,6 +107,22 @@ async function scanDir(dir: string, maxDepth = 3): Promise<ScannedFile[]> {
           const st = await stat(full);
           if (st.isDirectory() && maxDepth > 0 && !entry.startsWith('.') && entry !== 'subagents') {
             return await scanDir(full, maxDepth - 1);
+          } else if (st.isFile() && entry === 'opencode.db') {
+            return listOpenCodeDbSessions(full).map((session) => ({
+              path: session.path,
+              name: session.name,
+              size: session.size,
+              modified: session.modified,
+              source: 'opencode',
+            })) as ScannedFile[];
+          } else if (st.isFile() && entry === 'openclaw.sqlite') {
+            return listOpenClawDbSessions(full).map((session) => ({
+              path: session.path,
+              name: session.name,
+              size: session.size,
+              modified: session.modified,
+              source: 'openclaw',
+            })) as ScannedFile[];
           } else if (st.isFile() && entry.endsWith('.jsonl') && !entry.startsWith('agent-')) {
             return [{
               path: full,
@@ -129,6 +171,7 @@ function quickCwd(raw: string): string {
       if (typeof obj.part?.cwd === 'string' && obj.part.cwd) return obj.part.cwd;
       if (obj.type === 'header' && typeof obj.workingDirectory === 'string') return obj.workingDirectory;
       if (obj.type === 'session' && typeof obj.cwd === 'string') return obj.cwd;
+      if (obj.type === 'openclaw_session' && typeof obj.cwd === 'string') return obj.cwd;
     } catch { /* skip */ }
   }
   return '';
@@ -168,9 +211,14 @@ function textFromOpenAiContent(content: unknown): string {
 
 function quickMeta(filePath: string, raw: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
   const source = inferSource(filePath, raw);
-  if (source === 'codex') return quickMetaCodex(raw);
-  if (source === 'opencode') return quickMetaOpenCode(raw, basename(filePath));
-  if (source === 'pi') return quickMetaPi(raw, basename(filePath));
+  const format = detectSessionFormat(raw);
+  if (format === 'codex') return quickMetaCodex(raw);
+  if (format === 'opencode') return quickMetaOpenCode(raw, basename(filePath));
+  if (format === 'openclaw') return quickMetaOpenClaw(raw, basename(filePath));
+  if (format === 'pi-session' || format === 'pi-event-stream') {
+    const meta = quickMetaPi(raw, basename(filePath));
+    return source === 'openclaw' ? { ...meta, model: 'openclaw' } : meta;
+  }
   return quickMetaClaude(raw);
 }
 
@@ -282,6 +330,17 @@ function quickMetaPi(raw: string, filename: string): { title?: string; model?: s
   };
 }
 
+function quickMetaOpenClaw(raw: string, filename: string): { title?: string; model?: string; requests: number; peakTokens: number; turnCount: number } {
+  const { summary, turns } = runOpenClawPipeline(raw, filename);
+  return {
+    title: summary.session.aiTitle,
+    model: summary.session.model,
+    requests: summary.session.requests,
+    peakTokens: summary.session.peakTokens,
+    turnCount: turns.length,
+  };
+}
+
 // ── GET /scan ──────────────────────────────────────────────────────────────
 // Query params:
 //   paths  - comma-separated list of directories to scan (optional)
@@ -336,15 +395,17 @@ router.get('/scan', async (_req, res) => {
     const fileResults = await Promise.all(
       allFiles.map(async (f) => {
         const cachedMeta = cache.get(f.path);
+        const useCachedMeta = !force && !isVirtualSessionPath(f.path) && cachedMeta && cachedMeta.modified === f.modified && (cachedMeta.turnCount > 0 || cachedMeta.requests > 0);
         let result: FoundFile;
-        if (!force && cachedMeta && cachedMeta.modified === f.modified) {
-          result = { ...f, source: inferSourceFromModel(cachedMeta.model) ?? f.source, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
+        if (useCachedMeta) {
+          const source = f.source !== 'claude' ? f.source : inferSourceFromModel(cachedMeta.model) ?? f.source;
+          result = { ...f, source, ...cachedMeta, hash: cachedMeta.hash, imported: dbImported.has(f.name) };
         } else {
           let hash = '';
           let meta: ReturnType<typeof quickMeta> = { requests: 0, peakTokens: 0, turnCount: 0 };
           let cwd = '';
           try {
-            const content = await readFile(f.path, 'utf-8');
+            const content = readVirtualSessionJsonl(f.path)?.jsonl ?? await readFile(f.path, 'utf-8');
             hash = crypto.createHash('sha256').update(content).digest('hex');
             f.source = inferSource(f.path, content);
             meta = quickMeta(f.path, content);
@@ -364,7 +425,7 @@ router.get('/scan', async (_req, res) => {
         // Filter out sessions with 0 turns and 0 requests
         if ((result.turnCount ?? 0) === 0 && (result.requests ?? 0) === 0) return null;
 
-        return { result, wasCached: !force && cachedMeta && cachedMeta.modified === f.modified };
+        return { result, wasCached: Boolean(useCachedMeta) };
       }),
     );
 
@@ -396,6 +457,7 @@ function extractSessionTitle(jsonlContent: string): string {
       if (!line.trim()) continue;
       const obj = JSON.parse(line);
       if (obj.type === 'text' && typeof obj.part?.text === 'string') return obj.part.text.trim().slice(0, 120);
+      if (obj.type === 'step_start' && typeof obj.part?.prompt === 'string') return obj.part.prompt.trim().slice(0, 120);
       if (obj.type === 'message' && obj.message?.role === 'user') {
         const c = obj.message.content;
         if (typeof c === 'string' && c.trim()) return c.trim().slice(0, 120);
@@ -406,6 +468,13 @@ function extractSessionTitle(jsonlContent: string): string {
       }
       if (obj.type === 'event_msg' && obj.payload?.type === 'user_message' && typeof obj.payload.message === 'string') {
         return obj.payload.message.trim().slice(0, 120);
+      }
+      const update = obj.type === 'session_update' && obj.update ? obj.update : obj;
+      if (update.sessionUpdate === 'user_message_chunk') {
+        const text = typeof update.content?.text === 'string'
+          ? update.content.text
+          : typeof update.text === 'string' ? update.text : '';
+        if (text.trim()) return text.trim().slice(0, 120);
       }
       // First non-tool user message is the best title
       if (obj.type === 'user' && !obj.isSidechain && obj.message?.role === 'user') {
@@ -442,11 +511,12 @@ router.post('/import', validateBody(ImportRequestSchema), async (req, res) => {
   try {
     const filePath = req.body.path;
 
-    if (!existsSync(filePath)) {
+    if (!isVirtualSessionPath(filePath) && !existsSync(filePath)) {
       return res.status(404).json({ error: '文件不存在: ' + filePath });
     }
 
-    const content = await readFile(filePath, 'utf-8');
+    const virtualJsonl = readVirtualSessionJsonl(filePath);
+    const content = virtualJsonl ? virtualJsonl.jsonl : await readFile(filePath, 'utf-8');
     const hash = crypto.createHash('sha256').update(content).digest('hex');
 
     // Check for duplicate
@@ -455,13 +525,14 @@ router.post('/import', validateBody(ImportRequestSchema), async (req, res) => {
       return res.status(200).json({ imported: false, sessionId: existing.id, message: '会话已存在' });
     }
 
-    const filename = basename(filePath);
+    const filename = virtualJsonl ? virtualJsonl.filename : basename(filePath);
     const aiTitle = extractSessionTitle(content);
+    const source = inferSource(filePath, content);
 
     let created: Awaited<ReturnType<typeof createSession>>;
     try {
       created = await createSession({
-        jsonlContent: content, filename, hash, aiTitle, rawJsonl: null,
+        jsonlContent: content, filename, hash, aiTitle, rawJsonl: null, source,
       });
     } catch (err) {
       const racedExisting = isSessionUniqueConstraintError(err) ? findSessionByHash(hash) : undefined;

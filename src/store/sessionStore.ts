@@ -11,7 +11,7 @@ import type {
 } from '../types/session';
 import type { OntologyData } from '../types/ontology';
 
-type ScanFileSource = 'claude' | 'codex' | 'opencode' | 'pi';
+type ScanFileSource = 'claude' | 'codex' | 'opencode' | 'pi' | 'openclaw';
 type ScanFile = { path: string; name: string; size: number; modified: string; source?: ScanFileSource; hash: string; imported: boolean; title?: string; model?: string; requests?: number; peakTokens?: number; turnCount?: number; cwd?: string };
 
 export interface SessionStore {

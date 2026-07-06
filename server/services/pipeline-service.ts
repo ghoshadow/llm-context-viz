@@ -6,6 +6,7 @@ import { getDb } from '../db';
 import { runPipeline, setMemoryChars, loadCalibratedConstants } from '../../shared/pipeline/index';
 import { runCodexPipeline } from '../../shared/pipeline/codex-jsonl';
 import { runOpenCodePipeline } from '../../shared/pipeline/opencode-jsonl';
+import { runOpenClawPipeline } from '../../shared/pipeline/openclaw-jsonl';
 import { runPiPipeline } from '../../shared/pipeline/pi-jsonl';
 import { detectSessionFormat } from '../../shared/pipeline/session-format';
 import type { SessionSummary, TurnData } from '../../shared/types/session';
@@ -13,6 +14,7 @@ import type Database from 'better-sqlite3';
 import { readCalibrationConstants } from './calibration-constants';
 import { memoryCategoryChars } from '../../shared/pipeline/calibration-types';
 import type { ParseError } from '../../shared/pipeline/parse-jsonl';
+import { getSessionSource, type SessionSource } from '../../shared/session-source';
 
 // ============================================================================
 // Shared pipeline service — eliminates duplicated import/refresh logic across
@@ -91,6 +93,7 @@ export function extractCwdFromJsonl(jsonlContent?: string): string {
       if (parsed.type === 'session_meta' && typeof parsed.payload?.cwd === 'string') return parsed.payload.cwd;
       if (parsed.type === 'header' && typeof parsed.workingDirectory === 'string') return parsed.workingDirectory;
       if (parsed.type === 'session' && typeof parsed.cwd === 'string') return parsed.cwd;
+      if (parsed.type === 'openclaw_session' && typeof parsed.cwd === 'string') return parsed.cwd;
       if (typeof parsed.part?.cwd === 'string') return parsed.part.cwd;
     } catch { /* ignore parse errors */ }
   }
@@ -119,6 +122,8 @@ export async function runPipelineOnContent(
     }
     case 'opencode':
       return runOpenCodePipeline(jsonlContent, filename);
+    case 'openclaw':
+      return runOpenClawPipeline(jsonlContent, filename);
     case 'pi-session':
     case 'pi-event-stream':
       return runPiPipeline(jsonlContent, filename);
@@ -154,6 +159,8 @@ export function runPipelineOnContentSync(
     }
     case 'opencode':
       return runOpenCodePipeline(jsonlContent, filename);
+    case 'openclaw':
+      return runOpenClawPipeline(jsonlContent, filename);
     case 'pi-session':
     case 'pi-event-stream':
       return runPiPipeline(jsonlContent, filename);
@@ -243,6 +250,19 @@ export interface ImportSessionResult {
   errors: ParseError[];
 }
 
+function sourceForSummary(summary: SessionSummary, filename: string, source?: SessionSource): SessionSource {
+  return source ?? getSessionSource({
+    model: summary.session.model,
+    version: summary.session.version,
+    filename,
+  });
+}
+
+function summaryForSource(summary: SessionSummary, source: SessionSource): SessionSummary {
+  if (source !== 'openclaw' || summary.session.model !== 'pi') return summary;
+  return { ...summary, session: { ...summary.session, model: 'openclaw' } };
+}
+
 /**
  * Insert a new session record and its turns inside a single transaction.
  *
@@ -258,9 +278,13 @@ export async function createSession(opts: {
   hash: string;
   aiTitle?: string;
   rawJsonl?: string | null;
+  source?: SessionSource;
 }): Promise<ImportSessionResult> {
   const db = getDb();
-  const { summary, turns, errors } = await runPipelineOnContent(opts.jsonlContent, opts.filename);
+  const parsed = await runPipelineOnContent(opts.jsonlContent, opts.filename);
+  const source = sourceForSummary(parsed.summary, opts.filename, opts.source);
+  const summary = summaryForSource(parsed.summary, source);
+  const { turns, errors } = parsed;
   const sessionId = opts.hash.substring(0, 16);
 
   // 在事务外预序列化 JSON 列
@@ -270,11 +294,11 @@ export async function createSession(opts: {
 
   const insertSession = db.prepare(`
     INSERT INTO sessions (
-      id, filename, file_hash, model, version, ai_title, cwd,
+      id, filename, file_hash, source, model, version, ai_title, cwd,
       total_requests, peak_index, peak_tokens, peak_cache_hit, peak_turn_idx, peak_step,
       total_output, context_limit,
       turn_count, raw_size, categories_json, tools_json, series_json, raw_jsonl
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   db.transaction(() => {
@@ -282,6 +306,7 @@ export async function createSession(opts: {
       sessionId,
       opts.filename,
       opts.hash,
+      source,
       summary.session.model,
       summary.session.version,
       opts.aiTitle ?? summary.session.aiTitle ?? null,
@@ -320,9 +345,13 @@ export async function refreshSession(opts: {
   sessionId: string;
   jsonlContent: string;
   filename: string;
+  source?: SessionSource;
 }): Promise<ImportSessionResult> {
   const db = getDb();
-  const { summary, turns, errors } = await runPipelineOnContent(opts.jsonlContent, opts.filename);
+  const parsed = await runPipelineOnContent(opts.jsonlContent, opts.filename);
+  const source = sourceForSummary(parsed.summary, opts.filename, opts.source);
+  const summary = summaryForSource(parsed.summary, source);
+  const { turns, errors } = parsed;
 
   // 在事务外预序列化 JSON 列
   const categoriesJson = JSON.stringify(summary.categories);
@@ -332,6 +361,7 @@ export async function refreshSession(opts: {
   const deleteTurns = db.prepare('DELETE FROM turns WHERE session_id = ?');
   const updateSession = db.prepare(`
     UPDATE sessions SET
+      source = ?, model = ?, version = ?,
       turn_count = ?, total_requests = ?, peak_tokens = ?,
       peak_cache_hit = ?, peak_turn_idx = ?, peak_step = ?,
       total_output = ?, context_limit = ?,
@@ -344,6 +374,9 @@ export async function refreshSession(opts: {
     deleteTurns.run(opts.sessionId);
     persistTurns(opts.sessionId, turns);
     updateSession.run(
+      source,
+      summary.session.model,
+      summary.session.version,
       turns.length,
       summary.session.requests,
       summary.session.peakTokens,

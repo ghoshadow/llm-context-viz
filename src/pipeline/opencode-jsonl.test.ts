@@ -92,6 +92,27 @@ test('parses OpenCode run --format json streams into turn inspector data', () =>
   assert.equal(reply?.det.text, 'Done from OpenCode.');
 });
 
+test('uses OpenCode step prompts when present', () => {
+  const rawJsonl = toJsonl([
+    {
+      type: 'step_start',
+      timestamp: 1767036059338,
+      sessionID: 'ses_open',
+      part: { type: 'step-start', prompt: 'Read the project' },
+    },
+    {
+      type: 'text',
+      timestamp: 1767036064268,
+      sessionID: 'ses_open',
+      part: { type: 'text', text: 'Project read.' },
+    },
+  ]);
+
+  const { turns } = runOpenCodePipeline(rawJsonl, 'opencode-run.jsonl');
+
+  assert.equal(turns[0]!.prompt, 'Read the project');
+});
+
 test('keeps OpenCode error events visible without throwing', () => {
   const rawJsonl = toJsonl([
     { type: 'step_start', timestamp: 1767036059338, sessionID: 'ses_open', part: { type: 'step-start' } },
