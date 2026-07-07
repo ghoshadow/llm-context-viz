@@ -6,19 +6,25 @@
 [![Version](https://img.shields.io/badge/version-1.0.0-111827)](package.json)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-16a34a)](LICENSE)
 
-> LLM 对话上下文可视化工具——扫描本地 Claude Code / Codex 会话记录，以交互式 UI 展示 token 分布、turn 结构与上下文演变。
+> LLM 对话上下文可视化工具——扫描本地 Claude Code / Codex / OpenCode / Pi / OpenClaw 会话记录，以交互式 UI 展示 token 分布、turn 结构与上下文演变。
+
+<br>
+
+## 更新说明
+
+当前版本已兼容 OpenCode、Pi 和 OpenClaw 的日志解析展示。新增来源使用独立适配器解析 JSONL stream，可在同一套 WebUI 中查看会话首页、逐轮检查、上下文拆解、工具调用和本体图谱。
 
 <br>
 
 LLM Context Viz 是一个基于 **Express + React** 构建的本地工具，支持将 LLM 会话 JSONL 文件导入 SQLite 数据库，并提供多维度的可视化分析。核心特性：
 
-- **会话扫描** — 递归扫描 `~/.claude/projects/`、`~/.codex/sessions/` 和 `~/.codex/archived_sessions/`，SHA256 去重，增量导入。支持 Claude Code（Anthropic SDK 格式）和 Codex（OpenAI 兼容格式）两种 JSONL 来源
+- **会话扫描** — 递归扫描本地 agent 日志目录，SHA256 去重，增量导入。支持 Claude Code、Codex、OpenCode、Pi 和 OpenClaw 多种 JSONL 来源
 - **处理管道** — 五阶段同步管道（解析 → Turn 分组 → Token 计算 → 时间线拆解 → 摘要聚合），核心逻辑集中在 `shared/pipeline/`，前后端零依赖共享
 - **Turn 检查器** — 按 turn 粒度拆解 token 分布（模型 / 子代理 / 工具 / 系统 / 用户），支持执行时间线、token 增量面板、工具使用统计
 - **上下文组装视图** — 柱状图展示 context window 内 token 占用，按类别（system prompt、tool call、content block）拆解，含增长趋势折线图
 - **LLM 翻译** — 对 tool call 参数 / 结果进行中文翻译（Chat Completions 兼容端点），支持项目常量缓存翻译
 - **本体提取** — 从会话内容中自动提取概念节点和关系边，分片并发、置信度评分、缓存复用、失败分片重跑，SSE 流式返回并保持长连接
-- **校准系统** — 校准 LLM 分析参数（手动 + 自动检测），按来源（claude/codex）独立维护，用于分类器微调和 token 估算
+- **校准系统** — 校准 LLM 分析参数（手动 + 自动检测），按来源（claude/codex/opencode/pi/openclaw）独立维护，用于分类器微调和 token 估算
 - **模型配置** — 管理 `LLM_API_KEY`、自定义端点、模型选择，支持 `~/.llm-context-viz/.env`、项目 `.env` 和环境变量
 
 <br>
