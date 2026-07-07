@@ -31,7 +31,7 @@ export type LegacyClaudeDetails = Partial<Record<keyof LegacyClaudeSummary, stri
 
 export function normalizeAgentSource(value: unknown): AgentSource {
   if (value == null || value === '') return 'claude';
-  if (value === 'claude' || value === 'codex' || value === 'opencode' || value === 'openclaw') {
+  if (value === 'claude' || value === 'codex' || value === 'opencode' || value === 'pi' || value === 'openclaw') {
     return value;
   }
   throw new Error(`Unsupported calibration source: ${String(value)}`);

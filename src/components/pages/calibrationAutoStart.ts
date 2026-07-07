@@ -1,4 +1,6 @@
-export type CalibrationAutoSource = 'claude' | 'codex';
+import type { AgentSource } from './calibrationCategories';
+
+export type CalibrationAutoSource = AgentSource;
 
 export interface AutoCalibrationStartBody {
   source: CalibrationAutoSource;
@@ -9,7 +11,7 @@ export interface AutoCalibrationStartBody {
 }
 
 export function defaultCalibrationPromptInput(source: CalibrationAutoSource): string {
-  return source === 'codex' ? 'Calibration probe: reply with "ok".' : 'say hi';
+  return source === 'claude' ? 'say hi' : 'Calibration probe: reply with "ok".';
 }
 
 export function defaultCalibrationTargetInput(source: CalibrationAutoSource): string {
@@ -17,9 +19,9 @@ export function defaultCalibrationTargetInput(source: CalibrationAutoSource): st
 }
 
 export function captureTargetPlaceholderText(source: CalibrationAutoSource): string {
-  return source === 'codex'
-    ? '留空读取 ~/.codex/config.toml；填写可覆盖 Base URL'
-    : '留空读取 ~/.claude/settings.json；填写可覆盖 Base URL';
+  if (source === 'codex') return '留空读取 ~/.codex/config.toml；填写可覆盖 Base URL';
+  if (source === 'claude') return '留空读取 ~/.claude/settings.json；填写可覆盖 Base URL';
+  return '留空使用默认 API Host；填写可覆盖，如 api.deepseek.com';
 }
 
 export function buildAutoCalibrationStartBody(input: {

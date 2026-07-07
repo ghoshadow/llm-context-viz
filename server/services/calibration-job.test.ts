@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   defaultCalibrationPrompt,
   defaultCalibrationTarget,
   buildCalibrationProxyArgs,
+  startCalibrationJob,
   summarizeCalibrationProxyExit,
 } from './calibration-job';
 
@@ -23,9 +27,25 @@ test('falls back to exit code when proxy output has no explicit error', () => {
   );
 });
 
+test('summarizes child CLI stderr when proxy has no explicit ERROR line', () => {
+  const summary = summarizeCalibrationProxyExit(1, [
+    '[calibration-proxy] READY source=openclaw port=18443 mode=connect target=api.deepseek.com log=/repo/.openclaw-trace/api-log.jsonl',
+    'Config invalid',
+    'File: ~/.openclaw-autoclaw/openclaw.json',
+    'Run: openclaw --profile autoclaw doctor --fix',
+  ]);
+
+  assert.match(summary, /Config invalid/);
+  assert.match(summary, /openclaw --profile autoclaw doctor --fix/);
+  assert.match(summary, /calibration proxy exited with code 1/);
+});
+
 test('defaults calibration prompt by source', () => {
   assert.equal(defaultCalibrationPrompt('claude'), 'say hi');
   assert.equal(defaultCalibrationPrompt('codex'), 'Calibration probe: reply with "ok".');
+  assert.equal(defaultCalibrationPrompt('opencode'), 'Calibration probe: reply with "ok".');
+  assert.equal(defaultCalibrationPrompt('pi'), 'Calibration probe: reply with "ok".');
+  assert.equal(defaultCalibrationPrompt('openclaw'), 'Calibration probe: reply with "ok".');
 });
 
 test('defaults calibration target by source', () => {
@@ -36,6 +56,10 @@ test('defaults calibration target by source', () => {
   assert.equal(
     defaultCalibrationTarget('codex', () => 'http://127.0.0.1:9090', () => 'http://127.0.0.1:15721'),
     'http://127.0.0.1:9090',
+  );
+  assert.equal(
+    defaultCalibrationTarget('pi', () => 'http://127.0.0.1:9090', () => 'http://127.0.0.1:15721'),
+    'api.deepseek.com',
   );
 });
 
@@ -59,6 +83,75 @@ test('builds Claude proxy args with backward-compatible defaults', () => {
     '--timeout-ms', '45000',
     '--',
     '-p', 'say hi',
+  ]);
+});
+
+test('builds OpenCode proxy args with a plain probe prompt', () => {
+  const args = buildCalibrationProxyArgs({
+    source: 'opencode',
+    scriptPath: '/repo/scripts/calibration-proxy.cjs',
+    cwd: '/work',
+    targetHost: 'api.deepseek.com',
+    port: 18002,
+    timeoutMs: 45000,
+    prompt: 'Calibration probe: reply with "ok".',
+  });
+
+  assert.deepEqual(args, [
+    '/repo/scripts/calibration-proxy.cjs',
+    '--source', 'opencode',
+    '--cwd', '/work',
+    '--target-host', 'api.deepseek.com',
+    '--port', '18002',
+    '--timeout-ms', '45000',
+    '--',
+    'Calibration probe: reply with "ok".',
+  ]);
+});
+
+test('builds Pi proxy args with a plain probe prompt', () => {
+  const args = buildCalibrationProxyArgs({
+    source: 'pi',
+    scriptPath: '/repo/scripts/calibration-proxy.cjs',
+    cwd: '/work',
+    targetHost: 'api.deepseek.com',
+    port: 18003,
+    timeoutMs: 45000,
+    prompt: 'Calibration probe: reply with "ok".',
+  });
+
+  assert.deepEqual(args, [
+    '/repo/scripts/calibration-proxy.cjs',
+    '--source', 'pi',
+    '--cwd', '/work',
+    '--target-host', 'api.deepseek.com',
+    '--port', '18003',
+    '--timeout-ms', '45000',
+    '--',
+    'Calibration probe: reply with "ok".',
+  ]);
+});
+
+test('builds OpenClaw proxy args with a plain probe prompt', () => {
+  const args = buildCalibrationProxyArgs({
+    source: 'openclaw',
+    scriptPath: '/repo/scripts/calibration-proxy.cjs',
+    cwd: '/work',
+    targetHost: 'api.deepseek.com',
+    port: 18004,
+    timeoutMs: 45000,
+    prompt: 'Calibration probe: reply with "ok".',
+  });
+
+  assert.deepEqual(args, [
+    '/repo/scripts/calibration-proxy.cjs',
+    '--source', 'openclaw',
+    '--cwd', '/work',
+    '--target-host', 'api.deepseek.com',
+    '--port', '18004',
+    '--timeout-ms', '45000',
+    '--',
+    'Calibration probe: reply with "ok".',
   ]);
 });
 

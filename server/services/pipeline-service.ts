@@ -12,7 +12,7 @@ import { detectSessionFormat } from '../../shared/pipeline/session-format';
 import type { SessionSummary, TurnData } from '../../shared/types/session';
 import type Database from 'better-sqlite3';
 import { readCalibrationConstants } from './calibration-constants';
-import { memoryCategoryChars } from '../../shared/pipeline/calibration-types';
+import { memoryCategoryChars, type AgentSource, type NormalizedCalibration } from '../../shared/pipeline/calibration-types';
 import type { ParseError } from '../../shared/pipeline/parse-jsonl';
 import { getSessionSource, type SessionSource } from '../../shared/session-source';
 
@@ -20,6 +20,15 @@ import { getSessionSource, type SessionSource } from '../../shared/session-sourc
 // Shared pipeline service — eliminates duplicated import/refresh logic across
 // POST /scanner/import and POST /sessions/:id/refresh.
 // ============================================================================
+
+function readOptionalCalibrationConstants(cwd: string, source: AgentSource): NormalizedCalibration | null {
+  if (!cwd) return null;
+  try {
+    return readCalibrationConstants(cwd, source);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Compute total memory character count from the global CLAUDE.md and,
@@ -117,16 +126,25 @@ export async function runPipelineOnContent(
   switch (format) {
     case 'codex': {
       const cwd = extractCwdFromJsonl(jsonlContent);
-      const constants = cwd ? readCalibrationConstants(cwd, 'codex') : null;
+      const constants = readOptionalCalibrationConstants(cwd, 'codex');
       return runCodexPipeline(jsonlContent, filename, constants);
     }
-    case 'opencode':
-      return runOpenCodePipeline(jsonlContent, filename);
-    case 'openclaw':
-      return runOpenClawPipeline(jsonlContent, filename);
+    case 'opencode': {
+      const cwd = extractCwdFromJsonl(jsonlContent);
+      const constants = readOptionalCalibrationConstants(cwd, 'opencode');
+      return runOpenCodePipeline(jsonlContent, filename, constants);
+    }
+    case 'openclaw': {
+      const cwd = extractCwdFromJsonl(jsonlContent);
+      const constants = readOptionalCalibrationConstants(cwd, 'openclaw');
+      return runOpenClawPipeline(jsonlContent, filename, constants);
+    }
     case 'pi-session':
-    case 'pi-event-stream':
-      return runPiPipeline(jsonlContent, filename);
+    case 'pi-event-stream': {
+      const cwd = extractCwdFromJsonl(jsonlContent);
+      const constants = readOptionalCalibrationConstants(cwd, 'pi');
+      return runPiPipeline(jsonlContent, filename, constants);
+    }
     case 'claude':
       break;
     case 'unknown':
@@ -134,7 +152,7 @@ export async function runPipelineOnContent(
   }
 
   const cwd = extractCwdFromJsonl(jsonlContent);
-  const constants = cwd ? readCalibrationConstants(cwd, 'claude') : null;
+  const constants = readOptionalCalibrationConstants(cwd, 'claude');
   loadCalibratedConstants(constants);
   if (!memoryCategoryChars(constants)) {
     setMemoryChars(await computeMemoryChars(jsonlContent));
@@ -154,16 +172,25 @@ export function runPipelineOnContentSync(
   switch (format) {
     case 'codex': {
       const cwd = extractCwdFromJsonl(jsonlContent);
-      const constants = cwd ? readCalibrationConstants(cwd, 'codex') : null;
+      const constants = readOptionalCalibrationConstants(cwd, 'codex');
       return runCodexPipeline(jsonlContent, filename, constants);
     }
-    case 'opencode':
-      return runOpenCodePipeline(jsonlContent, filename);
-    case 'openclaw':
-      return runOpenClawPipeline(jsonlContent, filename);
+    case 'opencode': {
+      const cwd = extractCwdFromJsonl(jsonlContent);
+      const constants = readOptionalCalibrationConstants(cwd, 'opencode');
+      return runOpenCodePipeline(jsonlContent, filename, constants);
+    }
+    case 'openclaw': {
+      const cwd = extractCwdFromJsonl(jsonlContent);
+      const constants = readOptionalCalibrationConstants(cwd, 'openclaw');
+      return runOpenClawPipeline(jsonlContent, filename, constants);
+    }
     case 'pi-session':
-    case 'pi-event-stream':
-      return runPiPipeline(jsonlContent, filename);
+    case 'pi-event-stream': {
+      const cwd = extractCwdFromJsonl(jsonlContent);
+      const constants = readOptionalCalibrationConstants(cwd, 'pi');
+      return runPiPipeline(jsonlContent, filename, constants);
+    }
     case 'claude':
       break;
     case 'unknown':
@@ -171,7 +198,7 @@ export function runPipelineOnContentSync(
   }
 
   const cwd = extractCwdFromJsonl(jsonlContent);
-  const constants = cwd ? readCalibrationConstants(cwd, 'claude') : null;
+  const constants = readOptionalCalibrationConstants(cwd, 'claude');
   loadCalibratedConstants(constants);
   if (!memoryCategoryChars(constants)) {
     setMemoryChars(computeMemoryCharsSync(jsonlContent));

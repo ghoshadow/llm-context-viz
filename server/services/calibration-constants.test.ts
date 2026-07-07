@@ -7,6 +7,7 @@ import {
   DEFAULT_CALIBRATION_CONSTANTS,
   readCalibrationConstants,
   readClaudeMemoryConstants,
+  readLatestCaptureConstants,
   readProjectConstants,
   resolveProjectConstantsPath,
   writeCalibrationConstants,
@@ -23,6 +24,10 @@ test('resolves constants path under source-specific project trace directory', ()
     assert.equal(
       resolveProjectConstantsPath(project, 'codex'),
       join(project, '.codex-trace', 'codex-system-constants.json'),
+    );
+    assert.equal(
+      resolveProjectConstantsPath(project, 'pi'),
+      join(project, '.pi-trace', 'pi-system-constants.json'),
     );
   } finally {
     rmSync(project, { recursive: true, force: true });
@@ -124,6 +129,113 @@ test('reads empty Codex defaults when project constants are missing', () => {
     assert.equal(current.constantsSource, 'defaults');
     assert.equal(current.source, 'codex');
     assert.equal(current.categories.tool_defs?.chars ?? 0, 0);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('reads OpenCode defaults separately from latest capture candidate', () => {
+  const project = mkdtempSync(join(tmpdir(), 'cal-constants-'));
+  try {
+    mkdirSync(join(project, '.opencode-trace'), { recursive: true });
+    const logPath = join(project, '.opencode-trace', 'api-log-2026-07-06-01-02-03.jsonl');
+    writeFileSync(logPath, JSON.stringify({
+      request: {
+        method: 'POST',
+        url: 'https://api.openai.com/v1/responses',
+        headers: { 'user-agent': 'opencode/1.2.3' },
+        body: {
+          model: 'gpt-5.5',
+          instructions: 'OpenCode system prompt',
+          input: [{ role: 'developer', content: [{ text: '<skills_instructions>skills</skills_instructions>' }] }],
+          tools: [{ type: 'function', name: 'bash' }],
+        },
+      },
+      response: { body: 'data: {"response":{"usage":{"input_tokens":111}}}\n\n' },
+    }) + '\n');
+
+    const current = readCalibrationConstants(project, 'opencode');
+    const candidate = readLatestCaptureConstants(project, 'opencode');
+
+    assert.equal(current.constantsSource, 'defaults');
+    assert.equal(current.categories.sysPrompt?.chars ?? 0, 0);
+    assert.equal(candidate?.constantsSource, 'capture');
+    assert.equal(candidate?.rawLogPath, logPath);
+    assert.equal(candidate?.categories.sysPrompt?.chars, 'OpenCode system prompt'.length);
+    assert.equal(candidate?.categories.tool_defs?.chars, JSON.stringify([{ type: 'function', name: 'bash' }]).length);
+    assert.equal(candidate?.usage?.firstRequestInputTokens, 111);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('reads Pi defaults separately from latest capture candidate', () => {
+  const project = mkdtempSync(join(tmpdir(), 'cal-constants-'));
+  try {
+    mkdirSync(join(project, '.pi-trace'), { recursive: true });
+    const logPath = join(project, '.pi-trace', 'api-log-2026-07-06-01-02-03.jsonl');
+    writeFileSync(logPath, JSON.stringify({
+      request: {
+        method: 'POST',
+        url: 'https://api.openai.com/v1/chat/completions',
+        headers: { 'user-agent': 'pi/0.9.0' },
+        body: {
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: 'Pi system prompt' },
+            { role: 'developer', content: '<app-context>runtime</app-context>' },
+          ],
+          tools: [{ type: 'function', function: { name: 'read' } }],
+        },
+      },
+      response: { body: { usage: { prompt_tokens: 222 } } },
+    }) + '\n');
+
+    const current = readCalibrationConstants(project, 'pi');
+    const candidate = readLatestCaptureConstants(project, 'pi');
+
+    assert.equal(current.constantsSource, 'defaults');
+    assert.equal(current.categories.sysPrompt?.chars ?? 0, 0);
+    assert.equal(candidate?.constantsSource, 'capture');
+    assert.equal(candidate?.rawLogPath, logPath);
+    assert.equal(candidate?.categories.sysPrompt?.chars, 'Pi system prompt'.length);
+    assert.equal(candidate?.categories.reminders?.chars, '<app-context>runtime</app-context>'.length);
+    assert.equal(candidate?.usage?.firstRequestInputTokens, 222);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('reads OpenClaw defaults separately from latest capture candidate', () => {
+  const project = mkdtempSync(join(tmpdir(), 'cal-constants-'));
+  try {
+    mkdirSync(join(project, '.openclaw-trace'), { recursive: true });
+    const logPath = join(project, '.openclaw-trace', 'api-log-2026-07-06-01-02-03.jsonl');
+    writeFileSync(logPath, JSON.stringify({
+      request: {
+        method: 'POST',
+        url: 'https://api.anthropic.com/v1/messages',
+        headers: { 'user-agent': 'openclaw/5.0.0' },
+        body: {
+          model: 'claude-sonnet-4',
+          system: [{ text: 'OpenClaw system prompt' }],
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+          tools: [{ name: 'grep', input_schema: { type: 'object' } }],
+        },
+      },
+      response: { body: { usage: { input_tokens: 333 } } },
+    }) + '\n');
+
+    const current = readCalibrationConstants(project, 'openclaw');
+    const candidate = readLatestCaptureConstants(project, 'openclaw');
+
+    assert.equal(current.constantsSource, 'defaults');
+    assert.equal(current.categories.sysPrompt?.chars ?? 0, 0);
+    assert.equal(candidate?.source, 'openclaw');
+    assert.equal(candidate?.constantsSource, 'capture');
+    assert.equal(candidate?.rawLogPath, logPath);
+    assert.equal(candidate?.categories.sysPrompt?.chars, 'OpenClaw system prompt'.length);
+    assert.equal(candidate?.usage?.firstRequestInputTokens, 333);
   } finally {
     rmSync(project, { recursive: true, force: true });
   }

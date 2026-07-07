@@ -285,6 +285,13 @@ export function applyCodexCalibrationFallback(
   comp: Record<string, number>,
   calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
 ): void {
+  applyCoreCalibrationFallback(comp, calibration);
+}
+
+export function applyCoreCalibrationFallback(
+  comp: Record<string, number>,
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
+): void {
   if (!calibration) return;
   for (const key of ['sysPrompt', 'tool_defs', 'skills', 'mcp', 'reminders'] as const) {
     if ((comp[key] ?? 0) > 0) continue;

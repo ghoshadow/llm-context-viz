@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runOpenClawPipeline } from './openclaw-jsonl';
+import type { NormalizedCalibration } from './calibration-types';
 
 function toJsonl(lines: unknown[]): string {
   return lines.map((line) => JSON.stringify(line)).join('\n');
+}
+
+function categoryTokens(summary: { categories: Array<{ key: string; tokens: number }> }, key: string): number {
+  return summary.categories.find((category) => category.key === key)?.tokens ?? 0;
 }
 
 const openClawSample = toJsonl([
@@ -141,4 +146,27 @@ test('groups multi-block OpenClaw user chunks with the same run into one turn', 
   assert.equal(turns.length, 1);
   assert.equal(turns[0]!.prompt, 'First block\nSecond block');
   assert.equal(turns[0]!.asstReqs, 1);
+});
+
+test('uses OpenClaw calibration constants as missing core context fallback', () => {
+  const calibration: NormalizedCalibration = {
+    schemaVersion: 1,
+    source: 'openclaw',
+    categories: {
+      sysPrompt: { chars: 40 },
+      tool_defs: { chars: 60 },
+      skills: { chars: 20 },
+      mcp: { chars: 10 },
+      reminders: { chars: 15 },
+    },
+  };
+
+  const { summary, turns } = runOpenClawPipeline(openClawSample, 'openclaw.jsonl', calibration);
+
+  assert.ok(categoryTokens(summary, 'sysPrompt') > 0);
+  assert.ok(categoryTokens(summary, 'tool_defs') > 0);
+  assert.ok(categoryTokens(summary, 'skills') > 0);
+  assert.ok(categoryTokens(summary, 'mcp') > 0);
+  assert.ok(categoryTokens(summary, 'reminders') > 0);
+  assert.ok((turns[0]!.comp.sysPrompt ?? 0) > 0);
 });

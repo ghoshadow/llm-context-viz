@@ -9,6 +9,9 @@ import type { AgentSource, NormalizedCalibration } from '../../shared/pipeline/c
 import { normalizeAgentSource } from '../../shared/pipeline/calibration-types';
 import { extractConstants } from '../../shared/pipeline/extract-constants';
 import { extractCodexConstants } from '../../shared/pipeline/extract-codex-constants';
+import { extractOpenCodeConstants } from '../../shared/pipeline/extract-opencode-constants';
+import { extractOpenClawConstants } from '../../shared/pipeline/extract-openclaw-constants';
+import { extractPiConstants } from '../../shared/pipeline/extract-pi-constants';
 import { readClaudeBaseUrl } from './claude-config';
 import { readCodexBaseUrl, readCodexTargetHost } from './codex-config';
 
@@ -76,6 +79,7 @@ const __dirname = join(__filename, '..');
 const SCRIPT_PATH = resolve(join(__dirname, '..', '..', 'scripts', 'calibration-proxy.cjs'));
 const MAX_OUTPUT_LINES = 80;
 const JOB_RETENTION_MS = 15 * 60 * 1000;
+const DEFAULT_CALIBRATION_TARGET = 'api.deepseek.com';
 
 function appendOutput(job: CalibrationJob, text: string): void {
   for (const line of text.split(/\r?\n/)) {
@@ -85,7 +89,7 @@ function appendOutput(job: CalibrationJob, text: string): void {
       const match = line.match(/\slog=(.+)$/);
       if (match?.[1]) job.logFile = match[1].trim();
       job.status = 'running';
-      job.message = `waiting for ${job.source === 'codex' ? 'Codex' : 'Claude Code'} request`;
+      job.message = `waiting for ${job.source} request`;
     }
     if (line.includes('CAPTURED') && line.includes(' log=')) {
       const match = line.match(/\slog=(.+)$/);
@@ -102,9 +106,19 @@ function appendOutput(job: CalibrationJob, text: string): void {
 export function summarizeCalibrationProxyExit(code: number | null, output: string[]): string {
   const fallback = `calibration proxy exited with code ${code}`;
   const explicitError = [...output].reverse().find((line) => line.includes('[calibration-proxy] ERROR '));
-  if (!explicitError) return fallback;
-  const detail = explicitError.replace(/^.*?\[calibration-proxy\] ERROR\s+/, '').trim();
-  return detail ? `${detail}; ${fallback}` : fallback;
+  if (explicitError) {
+    const detail = explicitError.replace(/^.*?\[calibration-proxy\] ERROR\s+/, '').trim();
+    return detail ? `${detail}; ${fallback}` : fallback;
+  }
+  const childDetail = output
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('[calibration-proxy] READY '))
+    .filter((line) => !line.startsWith('[calibration-proxy] Launching:'))
+    .filter((line) => !line.startsWith('[calibration-proxy] CONNECT '))
+    .slice(-6)
+    .join('; ');
+  return childDetail ? `${childDetail}; ${fallback}` : fallback;
 }
 
 function snapshot(job: CalibrationJob): CalibrationJobSnapshot {
@@ -136,7 +150,7 @@ async function choosePort(preferred?: number): Promise<number> {
 }
 
 export function defaultCalibrationPrompt(source: AgentSource): string {
-  return source === 'codex' ? 'Calibration probe: reply with "ok".' : 'say hi';
+  return source === 'claude' ? 'say hi' : 'Calibration probe: reply with "ok".';
 }
 
 export function defaultCalibrationTarget(
@@ -144,7 +158,9 @@ export function defaultCalibrationTarget(
   readCodexTarget = readCodexTargetHost,
   readClaudeTarget = readClaudeBaseUrl,
 ): string {
-  return source === 'codex' ? readCodexTarget() : readClaudeTarget();
+  if (source === 'codex') return readCodexTarget();
+  if (source === 'claude') return readClaudeTarget();
+  return DEFAULT_CALIBRATION_TARGET;
 }
 
 export function buildCalibrationProxyArgs(options: {
@@ -166,9 +182,9 @@ export function buildCalibrationProxyArgs(options: {
     '--',
   ];
 
-  return options.source === 'codex'
-    ? [...base, options.prompt]
-    : [...base, '-p', options.prompt];
+  return options.source === 'claude'
+    ? [...base, '-p', options.prompt]
+    : [...base, options.prompt];
 }
 
 export async function startCalibrationJob(options: StartCalibrationJobOptions): Promise<CalibrationJobSnapshot> {
@@ -244,7 +260,7 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
       job.completedAt = new Date().toISOString();
       job.error = summarizeCalibrationProxyExit(code, job.output);
       job.message = code === 2
-        ? 'no target request captured; capture target may not match the active Claude Code base URL'
+        ? 'no target request captured; capture target may not match the active agent API host'
         : 'calibration proxy failed';
       scheduleCleanup(job);
       return;
@@ -260,9 +276,7 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
     job.status = 'extracting';
     job.message = 'extracting constants from capture';
     try {
-      const extracted = source === 'codex'
-        ? extractCodexConstants(job.logFile)
-        : extractConstants(job.logFile);
+      const extracted = extractCalibrationConstantsForSource(source, job.logFile);
       if (!extracted) throw new Error('capture log did not contain a valid API request');
       job.result = {
         schemaVersion: 1,
@@ -293,6 +307,21 @@ export async function startCalibrationJob(options: StartCalibrationJobOptions): 
   });
 
   return snapshot(job);
+}
+
+function extractCalibrationConstantsForSource(source: AgentSource, logFile: string) {
+  switch (source) {
+    case 'claude':
+      return extractConstants(logFile);
+    case 'codex':
+      return extractCodexConstants(logFile);
+    case 'opencode':
+      return extractOpenCodeConstants(logFile);
+    case 'pi':
+      return extractPiConstants(logFile);
+    case 'openclaw':
+      return extractOpenClawConstants(logFile);
+  }
 }
 
 export function getCalibrationJob(jobId: string): CalibrationJobSnapshot | null {

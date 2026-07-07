@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { get, post } from '../../api/client';
 import { buildAutoCalibrationStartBody } from './calibrationAutoStart';
+import { calibrationSourceAutoLaunchSupported, calibrationSourceLabel } from './calibrationSource';
 import type { AgentSource } from './calibrationCategories';
 import type { ExtractedResult } from './CalibratePage';
 
@@ -38,7 +39,7 @@ export function useAutoCalibrationJob({
   onBeforeStart,
 }: {
   sessionCwd: string | null | undefined;
-  calibrationSource: Extract<AgentSource, 'claude' | 'codex'>;
+  calibrationSource: AgentSource;
   autoPrompt: string;
   autoTargetHost: string;
   onResult: (result: ExtractedResult) => void;
@@ -51,6 +52,10 @@ export function useAutoCalibrationJob({
   const handleAutoStart = useCallback(async () => {
     if (!sessionCwd) {
       onError('请先打开一个会话，以便自动检测项目目录。');
+      return;
+    }
+    if (!calibrationSourceAutoLaunchSupported(calibrationSource)) {
+      onError(`${calibrationSourceLabel(calibrationSource)} 暂不支持从前端自动启动校准；请使用已有抓包 JSONL 解析结果。`);
       return;
     }
     onBeforeStart();

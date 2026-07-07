@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { normalizeAgentSource } from '../../shared/pipeline/calibration-types';
 import type { NormalizedCalibrationSummary } from '../../shared/pipeline/calibration-types';
 import {
+  readLatestCaptureConstants,
   readCalibrationConstants,
   writeCalibrationConstants,
 } from '../services/calibration-constants';
@@ -67,6 +68,26 @@ router.get('/current', (_req, res) => {
   } catch (err) {
     console.error('GET /calibrate/current error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
     return res.status(500).json({ error: '读取失败: ' + (err instanceof Error ? err.message : String(err)) });
+  }
+});
+
+// ── GET /latest-capture — parse newest existing capture log without applying it ──
+
+router.get('/latest-capture', (_req, res) => {
+  try {
+    const cwd = typeof _req.query.cwd === 'string' ? _req.query.cwd : '';
+    if (!cwd) {
+      return res.status(400).json({ error: '缺少 cwd 参数，无法确定当前项目。' });
+    }
+    const source = normalizeAgentSource(_req.query.source);
+    const data = readLatestCaptureConstants(cwd, source);
+    if (!data) {
+      return res.status(404).json({ error: '未找到可解析的抓包 JSONL。' });
+    }
+    return res.json(data);
+  } catch (err) {
+    console.error('GET /calibrate/latest-capture error:', sanitizeForLog(err instanceof Error ? err.message : String(err)));
+    return res.status(500).json({ error: '解析失败: ' + (err instanceof Error ? err.message : String(err)) });
   }
 });
 

@@ -24,7 +24,12 @@ import {
   defaultCalibrationPromptInput,
   defaultCalibrationTargetInput,
 } from './calibrationAutoStart';
-import { calibrationSourceFromSession, calibrationSourceLabel } from './calibrationSource';
+import {
+  calibrationSourceAutoLaunchSupported,
+  calibrationSourceFromSession,
+  calibrationSourceLabel,
+  calibrationTraceDirName,
+} from './calibrationSource';
 import {
   CalibrationCategoryRows,
   CalibrationDetailDialog,
@@ -62,7 +67,7 @@ export interface UserMessageParts {
 export interface ExtractedResult {
   schemaVersion?: 1;
   source?: AgentSource;
-  constantsSource?: 'project' | 'defaults';
+  constantsSource?: 'project' | 'defaults' | 'capture';
   path?: string;
   cwd?: string;
   note?: string;
@@ -92,7 +97,7 @@ export interface ExtractedResult {
 type ConstantKey = string;
 export type ConstantDetails = Partial<CalibrationDetails>;
 type CurrentConstants = ExtractedResult;
-type CalibrationUiSource = Extract<AgentSource, 'claude' | 'codex'>;
+type CalibrationUiSource = AgentSource;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -116,6 +121,7 @@ export default function CalibratePage() {
   const [result, setResult] = useState<ExtractedResult | null>(null);
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [loadingLatestCapture, setLoadingLatestCapture] = useState(false);
   const [calibrationSource, setCalibrationSource] = useState<CalibrationUiSource>('claude');
   const [autoPrompt, setAutoPrompt] = useState(defaultCalibrationPromptInput('claude'));
   const [autoTargetHost, setAutoTargetHost] = useState(defaultCalibrationTargetInput('claude'));
@@ -149,6 +155,8 @@ export default function CalibratePage() {
     onBeforeStart: handleAutoBeforeStart,
   });
   const permissionNotice = getCalibrationFailureNotice(autoJob);
+  const autoLaunchSupported = calibrationSourceAutoLaunchSupported(calibrationSource);
+  const calibrationLabel = calibrationSourceLabel(calibrationSource);
   const sessionCalibrationSource = useMemo(() => calibrationSourceFromSession(currentSession), [currentSession]);
   const resultSummary = useMemo(() => getNormalizedCalibrationSummary(result), [result]);
   const resultRows = useMemo(
@@ -204,6 +212,27 @@ export default function CalibratePage() {
       setApplying(false);
     }
   }, [autoJob?.logFile, calibrationSource, result, resultSummary, sessionCwd, setCurrentConstants]);
+
+  const handleLoadLatestCapture = useCallback(async () => {
+    if (!sessionCwd) {
+      setError('请先打开一个会话，以便确定项目 cwd。');
+      return;
+    }
+    setLoadingLatestCapture(true);
+    setError(null);
+    setApplied(false);
+    setResult(null);
+    try {
+      const candidate = await get<ExtractedResult>(
+        `/calibrate/latest-capture?cwd=${encodeURIComponent(sessionCwd)}&source=${calibrationSource}`,
+      );
+      setResult(candidate);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoadingLatestCapture(false);
+    }
+  }, [calibrationSource, sessionCwd]);
 
   // Token estimate
   const estTok = estimateCalibrationTokens;
@@ -279,7 +308,7 @@ export default function CalibratePage() {
           </div>
           <h1>更新系统级上下文常量</h1>
           <p className="subtitle">
-            Claude Code 或 Codex 版本更新后，系统提示词、工具定义等上下文常量可能变化。使用无 sudo 本地代理自动截获一次请求，并将原始 API 日志固定写入项目内 trace 目录。
+            所选 agent 版本更新后，系统提示词、工具定义等上下文常量可能变化。自动校准或抓包 JSONL 解析会生成候选常量，确认后写入当前项目 trace 目录。
           </p>
         </div>
         <div style={{ display: 'flex', gap: 9, fontFamily: MONO, fontSize: 12 }}>
@@ -293,11 +322,15 @@ export default function CalibratePage() {
         </div>
       </header>
 
-      {/* Step 1: Automatic capture */}
+      {/* Step 1: Capture or parse */}
       <section style={{ marginTop: 28 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>1. 自动截获 API 请求</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
+          {autoLaunchSupported ? '1. 自动截获 API 请求' : '1. 解析抓包 API 请求'}
+        </h2>
         <p style={{ fontSize: 13, color: S.textDesc3, marginBottom: 16, lineHeight: 1.6 }}>
-          使用无 sudo 本地代理启动一次所选 agent，请求成功后会自动解析捕获日志。日志固定写入当前会话项目对应的 trace 目录。
+          {autoLaunchSupported
+            ? '使用无 sudo 本地代理启动一次所选 agent，请求成功后会自动解析捕获日志。日志固定写入当前会话项目对应的 trace 目录。'
+            : `从 ${calibrationTraceDirName(calibrationSource)} 中读取最新 api-log JSONL，解析为 ${calibrationLabel} 候选常量。`}
         </p>
         <div style={{
           border: `1px solid ${S.borderColor}`, borderRadius: 13, padding: '16px 18px',
@@ -316,55 +349,73 @@ export default function CalibratePage() {
               fontFamily: SANS,
               fontSize: 12,
             }}>
-              {calibrationSourceLabel(calibrationSource)}
+              {calibrationLabel}
             </span>
             <span style={{ fontSize: 12, color: S.textMuted }}>
               跟随当前会话类型
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 340px', minWidth: 0 }}>
-              Prompt
-              <input
-                value={autoPrompt}
-                onChange={(e) => setAutoPrompt(e.target.value)}
-                disabled={autoRunning}
-                style={{
-                  border: `1px solid ${S.borderColor}`, borderRadius: 8, padding: '10px 12px',
-                  background: 'oklch(0.16 0.01 265)', color: S.textPrimary3, fontFamily: MONO,
-                }}
-                aria-label="校准 prompt"
-              />
-            </label>
-            <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 220px', minWidth: 0 }}>
-              Capture Target
-              <input
-                value={autoTargetHost}
-                onChange={(e) => setAutoTargetHost(e.target.value)}
-                disabled={autoRunning}
-                placeholder={captureTargetPlaceholderText(calibrationSource)}
-                style={{
-                  border: `1px solid ${S.borderColor}`, borderRadius: 8, padding: '10px 12px',
-                  background: 'oklch(0.16 0.01 265)', color: S.textPrimary3, fontFamily: MONO,
-                }}
-                aria-label="捕获目标 host 或 base url"
-              />
-            </label>
-          </div>
+          {autoLaunchSupported && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 340px', minWidth: 0 }}>
+                Prompt
+                <input
+                  value={autoPrompt}
+                  onChange={(e) => setAutoPrompt(e.target.value)}
+                  disabled={autoRunning}
+                  style={{
+                    border: `1px solid ${S.borderColor}`, borderRadius: 8, padding: '10px 12px',
+                    background: 'oklch(0.16 0.01 265)', color: S.textPrimary3, fontFamily: MONO,
+                  }}
+                  aria-label="校准 prompt"
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 5, fontSize: 11, color: S.textMuted, fontFamily: SANS, flex: '1 1 220px', minWidth: 0 }}>
+                Capture Target
+                <input
+                  value={autoTargetHost}
+                  onChange={(e) => setAutoTargetHost(e.target.value)}
+                  disabled={autoRunning}
+                  placeholder={captureTargetPlaceholderText(calibrationSource)}
+                  style={{
+                    border: `1px solid ${S.borderColor}`, borderRadius: 8, padding: '10px 12px',
+                    background: 'oklch(0.16 0.01 265)', color: S.textPrimary3, fontFamily: MONO,
+                  }}
+                  aria-label="捕获目标 host 或 base url"
+                />
+              </label>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
-              disabled={!sessionCwd || autoRunning}
-              onClick={handleAutoStart}
-              style={{
-                border: 'none', borderRadius: 10, padding: '12px 24px',
-                fontSize: 14, fontWeight: 600, fontFamily: SANS,
-                cursor: (!sessionCwd || autoRunning) ? 'not-allowed' : 'pointer',
-                background: (!sessionCwd || autoRunning) ? 'oklch(0.28 0.01 265)' : 'oklch(0.74 0.13 60)',
-                color: (!sessionCwd || autoRunning) ? S.textMuted : 'oklch(0.12 0.01 265)',
-              }}
-            >
-              {autoRunning ? '截获中...' : '自动截获并提取'}
-            </button>
+            {autoLaunchSupported ? (
+              <button
+                disabled={!sessionCwd || autoRunning}
+                onClick={handleAutoStart}
+                style={{
+                  border: 'none', borderRadius: 10, padding: '12px 24px',
+                  fontSize: 14, fontWeight: 600, fontFamily: SANS,
+                  cursor: (!sessionCwd || autoRunning) ? 'not-allowed' : 'pointer',
+                  background: (!sessionCwd || autoRunning) ? 'oklch(0.28 0.01 265)' : 'oklch(0.74 0.13 60)',
+                  color: (!sessionCwd || autoRunning) ? S.textMuted : 'oklch(0.12 0.01 265)',
+                }}
+              >
+                {autoRunning ? '截获中...' : '自动截获并提取'}
+              </button>
+            ) : (
+              <button
+                disabled={!sessionCwd || loadingLatestCapture}
+                onClick={handleLoadLatestCapture}
+                style={{
+                  border: 'none', borderRadius: 10, padding: '12px 24px',
+                  fontSize: 14, fontWeight: 600, fontFamily: SANS,
+                  cursor: (!sessionCwd || loadingLatestCapture) ? 'not-allowed' : 'pointer',
+                  background: (!sessionCwd || loadingLatestCapture) ? 'oklch(0.28 0.01 265)' : 'oklch(0.74 0.13 60)',
+                  color: (!sessionCwd || loadingLatestCapture) ? S.textMuted : 'oklch(0.12 0.01 265)',
+                }}
+              >
+                {loadingLatestCapture ? '解析中...' : '解析最新抓包'}
+              </button>
+            )}
             {autoRunning && (
               <button
                 onClick={handleAutoCancel}
@@ -376,9 +427,14 @@ export default function CalibratePage() {
                 取消
               </button>
             )}
-            {autoJob && (
+            {autoLaunchSupported && autoJob && (
               <span style={{ fontSize: 12, color: autoJob.status === 'failed' ? 'oklch(0.72 0.14 25)' : S.textDesc3 }}>
                 {autoJob.message}
+              </span>
+            )}
+            {!autoLaunchSupported && (
+              <span style={{ fontSize: 12, color: S.textDesc3 }}>
+                生成候选后可在下方检查并应用。
               </span>
             )}
           </div>
@@ -387,7 +443,7 @@ export default function CalibratePage() {
               log: {autoJob.logFile}
             </div>
           )}
-          {permissionNotice ? (
+          {autoLaunchSupported && permissionNotice ? (
             <CalibrationErrorNotice>
               <div style={{ fontWeight: 600, color: 'oklch(0.78 0.14 25)', marginBottom: 4 }}>
                 {permissionNotice.title}
@@ -422,7 +478,7 @@ export default function CalibratePage() {
 
           {/* Meta */}
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
-            <CalibrationStatCard label="来源" value={result.source === 'codex' ? 'Codex' : 'Claude Code'} />
+            <CalibrationStatCard label="来源" value={calibrationSourceLabel(result.source ?? calibrationSource)} />
             <CalibrationStatCard label="CLI 版本" value={result.cliVersion || result.ccVersion || '-'} />
             <CalibrationStatCard label="模型" value={result.model || '-'} />
             <CalibrationStatCard
@@ -504,7 +560,7 @@ export default function CalibratePage() {
             </button>
             {!applied && (
               <span style={{ fontSize: 12, color: S.textDesc3 }}>
-                将常量写入当前项目的 {calibrationSource === 'codex' ? '.codex-trace/' : '.claude-trace/'} 目录
+                将常量写入当前项目的 {calibrationTraceDirName(calibrationSource)} 目录
               </span>
             )}
           </div>
@@ -525,7 +581,10 @@ export default function CalibratePage() {
           ) : currentConstants ? (
             <>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
-                <CalibrationStatCard label="来源" value={currentConstants.constantsSource === 'project' ? '项目校准' : '内置默认'} />
+                <CalibrationStatCard
+                  label="来源"
+                  value={currentConstants.constantsSource === 'project' ? '项目校准' : currentConstants.constantsSource === 'capture' ? '抓包解析' : '内置默认'}
+                />
                 {currentConstants.appliedAt && (
                   <CalibrationStatCard label="校准时间" value={new Date(currentConstants.appliedAt).toLocaleString()} />
                 )}

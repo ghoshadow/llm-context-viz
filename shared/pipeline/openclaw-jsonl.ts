@@ -4,11 +4,13 @@ import {
   CATEGORY_META,
   addTokenCount,
   addTokens,
+  applyCoreCalibrationFallback,
   cloneTools,
   deltaBetween,
   initComp,
   sumComp,
 } from './codex-jsonl-summary';
+import type { NormalizedCalibration, NormalizedCalibrationSummary } from './calibration-types';
 import type { ParseError } from './parse-jsonl';
 import { roundTokens } from './utils';
 
@@ -45,6 +47,7 @@ interface ToolState {
 export function runOpenClawPipeline(
   jsonlText: string,
   filename: string,
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
 ): {
   summary: SessionSummary;
   turns: TurnData[];
@@ -52,7 +55,7 @@ export function runOpenClawPipeline(
 } {
   const { lines, errors } = parseOpenClawLines(jsonlText);
   const rawTurns = buildOpenClawTurns(lines, filename);
-  const turns = assembleOpenClawTurns(rawTurns);
+  const turns = assembleOpenClawTurns(rawTurns, calibration);
   const summary = aggregateOpenClawSession(lines, turns, filename);
   return { summary, turns, errors };
 }
@@ -176,9 +179,13 @@ function buildOpenClawTurns(lines: OpenClawLine[], filename: string): OpenClawTu
   return turns;
 }
 
-function assembleOpenClawTurns(turns: OpenClawTurn[]): TurnData[] {
+function assembleOpenClawTurns(
+  turns: OpenClawTurn[],
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
+): TurnData[] {
   const results: TurnData[] = [];
   const runningComp = initComp();
+  applyCoreCalibrationFallback(runningComp, calibration);
   const cumTools: Record<string, ToolState> = {};
   let prevComp = initComp();
   let runningCumTotal = 0;

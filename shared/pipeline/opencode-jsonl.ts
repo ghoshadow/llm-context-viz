@@ -1,6 +1,7 @@
 import type { ContextCategory, SeriesPoint, SessionSummary, TimelineSegment, ToolAggregation, TurnData, TurnDelta } from '../types/session';
 import { isObject, msBetween, numberOrZero, stringifyInput } from './codex-jsonl-parser';
-import { CATEGORY_META, addTokenCount, addTokens, cloneTools, deltaBetween, initComp, sumComp } from './codex-jsonl-summary';
+import { CATEGORY_META, addTokenCount, addTokens, applyCoreCalibrationFallback, cloneTools, deltaBetween, initComp, sumComp } from './codex-jsonl-summary';
+import type { NormalizedCalibration, NormalizedCalibrationSummary } from './calibration-types';
 import type { ParseError } from './parse-jsonl';
 import { roundTokens } from './utils';
 
@@ -38,6 +39,7 @@ interface ToolState {
 export function runOpenCodePipeline(
   jsonlText: string,
   filename: string,
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
 ): {
   summary: SessionSummary;
   turns: TurnData[];
@@ -45,7 +47,7 @@ export function runOpenCodePipeline(
 } {
   const { lines, errors } = parseOpenCodeLines(jsonlText);
   const rawTurns = buildOpenCodeTurns(lines, filename);
-  const turns = assembleOpenCodeTurns(rawTurns);
+  const turns = assembleOpenCodeTurns(rawTurns, calibration);
   const summary = aggregateOpenCodeSession(lines, rawTurns, turns, filename);
   return { summary, turns, errors };
 }
@@ -120,9 +122,13 @@ function buildOpenCodeTurns(lines: OpenCodeLine[], filename: string): OpenCodeTu
   return turns;
 }
 
-function assembleOpenCodeTurns(turns: OpenCodeTurn[]): TurnData[] {
+function assembleOpenCodeTurns(
+  turns: OpenCodeTurn[],
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
+): TurnData[] {
   const results: TurnData[] = [];
   const runningComp = initComp();
+  applyCoreCalibrationFallback(runningComp, calibration);
   const cumTools: Record<string, ToolState> = {};
   let prevComp = initComp();
   let runningCumTotal = 0;

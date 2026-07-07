@@ -1,12 +1,19 @@
-import { getSessionSource, type SessionSourceLike } from '../../utils/sessionSource';
+import { getSessionSource, SESSION_SOURCE_LABELS, type SessionSourceLike } from '../../utils/sessionSource';
 import type { CalibrationAutoSource } from './calibrationAutoStart';
 
 export function calibrationSourceFromSession(session: SessionSourceLike | null | undefined): CalibrationAutoSource {
   if (!session) return 'claude';
-  const source = getSessionSource(session);
-  return source === 'codex' ? 'codex' : 'claude';
+  return getSessionSource(session);
 }
 
 export function calibrationSourceLabel(source: CalibrationAutoSource): string {
-  return source === 'codex' ? 'Codex' : 'Claude Code';
+  return SESSION_SOURCE_LABELS[source];
+}
+
+export function calibrationTraceDirName(source: CalibrationAutoSource): string {
+  return source === 'claude' ? '.claude-trace/' : `.${source}-trace/`;
+}
+
+export function calibrationSourceAutoLaunchSupported(source: CalibrationAutoSource): boolean {
+  return source === 'claude' || source === 'codex' || source === 'opencode' || source === 'pi' || source === 'openclaw';
 }

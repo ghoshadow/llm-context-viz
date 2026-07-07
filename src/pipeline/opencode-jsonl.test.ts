@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runOpenCodePipeline } from './opencode-jsonl';
+import type { NormalizedCalibration } from './calibration-types';
 
 function toJsonl(lines: unknown[]): string {
   return lines.map((line) => JSON.stringify(line)).join('\n');
+}
+
+function categoryTokens(summary: { categories: Array<{ key: string; tokens: number }> }, key: string): number {
+  return summary.categories.find((category) => category.key === key)?.tokens ?? 0;
 }
 
 const openCodeSample = toJsonl([
@@ -128,4 +133,27 @@ test('keeps OpenCode error events visible without throwing', () => {
   const err = turns[0]!.segs.find((seg) => seg.k === 'i' && seg.n === 'OpenCode 错误');
 
   assert.match(err?.det.text ?? '', /Rate limit exceeded/);
+});
+
+test('uses OpenCode calibration constants as missing core context fallback', () => {
+  const calibration: NormalizedCalibration = {
+    schemaVersion: 1,
+    source: 'opencode',
+    categories: {
+      sysPrompt: { chars: 40 },
+      tool_defs: { chars: 60 },
+      skills: { chars: 20 },
+      mcp: { chars: 10 },
+      reminders: { chars: 15 },
+    },
+  };
+
+  const { summary, turns } = runOpenCodePipeline(openCodeSample, 'opencode-run.jsonl', calibration);
+
+  assert.ok(categoryTokens(summary, 'sysPrompt') > 0);
+  assert.ok(categoryTokens(summary, 'tool_defs') > 0);
+  assert.ok(categoryTokens(summary, 'skills') > 0);
+  assert.ok(categoryTokens(summary, 'mcp') > 0);
+  assert.ok(categoryTokens(summary, 'reminders') > 0);
+  assert.ok((turns[0]!.comp.sysPrompt ?? 0) > 0);
 });

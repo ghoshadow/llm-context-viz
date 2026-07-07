@@ -4,7 +4,7 @@
  * 被 server/ 和 src/ 共同引用，消除双向依赖。
  */
 
-export type AgentSource = 'claude' | 'codex' | 'opencode' | 'openclaw';
+export type AgentSource = 'claude' | 'codex' | 'opencode' | 'pi' | 'openclaw';
 
 export interface CalibrationCategory {
   chars: number;
@@ -41,7 +41,7 @@ export interface NormalizedCalibrationSummary {
 export interface NormalizedCalibration extends NormalizedCalibrationSummary {
   schemaVersion: 1;
   source: AgentSource;
-  constantsSource?: 'project' | 'defaults';
+  constantsSource?: 'project' | 'defaults' | 'capture';
   path?: string;
   cwd?: string;
   note?: string;

@@ -1,4 +1,4 @@
-export type AgentSource = 'claude' | 'codex' | 'opencode' | 'openclaw';
+export type AgentSource = 'claude' | 'codex' | 'opencode' | 'pi' | 'openclaw';
 
 export interface CalibrationCategoryValue {
   chars: number;

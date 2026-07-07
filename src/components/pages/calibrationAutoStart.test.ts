@@ -17,6 +17,17 @@ test('leaves Codex target empty so the server can read config.toml', () => {
   assert.equal(defaultCalibrationTargetInput('codex'), '');
 });
 
+test('uses neutral auto-launch defaults for OpenCode, Pi, and OpenClaw', () => {
+  for (const source of ['opencode', 'pi', 'openclaw'] as const) {
+    assert.equal(defaultCalibrationPromptInput(source), 'Calibration probe: reply with "ok".');
+    assert.equal(defaultCalibrationTargetInput(source), '');
+    assert.equal(
+      captureTargetPlaceholderText(source),
+      '留空使用默认 API Host；填写可覆盖，如 api.deepseek.com',
+    );
+  }
+});
+
 test('uses concise Codex capture target placeholder', () => {
   assert.equal(
     captureTargetPlaceholderText('codex'),

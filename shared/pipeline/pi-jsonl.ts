@@ -1,6 +1,7 @@
 import type { ContextCategory, SeriesPoint, SessionSummary, TimelineSegment, ToolAggregation, TurnData, TurnDelta } from '../types/session';
 import { isObject, msBetween, stringifyInput } from './codex-jsonl-parser';
-import { CATEGORY_META, addTokenCount, addTokens, cloneTools, deltaBetween, initComp, sumComp } from './codex-jsonl-summary';
+import { CATEGORY_META, addTokenCount, addTokens, applyCoreCalibrationFallback, cloneTools, deltaBetween, initComp, sumComp } from './codex-jsonl-summary';
+import type { NormalizedCalibration, NormalizedCalibrationSummary } from './calibration-types';
 import type { ParseError } from './parse-jsonl';
 import { detectSessionFormat } from './session-format';
 import { roundTokens } from './utils';
@@ -31,6 +32,7 @@ interface ToolState {
 export function runPiPipeline(
   jsonlText: string,
   filename: string,
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
 ): {
   summary: SessionSummary;
   turns: TurnData[];
@@ -41,7 +43,7 @@ export function runPiPipeline(
   const rawTurns = format === 'pi-event-stream'
     ? buildPiEventTurns(lines, filename)
     : buildPiSessionTurns(lines, filename);
-  const turns = assemblePiTurns(rawTurns);
+  const turns = assemblePiTurns(rawTurns, calibration);
   const summary = aggregatePiSession(lines, turns, filename);
   return { summary, turns, errors };
 }
@@ -268,9 +270,13 @@ function buildPiEventTurns(lines: PiLine[], filename: string): PiTurn[] {
   return turns;
 }
 
-function assemblePiTurns(turns: PiTurn[]): TurnData[] {
+function assemblePiTurns(
+  turns: PiTurn[],
+  calibration?: NormalizedCalibration | NormalizedCalibrationSummary | null,
+): TurnData[] {
   const results: TurnData[] = [];
   const runningComp = initComp();
+  applyCoreCalibrationFallback(runningComp, calibration);
   const cumTools: Record<string, ToolState> = {};
   let prevComp = initComp();
 

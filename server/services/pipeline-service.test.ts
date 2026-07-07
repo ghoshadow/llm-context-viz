@@ -12,7 +12,11 @@
  */
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { writeCalibrationConstants } from './calibration-constants';
 
 // ── 创建内存数据库 ────────────────────────────────────────────────────
 
@@ -60,6 +64,10 @@ const {
   runPipelineOnContentSync,
   createSession,
 } = pipelineService;
+
+function categoryTokens(summary: { categories: Array<{ key: string; tokens: number }> }, key: string): number {
+  return summary.categories.find((category) => category.key === key)?.tokens ?? 0;
+}
 
 // ── extractCwdFromJsonl 测试 ─────────────────────────────────────────────
 
@@ -365,6 +373,27 @@ test('runPipelineOnContentSync OpenCode 分支返回摘要', () => {
   assert.equal(result.turns[0]!.segs.some((seg) => seg.det.text === 'OpenCode reply'), true);
 });
 
+test('runPipelineOnContentSync OpenCode 分支读取项目校准常量', () => {
+  const project = mkdtempSync(join(tmpdir(), 'pipeline-opencode-cal-'));
+  try {
+    writeCalibrationConstants(project, {
+      source: 'opencode',
+      summary: { categories: { sysPrompt: { chars: 40 } } },
+    });
+    const opencodeJsonl = [
+      { type: 'step_start', timestamp: 1767036059338, sessionID: 'ses_open', part: { type: 'step-start', cwd: project } },
+      { type: 'text', timestamp: 1767036064268, sessionID: 'ses_open', part: { type: 'text', text: 'OpenCode reply' } },
+    ].map((line) => JSON.stringify(line)).join('\n');
+
+    const result = runPipelineOnContentSync(opencodeJsonl, 'opencode.jsonl');
+
+    assert.ok(categoryTokens(result.summary, 'sysPrompt') > 0);
+    assert.ok(result.turns[0]!.comp.sysPrompt > 0);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('runPipelineOnContentSync Pi session 分支返回摘要', () => {
   const piJsonl = [
     { type: 'header', version: 3, workingDirectory: '/repo/pi' },
@@ -378,6 +407,28 @@ test('runPipelineOnContentSync Pi session 分支返回摘要', () => {
   assert.equal(result.summary.session.cwd, '/repo/pi');
   assert.equal(result.turns.length, 1);
   assert.equal(result.turns[0]!.prompt, 'Pi prompt');
+});
+
+test('runPipelineOnContentSync Pi 分支读取项目校准常量', () => {
+  const project = mkdtempSync(join(tmpdir(), 'pipeline-pi-cal-'));
+  try {
+    writeCalibrationConstants(project, {
+      source: 'pi',
+      summary: { categories: { sysPrompt: { chars: 40 } } },
+    });
+    const piJsonl = [
+      { type: 'header', version: 3, workingDirectory: project },
+      { type: 'message', id: 'u1', parentId: null, message: { role: 'user', content: [{ type: 'text', text: 'Pi prompt' }] } },
+      { type: 'message', id: 'a1', parentId: 'u1', message: { role: 'assistant', content: [{ type: 'text', text: 'Pi reply' }] } },
+    ].map((line) => JSON.stringify(line)).join('\n');
+
+    const result = runPipelineOnContentSync(piJsonl, 'pi.jsonl');
+
+    assert.ok(categoryTokens(result.summary, 'sysPrompt') > 0);
+    assert.ok(result.turns[0]!.comp.sysPrompt > 0);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
 });
 
 test('createSession persists explicit OpenClaw source for Pi-shaped OpenClaw JSONL', async () => {
@@ -427,6 +478,33 @@ test('runPipelineOnContentSync OpenClaw 分支返回摘要', () => {
   assert.equal(result.turns.length, 1);
   assert.equal(result.turns[0]!.prompt, 'OpenClaw prompt');
   assert.equal(result.turns[0]!.segs.find((seg) => seg.k === 'm')?.det.text, 'OpenClaw reply');
+});
+
+test('runPipelineOnContentSync OpenClaw 分支读取项目校准常量', () => {
+  const project = mkdtempSync(join(tmpdir(), 'pipeline-openclaw-cal-'));
+  try {
+    writeCalibrationConstants(project, {
+      source: 'openclaw',
+      summary: { categories: { sysPrompt: { chars: 40 } } },
+    });
+    const openClawJsonl = [
+      { type: 'openclaw_session', sessionId: 'oc_1', sessionKey: 'agent:main', cwd: project },
+      {
+        type: 'session_update',
+        timestamp: '2026-07-06T00:00:00.000Z',
+        sessionId: 'oc_1',
+        runId: 'run_1',
+        update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'OpenClaw prompt' } },
+      },
+    ].map((line) => JSON.stringify(line)).join('\n');
+
+    const result = runPipelineOnContentSync(openClawJsonl, 'openclaw.jsonl');
+
+    assert.ok(categoryTokens(result.summary, 'sysPrompt') > 0);
+    assert.ok(result.turns[0]!.comp.sysPrompt > 0);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
 });
 
 test('runPipelineOnContentSync unknown JSONL throws unsupported format error', () => {

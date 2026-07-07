@@ -17,7 +17,8 @@ const {
   ensureDir,
   getProjectLogFilePath,
   resolveCaptureTarget,
-  resolveCliPath,
+  buildSourceChildArgs,
+  resolveSourceCliCommand,
 } = require("./calibration-proxy-utils.cjs");
 
 const DEFAULT_TARGET_HOST = "api.deepseek.com";
@@ -351,23 +352,17 @@ async function main() {
 
   const proxyUrl = `http://127.0.0.1:${opts.port}`;
   captureBaseUrl = captureTarget.mode === "base-url" ? proxyUrl : undefined;
-  const cliName = opts.source === "codex" ? "codex" : "claude";
-  const cliPath = resolveCliPath(cliName);
-  const childArgs = opts.source === "codex"
-    ? captureTarget.mode === "base-url"
-      ? [
-          "exec", "--ephemeral", "--json", "--skip-git-repo-check",
-          "-c", `model_providers.OpenAI.base_url="${proxyUrl}"`,
-          "-s", "read-only", "-C", opts.cwd,
-          ...(opts.claudeArgs.length ? opts.claudeArgs : ['Calibration probe: reply with "ok".']),
-        ]
-      : [
-          "exec", "--json", "--skip-git-repo-check",
-          "-c", `model_providers.OpenAI.base_url="${proxyUrl}"`,
-          "-s", "read-only", "-C", opts.cwd,
-          ...(opts.claudeArgs.length ? opts.claudeArgs : ['Calibration probe: reply with "ok".']),
-        ]
-    : opts.claudeArgs;
+  const cli = resolveSourceCliCommand(opts.source);
+  const cliPath = cli.cliPath;
+  const childArgs = [
+    ...cli.prefixArgs,
+    ...buildSourceChildArgs(opts.source, {
+      captureMode: captureTarget.mode,
+      proxyUrl,
+      cwd: opts.cwd,
+      promptArgs: opts.claudeArgs,
+    }),
+  ];
   const modeLabel = captureTarget.mode === "base-url"
     ? `mode=base-url upstream=${captureTarget.upstreamBaseUrl}`
     : `mode=connect target=${opts.targetHost}`;

@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runPiPipeline } from './pi-jsonl';
+import type { NormalizedCalibration } from './calibration-types';
 
 function toJsonl(lines: unknown[]): string {
   return lines.map((line) => JSON.stringify(line)).join('\n');
+}
+
+function categoryTokens(summary: { categories: Array<{ key: string; tokens: number }> }, key: string): number {
+  return summary.categories.find((category) => category.key === key)?.tokens ?? 0;
 }
 
 const piSessionSample = toJsonl([
@@ -137,4 +142,27 @@ test('uses final Pi message_end text without duplicating message_update chunks',
   assert.equal(turns[0]!.asstReqs, 1);
   assert.equal(replySegments.length, 1);
   assert.equal(replySegments[0]!.det.text, 'final answer');
+});
+
+test('uses Pi calibration constants as missing core context fallback', () => {
+  const calibration: NormalizedCalibration = {
+    schemaVersion: 1,
+    source: 'pi',
+    categories: {
+      sysPrompt: { chars: 40 },
+      tool_defs: { chars: 60 },
+      skills: { chars: 20 },
+      mcp: { chars: 10 },
+      reminders: { chars: 15 },
+    },
+  };
+
+  const { summary, turns } = runPiPipeline(piSessionSample, 'pi-session.jsonl', calibration);
+
+  assert.ok(categoryTokens(summary, 'sysPrompt') > 0);
+  assert.ok(categoryTokens(summary, 'tool_defs') > 0);
+  assert.ok(categoryTokens(summary, 'skills') > 0);
+  assert.ok(categoryTokens(summary, 'mcp') > 0);
+  assert.ok(categoryTokens(summary, 'reminders') > 0);
+  assert.ok((turns[0]!.comp.sysPrompt ?? 0) > 0);
 });

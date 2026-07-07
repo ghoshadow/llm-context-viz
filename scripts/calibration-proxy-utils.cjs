@@ -180,6 +180,59 @@ function builtinCliCandidates(cliName) {
   return [];
 }
 
+function promptFromArgs(args, fallback) {
+  if (!Array.isArray(args) || args.length === 0) return fallback;
+  if (args.length === 2 && args[0] === "-p") return args[1];
+  return args.join(" ");
+}
+
+function buildSourceChildArgs(source, options) {
+  const promptArgs = options.promptArgs || [];
+  const prompt = promptFromArgs(promptArgs, source === "claude" ? "say hi" : 'Calibration probe: reply with "ok".');
+  if (source === "codex") {
+    const base = [
+      "exec", "--json", "--skip-git-repo-check",
+      "-c", `model_providers.OpenAI.base_url="${options.proxyUrl}"`,
+      "-s", "read-only", "-C", options.cwd,
+    ];
+    if (options.captureMode === "base-url") base.splice(1, 0, "--ephemeral");
+    return [...base, ...(promptArgs.length ? promptArgs : [prompt])];
+  }
+  if (source === "opencode") return ["run", "--format", "json", prompt];
+  if (source === "pi") return ["--no-session", "--mode", "json", "-p", prompt];
+  if (source === "openclaw") {
+    const profile = inferOpenClawProfileFromCwd(options.cwd);
+    return [...(profile ? ["--profile", profile] : []), "agent", "--local", "--json", "--agent", "main", "--message", prompt];
+  }
+  return promptArgs.length ? promptArgs : ["-p", prompt];
+}
+
+function inferOpenClawProfileFromCwd(cwd, env = process.env) {
+  const home = env.HOME || env.USERPROFILE;
+  if (!home || !cwd) return "";
+  const rel = path.relative(path.resolve(home), path.resolve(cwd));
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return "";
+  const root = rel.split(path.sep)[0] || "";
+  const match = root.match(/^\.openclaw-(.+)$/);
+  return match?.[1] || "";
+}
+
+function resolveOpenClawCliCommand(env = process.env) {
+  if (env.OPENCLAW_CLI_PATH) return { cliPath: path.resolve(env.OPENCLAW_CLI_PATH), prefixArgs: [] };
+  const appNode = "/Applications/AutoClaw.app/Contents/Resources/node/node";
+  const appCli = "/Applications/AutoClaw.app/Contents/Resources/gateway/openclaw/openclaw.mjs";
+  if (isExecutableFile(appNode) && fs.existsSync(appCli)) {
+    return { cliPath: appNode, prefixArgs: ["--loader", path.join(__dirname, "openclaw-plugin-sdk-loader.mjs"), appCli] };
+  }
+  return { cliPath: resolveCliPath("openclaw", { env }), prefixArgs: [] };
+}
+
+function resolveSourceCliCommand(source, env = process.env) {
+  if (source === "openclaw") return resolveOpenClawCliCommand(env);
+  const cliName = source === "codex" ? "codex" : source === "opencode" ? "opencode" : source === "pi" ? "pi" : "claude";
+  return { cliPath: resolveCliPath(cliName, { env }), prefixArgs: [] };
+}
+
 module.exports = {
   parseConnectAuthority,
   isSensitiveHeader,
@@ -192,5 +245,8 @@ module.exports = {
   getProjectLogFilePath,
   resolveCaptureTarget,
   resolveCliPath,
+  buildSourceChildArgs,
+  resolveSourceCliCommand,
+  inferOpenClawProfileFromCwd,
   pickPort,
 };

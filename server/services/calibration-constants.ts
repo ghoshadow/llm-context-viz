@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import {
@@ -12,6 +12,11 @@ import {
   normalizeAgentSource,
   normalizedToLegacyClaudeSummary,
 } from '../../shared/pipeline/calibration-types';
+import { extractConstants } from '../../shared/pipeline/extract-constants';
+import { extractCodexConstants } from '../../shared/pipeline/extract-codex-constants';
+import { extractOpenCodeConstants } from '../../shared/pipeline/extract-opencode-constants';
+import { extractOpenClawConstants } from '../../shared/pipeline/extract-openclaw-constants';
+import { extractPiConstants } from '../../shared/pipeline/extract-pi-constants';
 
 export const DEFAULT_CALIBRATION_CONSTANTS = {
   SYS_PROMPT_FALLBACK_CHARS: CALIBRATION_DEFAULTS.SYS_PROMPT_CHARS,
@@ -19,7 +24,7 @@ export const DEFAULT_CALIBRATION_CONSTANTS = {
   SYSTEM_REMINDER_CHROME_CHARS: CALIBRATION_DEFAULTS.USER_WRAPPER_CHARS,
 };
 
-export type CalibrationConstantsSource = 'project' | 'defaults';
+export type CalibrationConstantsSource = 'project' | 'defaults' | 'capture';
 
 export interface ProjectCalibrationConstants {
   source: CalibrationConstantsSource;
@@ -178,6 +183,65 @@ function defaultNormalizedConstants(cwd: string, source: AgentSource, path: stri
     cwd,
     note: '当前项目尚未应用校准常量。',
     categories: {},
+  };
+}
+
+function latestCaptureLogPath(cwd: string, source: AgentSource): string | null {
+  const traceDir = resolveProjectTraceDir(cwd, source);
+  try {
+    let latest: { path: string; mtimeMs: number } | null = null;
+    for (const entry of readdirSync(traceDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl') || !entry.name.includes('api-log')) continue;
+      const candidate = join(traceDir, entry.name);
+      const mtimeMs = statSync(candidate).mtimeMs;
+      if (!latest || mtimeMs > latest.mtimeMs) latest = { path: candidate, mtimeMs };
+    }
+    return latest?.path ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function extractCaptureConstants(source: AgentSource, logPath: string) {
+  switch (source) {
+    case 'claude':
+      return extractConstants(logPath);
+    case 'codex':
+      return extractCodexConstants(logPath);
+    case 'opencode':
+      return extractOpenCodeConstants(logPath);
+    case 'pi':
+      return extractPiConstants(logPath);
+    case 'openclaw':
+      return extractOpenClawConstants(logPath);
+  }
+}
+
+export function readLatestCaptureConstants(cwd: string, source: AgentSource = 'claude'): NormalizedCalibration | null {
+  const agent = normalizeAgentSource(source);
+  const normalized = normalizeProjectCwd(cwd);
+  const path = resolveProjectConstantsPath(normalized, agent);
+  const logPath = latestCaptureLogPath(normalized, agent);
+  if (!logPath) return null;
+  const extracted = extractCaptureConstants(agent, logPath);
+  if (!extracted) return null;
+  return {
+    schemaVersion: 1,
+    source: agent,
+    constantsSource: 'capture',
+    path,
+    cwd: normalized,
+    note: '已从最新抓包日志自动解析；应用后会写入项目常量文件。',
+    rawLogPath: logPath,
+    cliVersion: 'cliVersion' in extracted ? extracted.cliVersion : undefined,
+    ccVersion: 'ccVersion' in extracted ? extracted.ccVersion : undefined,
+    model: extracted.model,
+    wireApi: 'wireApi' in extracted ? extracted.wireApi : undefined,
+    categories: extracted.summary.categories,
+    ...(extracted.summary.usage ? { usage: extracted.summary.usage } : {}),
+    ...(extracted.summary.toolNames ? { toolNames: extracted.summary.toolNames } : {}),
+    ...(extracted.summary.hashes ? { hashes: extracted.summary.hashes } : {}),
+    ...(extracted.details ? { details: extracted.details } : {}),
   };
 }
 
