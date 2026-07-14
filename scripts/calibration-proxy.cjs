@@ -130,12 +130,23 @@ function buildForwardHeaders(headers, upstreamUrl) {
 
 function createBaseUrlCaptureServer({ upstreamBaseUrl, logFile, onCapture }) {
   const upstream = new URL(upstreamBaseUrl);
+  // Preserve the upstream URL's path prefix (e.g., /v1) when resolving relative paths
+  const upstreamBasePath = upstream.pathname.replace(/\/+$/, "");
   return http.createServer((req, res) => {
     const reqTs = Date.now();
     let body = "";
     req.on("data", (chunk) => { body += chunk.toString("utf-8"); });
     req.on("end", () => {
-      const upstreamUrl = new URL(req.url || "/", upstream);
+      let targetPath;
+      if (/^https?:\/\//i.test(req.url || "")) {
+        // Absolute URL (proxy-style): extract path+query, prepend upstream path
+        const reqUrl = new URL(req.url!);
+        targetPath = upstreamBasePath + reqUrl.pathname + reqUrl.search;
+      } else {
+        // Relative path (origin-style): resolve against upstream, keeping its path
+        targetPath = upstreamBasePath + (req.url || "/");
+      }
+      const upstreamUrl = new URL(targetPath, upstream.origin);
       const isHttps = upstreamUrl.protocol === "https:";
       const client = isHttps ? https : http;
       const proxyReq = client.request({

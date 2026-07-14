@@ -54,11 +54,11 @@ test('defaults calibration target by source', () => {
     'http://127.0.0.1:15721',
   );
   assert.equal(
-    defaultCalibrationTarget('codex', () => 'http://127.0.0.1:9090', () => 'http://127.0.0.1:15721'),
+    defaultCalibrationTarget('codex', () => '127.0.0.1:9090', () => 'http://127.0.0.1:9090', () => 'http://127.0.0.1:15721'),
     'http://127.0.0.1:9090',
   );
   assert.equal(
-    defaultCalibrationTarget('pi', () => 'http://127.0.0.1:9090', () => 'http://127.0.0.1:15721'),
+    defaultCalibrationTarget('pi', () => '127.0.0.1:9090', () => 'http://127.0.0.1:9090', () => 'http://127.0.0.1:15721'),
     'api.deepseek.com',
   );
 });

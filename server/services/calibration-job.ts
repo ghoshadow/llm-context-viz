@@ -13,7 +13,7 @@ import { extractOpenCodeConstants } from '../../shared/pipeline/extract-opencode
 import { extractOpenClawConstants } from '../../shared/pipeline/extract-openclaw-constants';
 import { extractPiConstants } from '../../shared/pipeline/extract-pi-constants';
 import { readClaudeBaseUrl } from './claude-config';
-import { readCodexBaseUrl } from './codex-config';
+import { readCodexBaseUrl, readCodexTargetHost } from './codex-config';
 
 type ProxyUtils = {
   pickPort: (host?: string) => Promise<number>;
@@ -155,10 +155,22 @@ export function defaultCalibrationPrompt(source: AgentSource): string {
 
 export function defaultCalibrationTarget(
   source: AgentSource,
-  readCodexTarget = readCodexBaseUrl,
+  readCodexTarget = readCodexTargetHost,
+  readCodexFull = readCodexBaseUrl,
   readClaudeTarget = readClaudeBaseUrl,
 ): string {
-  if (source === 'codex') return readCodexTarget();
+  if (source === 'codex') {
+    // HTTP endpoints need the full URL for base-url proxy mode;
+    // HTTPS endpoints use CONNECT/MITM mode — pass host:port only.
+    const baseUrl = readCodexFull();
+    if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {
+      try {
+        const u = new URL(baseUrl);
+        if (u.protocol === 'http:') return baseUrl;
+      } catch { /* fall through */ }
+    }
+    return readCodexTarget();
+  }
   if (source === 'claude') return readClaudeTarget();
   return DEFAULT_CALIBRATION_TARGET;
 }
