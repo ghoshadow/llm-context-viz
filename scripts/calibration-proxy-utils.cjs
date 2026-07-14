@@ -184,7 +184,12 @@ function resolveCliPath(cliName, options = {}) {
 
 function builtinCliCandidates(cliName) {
   const home = require("os").homedir();
-  if (cliName === "codex") return ["/Applications/Codex.app/Contents/Resources/codex"];
+  if (cliName === "codex") {
+    return [
+      "/Applications/Codex.app/Contents/Resources/codex",         // legacy Codex.app
+      "/Applications/ChatGPT.app/Contents/Resources/codex",       // Codex bundled in ChatGPT.app
+    ];
+  }
   if (cliName === "claude") return ["/Applications/Claude.app/Contents/Resources/app/bin/claude"];
   if (cliName === "opencode") {
     return [
