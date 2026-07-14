@@ -44,13 +44,51 @@ export function extractCodexConstants(logPath: string): ExtractedCodexConstants 
     if (!url.includes('/responses')) continue;
     const body = entry.request?.body;
     if (!body || typeof body !== 'object') continue;
-    if (typeof body.instructions !== 'string' || !Array.isArray(body.input)) continue;
 
-    const instructions = body.instructions;
-    const tools = Array.isArray(body.tools) ? body.tools : [];
+    let instructions: string;
+    let tools: unknown[];
+    let inputItems: unknown[];
+    let wireApi: 'responses' | 'chat_completions' = 'responses';
+
+    if (typeof body.instructions === 'string') {
+      // Old format: top-level instructions + tools + input with developer messages
+      instructions = body.instructions;
+      tools = Array.isArray(body.tools) ? body.tools : [];
+      inputItems = Array.isArray(body.input) ? body.input : [];
+    } else if (Array.isArray(body.input) && body.input.length > 0) {
+      // New ChatGPT codex format: no top-level instructions; system prompt is
+      // embedded in developer-role messages within the input array
+      wireApi = 'chat_completions';
+      const devTexts: string[] = [];
+      const toolItems: unknown[] = [];
+      for (const item of body.input) {
+        if (!isObject(item)) continue;
+        if (item.type === 'additional_tools') {
+          const list = Array.isArray(item.tools) ? item.tools : [];
+          toolItems.push(...list);
+        }
+        if (item.role === 'developer') {
+          for (const text of contentTexts(item.content)) {
+            devTexts.push(text);
+          }
+        }
+      }
+      instructions = devTexts.join('\n\n');
+      tools = toolItems;
+      inputItems = body.input;
+      // Also collect tools from top-level if present (prefer over additional_tools)
+      if (tools.length === 0 && Array.isArray(body.tools)) {
+        tools = body.tools;
+      }
+    } else {
+      continue;
+    }
+
     const toolsJsonCompact = JSON.stringify(tools);
     const toolsJsonPretty = JSON.stringify(tools, null, 2);
-    const developer = classifyDeveloperInput(body.input);
+    const developer = wireApi === 'responses'
+      ? classifyDeveloperInput(inputItems)
+      : { total: 0, runtime: 0, skills: 0, plugins: 0, runtimeText: '', skillsText: '', pluginsText: '' };
     const usage = parseResponsesSseUsage(entry.response?.body);
     const toolNames = tools
       .map((tool) => typeof (tool as Record<string, unknown>)?.name === 'string' ? (tool as Record<string, unknown>).name : typeof (tool as Record<string, unknown>)?.function === 'object' ? ((tool as Record<string, unknown>).function as Record<string, unknown>)?.name : '')
@@ -63,7 +101,7 @@ export function extractCodexConstants(logPath: string): ExtractedCodexConstants 
       sourceFile: logPath.split('/').pop() || logPath,
       cliVersion,
       model: typeof body.model === 'string' ? body.model : 'unknown',
-      wireApi: 'responses',
+      wireApi,
       instructionsChars: instructions.length,
       toolsChars: toolsJsonCompact.length,
       developerChars: developer.total,

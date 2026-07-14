@@ -156,14 +156,9 @@ export function defaultCalibrationPrompt(source: AgentSource): string {
 export function defaultCalibrationTarget(
   source: AgentSource,
   readCodexTarget = readCodexTargetHost,
-  readCodexFull = readCodexBaseUrl,
   readClaudeTarget = readClaudeBaseUrl,
 ): string {
-  if (source === 'codex') {
-    // ChatGPT.app codex uses chatgpt.com:443 via TLS.
-    // CONNECT/MITM mode intercepts the TLS handshake via HTTPS_PROXY.
-    return 'chatgpt.com:443';
-  }
+  if (source === 'codex') return readCodexTarget();
   if (source === 'claude') return readClaudeTarget();
   return DEFAULT_CALIBRATION_TARGET;
 }
