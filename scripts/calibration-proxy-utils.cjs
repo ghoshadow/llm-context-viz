@@ -160,6 +160,11 @@ function resolveCliPath(cliName, options = {}) {
   // mise shims directory — covers tools installed via mise even if PATH is incomplete
   const miseShimsDir = path.join(require("os").homedir(), ".local", "share", "mise", "shims");
   candidates.push(path.join(miseShimsDir, cliName));
+  // npm global bin — covers tools installed via `npm install -g` when npm prefix is not in PATH
+  try {
+    const npmPrefix = require("child_process").execSync("npm config get prefix", { encoding: "utf-8", timeout: 3000 }).trim();
+    if (npmPrefix) candidates.push(path.join(npmPrefix, "bin", cliName));
+  } catch { /* npm not available, skip */ }
   candidates.push(...(options.extraCandidates || []));
   candidates.push(...defaultCandidates);
 
