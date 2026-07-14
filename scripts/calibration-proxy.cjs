@@ -140,7 +140,7 @@ function createBaseUrlCaptureServer({ upstreamBaseUrl, logFile, onCapture }) {
       let targetPath;
       if (/^https?:\/\//i.test(req.url || "")) {
         // Absolute URL (proxy-style): extract path+query, prepend upstream path
-        const reqUrl = new URL(req.url!);
+        const reqUrl = new URL(req.url || "/");
         targetPath = upstreamBasePath + reqUrl.pathname + reqUrl.search;
       } else {
         // Relative path (origin-style): resolve against upstream, keeping its path
@@ -217,6 +217,9 @@ function createMitmHandler({ targetHost, logFile, onCapture }) {
     });
     tlsSocket.on("error", (err) => {
       log(`TLS socket error: ${err.message}`);
+    });
+    tlsSocket.on("secureConnect", () => {
+      log(`MITM TLS established for ${targetHost}`);
     });
 
     const localHttp = http.createServer((req, res) => {
@@ -295,11 +298,12 @@ async function main() {
       onCapture: () => { captured = true; },
     });
   } else {
+    const mitmHost = opts.targetHost.split(":")[0] || opts.targetHost;
     ca = getCACert();
-    getHostCert(opts.targetHost);
+    getHostCert(mitmHost);
     server = http.createServer();
     const handleMitm = createMitmHandler({
-      targetHost: opts.targetHost,
+      targetHost: mitmHost,
       logFile,
       onCapture: () => { captured = true; },
     });
@@ -310,7 +314,7 @@ async function main() {
         seenConnectHosts.add(`${host}:${port}`);
         log(`CONNECT ${host}:${port}`);
       }
-      if (host === opts.targetHost && port === 443) handleMitm(clientSocket);
+      if (host === opts.targetHost.split(":")[0] && port === 443) handleMitm(clientSocket);
       else tunnelRaw(clientSocket, req.url);
     });
 
@@ -321,7 +325,15 @@ async function main() {
       const isTarget = hostHeader === targetHostname || hostHeader === "127.0.0.1" || hostHeader === "localhost";
       if (!isTarget) return;
 
-      const url = `http://${opts.targetHost}${req.url}`;
+      // req.url may be an absolute URL (proxy-style) or a relative path (origin-style)
+      let path;
+      if (/^https?:\/\//i.test(req.url || "")) {
+        const parsed = new URL(req.url || "/");
+        path = parsed.pathname + parsed.search;
+      } else {
+        path = req.url || "/";
+      }
+      const url = `http://${opts.targetHost}${path}`;
       log(`MITM HTTP: ${req.method} ${url}`);
       let body = "";
       req.on("data", (c) => { body += c.toString("utf-8"); });
@@ -329,7 +341,7 @@ async function main() {
         const [upstreamHost, portStr] = opts.targetHost.split(":");
         const upstreamPort = parseInt(portStr || "80", 10);
         const proxyReq = (upstreamPort === 443 ? https : http).request({
-          hostname: upstreamHost, port: upstreamPort, path: req.url, method: req.method,
+          hostname: upstreamHost, port: upstreamPort, path, method: req.method,
           headers: cleanForwardHeaders(req.headers, upstreamHost),
         }, (proxyRes) => {
           let resBody = "";

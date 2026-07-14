@@ -160,16 +160,9 @@ export function defaultCalibrationTarget(
   readClaudeTarget = readClaudeBaseUrl,
 ): string {
   if (source === 'codex') {
-    // HTTP endpoints need the full URL for base-url proxy mode;
-    // HTTPS endpoints use CONNECT/MITM mode — pass host:port only.
-    const baseUrl = readCodexFull();
-    if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {
-      try {
-        const u = new URL(baseUrl);
-        if (u.protocol === 'http:') return baseUrl;
-      } catch { /* fall through */ }
-    }
-    return readCodexTarget();
+    // ChatGPT.app codex uses chatgpt.com:443 via TLS.
+    // CONNECT/MITM mode intercepts the TLS handshake via HTTPS_PROXY.
+    return 'chatgpt.com:443';
   }
   if (source === 'claude') return readClaudeTarget();
   return DEFAULT_CALIBRATION_TARGET;

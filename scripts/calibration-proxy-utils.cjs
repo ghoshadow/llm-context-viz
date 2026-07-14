@@ -216,7 +216,6 @@ function buildSourceChildArgs(source, options) {
   if (source === "codex") {
     const base = [
       "exec", "--json", "--skip-git-repo-check",
-      "-c", `model_providers.OpenAI.base_url="${options.proxyUrl}"`,
       "-s", "read-only", "-C", options.cwd,
     ];
     if (options.captureMode === "base-url") base.splice(1, 0, "--ephemeral");
