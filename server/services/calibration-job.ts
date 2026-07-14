@@ -13,7 +13,7 @@ import { extractOpenCodeConstants } from '../../shared/pipeline/extract-opencode
 import { extractOpenClawConstants } from '../../shared/pipeline/extract-openclaw-constants';
 import { extractPiConstants } from '../../shared/pipeline/extract-pi-constants';
 import { readClaudeBaseUrl } from './claude-config';
-import { readCodexBaseUrl, readCodexTargetHost } from './codex-config';
+import { readCodexBaseUrl } from './codex-config';
 
 type ProxyUtils = {
   pickPort: (host?: string) => Promise<number>;
@@ -155,7 +155,7 @@ export function defaultCalibrationPrompt(source: AgentSource): string {
 
 export function defaultCalibrationTarget(
   source: AgentSource,
-  readCodexTarget = readCodexTargetHost,
+  readCodexTarget = readCodexBaseUrl,
   readClaudeTarget = readClaudeBaseUrl,
 ): string {
   if (source === 'codex') return readCodexTarget();
