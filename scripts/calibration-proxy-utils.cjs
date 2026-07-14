@@ -157,6 +157,9 @@ function resolveCliPath(cliName, options = {}) {
   for (const dir of String(env.PATH || "").split(path.delimiter)) {
     if (dir) candidates.push(path.join(dir, cliName));
   }
+  // mise shims directory — covers tools installed via mise even if PATH is incomplete
+  const miseShimsDir = path.join(require("os").homedir(), ".local", "share", "mise", "shims");
+  candidates.push(path.join(miseShimsDir, cliName));
   candidates.push(...(options.extraCandidates || []));
   candidates.push(...defaultCandidates);
 
@@ -175,8 +178,19 @@ function resolveCliPath(cliName, options = {}) {
 }
 
 function builtinCliCandidates(cliName) {
+  const home = require("os").homedir();
   if (cliName === "codex") return ["/Applications/Codex.app/Contents/Resources/codex"];
   if (cliName === "claude") return ["/Applications/Claude.app/Contents/Resources/app/bin/claude"];
+  if (cliName === "opencode") {
+    return [
+      path.join(home, ".local", "share", "mise", "installs", "opencode", "latest", "opencode"),
+    ];
+  }
+  if (cliName === "pi") {
+    return [
+      path.join(home, ".local", "share", "mise", "installs", "pi", "latest", "pi"),
+    ];
+  }
   return [];
 }
 
